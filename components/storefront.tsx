@@ -20,6 +20,7 @@ import type {
 } from "@/lib/types";
 
 const LOCAL_STORAGE_CART_KEY = "diezdeportes-cart";
+const LOCAL_STORAGE_THEME_KEY = "diezdeportes-theme";
 const ODOO_FACEBOOK_URL = "https://diezdeportes.odoo.com/website/social/facebook";
 const ODOO_INSTAGRAM_URL = "https://diezdeportes.odoo.com/website/social/instagram";
 
@@ -39,6 +40,7 @@ const emptyCustomer: CheckoutCustomer = {
 
 type SortOption = "featured" | "name-asc" | "price-asc" | "price-desc";
 type StockOption = "all" | "available" | "low" | "empty";
+type ThemeMode = "light" | "dark";
 
 type StorefrontProps = {
   initialProducts: Product[];
@@ -67,6 +69,7 @@ export function Storefront({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [order, setOrder] = useState<OrderSummary | null>(null);
   const [mobileCartOpen, setMobileCartOpen] = useState(false);
+  const [theme, setTheme] = useState<ThemeMode>("light");
 
   useEffect(() => {
     const savedCart = window.localStorage.getItem(LOCAL_STORAGE_CART_KEY);
@@ -82,6 +85,24 @@ export function Storefront({
   useEffect(() => {
     window.localStorage.setItem(LOCAL_STORAGE_CART_KEY, JSON.stringify(cart));
   }, [cart]);
+
+  useEffect(() => {
+    const savedTheme = window.localStorage.getItem(LOCAL_STORAGE_THEME_KEY);
+    if (savedTheme === "light" || savedTheme === "dark") {
+      setTheme(savedTheme);
+      return;
+    }
+
+    if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+      setTheme("dark");
+    }
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+    window.localStorage.setItem(LOCAL_STORAGE_THEME_KEY, theme);
+  }, [theme]);
 
   const families = Array.from(
     new Set(
@@ -311,6 +332,17 @@ export function Storefront({
           </nav>
 
           <div className="site-actions">
+            <button
+              type="button"
+              className="theme-toggle"
+              onClick={() =>
+                setTheme((current) => (current === "dark" ? "light" : "dark"))
+              }
+              aria-label={`Cambiar a modo ${theme === "dark" ? "claro" : "oscuro"}`}
+            >
+              {theme === "dark" ? "Claro" : "Oscuro"}
+            </button>
+
             <button
               type="button"
               className="site-cart-pill"
