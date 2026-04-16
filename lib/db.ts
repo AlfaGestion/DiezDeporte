@@ -1,12 +1,17 @@
 import "server-only";
-import sql from "mssql";
+import type mssql from "mssql";
 import { parseBoolean } from "@/lib/commerce";
 
+// `mssql` es CommonJS. En runtime de Next conviene cargarlo con `require`
+// para evitar desajustes de interoperabilidad en los tipos SQL.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const sql = require("mssql") as typeof import("mssql");
+
 declare global {
-  var __diezDeportesSqlPool: Promise<sql.ConnectionPool> | undefined;
+  var __diezDeportesSqlPool: Promise<mssql.ConnectionPool> | undefined;
 }
 
-function getSqlConfig(): sql.config {
+function getSqlConfig(): mssql.config {
   const server = process.env.DB_SERVER?.trim();
   const database = process.env.DB_DATABASE?.trim();
 

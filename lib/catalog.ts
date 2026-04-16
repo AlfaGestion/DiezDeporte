@@ -26,6 +26,14 @@ type ProductRecord = {
   URL1: string | null;
 };
 
+function setInput(
+  request: ReturnType<typeof createRequest> | ReturnType<ConnectionPool["request"]>,
+  name: string,
+  value: unknown,
+) {
+  request.input(name, value);
+}
+
 function mapProduct(record: ProductRecord) {
   const settings = getServerSettings();
   const taxRate = toNumber(record.TasaIVA, settings.defaultTaxRate);
@@ -67,9 +75,9 @@ export async function listProducts() {
   const settings = getServerSettings();
   const pool = await getConnection();
   const request = pool.request();
+  const safeLimit = Math.max(1, Math.min(1000, Math.trunc(settings.productLimit)));
 
-  request.input("limit", sql.Int, settings.productLimit);
-  request.input("depositId", sql.NVarChar(4), settings.stockDepositId || null);
+  setInput(request, "depositId", settings.stockDepositId || null);
 
   const result = await request.query<ProductRecord>(`
     WITH StockActual AS (
@@ -81,7 +89,7 @@ export async function listProducts() {
         AND (@depositId IS NULL OR LTRIM(RTRIM(ISNULL(IdDeposito, ''))) = @depositId)
       GROUP BY LTRIM(RTRIM(IDArticulo))
     )
-    SELECT TOP (@limit)
+    SELECT TOP (${safeLimit})
       a.IDARTICULO,
       a.DESCRIPCION,
       CAST(ISNULL(a.${settings.priceColumn}, 0) AS float) AS RawPrice,
@@ -131,11 +139,11 @@ export async function getProductsByIds(
   const settings = getServerSettings();
   const connection = executor || (await getConnection());
   const request = createRequest(connection);
-  request.input("depositId", sql.NVarChar(4), settings.stockDepositId || null);
+  setInput(request, "depositId", settings.stockDepositId || null);
 
   const placeholders = productIds.map((_, index) => `@productId${index}`);
   productIds.forEach((productId, index) => {
-    request.input(`productId${index}`, sql.NVarChar(25), productId.trim());
+    setInput(request, `productId${index}`, productId.trim());
   });
 
   const result: IResult<ProductRecord> = await request.query(`

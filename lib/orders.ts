@@ -65,6 +65,10 @@ type ComprobanteParts = {
   letra: string;
 };
 
+function setInput(request: ReturnType<typeof createRequest>, name: string, value: unknown) {
+  request.input(name, value);
+}
+
 async function getConfigurationRows(executor: Executor) {
   const request = createRequest(executor);
 
@@ -139,9 +143,9 @@ async function getNextComprobante(
 
   try {
     const request = createRequest(executor);
-    request.input("tc", sql.NVarChar(4), tc);
-    request.input("branch", sql.NVarChar(4), normalizedBranch);
-    request.input("letter", sql.NVarChar(1), normalizedLetter);
+    setInput(request, "tc", tc);
+    setInput(request, "branch", normalizedBranch);
+    setInput(request, "letter", normalizedLetter);
 
     const functionResult = await request.query<{ idComprobante: string }>(`
       IF OBJECT_ID('dbo.FN_OBTIENE_PROXIMO_NUMERO_CPTE') IS NOT NULL
@@ -168,9 +172,9 @@ async function getNextComprobante(
   }
 
   const request = createRequest(executor);
-  request.input("tc", sql.NVarChar(4), tc);
-  request.input("branch", sql.NVarChar(4), normalizedBranch);
-  request.input("letter", sql.NVarChar(1), normalizedLetter);
+  setInput(request, "tc", tc);
+  setInput(request, "branch", normalizedBranch);
+  setInput(request, "letter", normalizedLetter);
 
   const maxResult = await request.query<{ maxNumber: number | null }>(`
     SELECT MAX(TRY_CAST(NUMERO AS int)) AS maxNumber
@@ -254,49 +258,49 @@ async function insertHeader(
   const currency = lines[0]?.product.currency || "ARS";
   const request = createRequest(executor);
 
-  request.input("tc", sql.NVarChar(4), context.tc);
-  request.input("idComprobante", sql.NVarChar(13), comprobante.idComprobante);
-  request.input("fecha", sql.DateTime, new Date());
-  request.input("cuenta", sql.NVarChar(15), context.customerAccount || null);
-  request.input("nombre", sql.NVarChar(50), truncate(payload.customer.fullName, 50));
-  request.input("domicilio", sql.NVarChar(50), truncate(payload.customer.address, 50));
-  request.input("telefono", sql.NVarChar(100), payload.customer.phone || null);
-  request.input("localidad", sql.NVarChar(50), truncate(payload.customer.city, 50));
-  request.input(
+  setInput(request, "tc", context.tc);
+  setInput(request, "idComprobante", comprobante.idComprobante);
+  setInput(request, "fecha", new Date());
+  setInput(request, "cuenta", context.customerAccount || null);
+  setInput(request, "nombre", truncate(payload.customer.fullName, 50));
+  setInput(request, "domicilio", truncate(payload.customer.address, 50));
+  setInput(request, "telefono", payload.customer.phone || null);
+  setInput(request, "localidad", truncate(payload.customer.city, 50));
+  setInput(
+    request,
     "codigoPostal",
-    sql.NVarChar(10),
     truncate(payload.customer.postalCode || "", 10) || null,
   );
-  request.input("documentoTipo", sql.NVarChar(4), context.documentType);
-  request.input(
+  setInput(request, "documentoTipo", context.documentType);
+  setInput(
+    request,
     "documentoNumero",
-    sql.NVarChar(13),
     truncate(payload.customer.documentNumber || "", 13) || null,
   );
-  request.input("condicionIva", sql.NVarChar(4), context.ivaCondition);
-  request.input("idCondCpraVta", sql.NVarChar(4), context.paymentCondition);
-  request.input("comentarios", sql.NVarChar(100), buildOrderComment(payload.customer));
-  request.input("observaciones", sql.NVarChar(sql.MAX), buildOrderNotes(payload.customer));
-  request.input("importe", sql.Money, total);
-  request.input("importeSinIva", sql.Money, netTotal);
-  request.input("importeInsumos", sql.Money, netTotal);
-  request.input("importeIva", sql.Money, taxTotal);
-  request.input("netoGravado", sql.Money, netTotal);
-  request.input("netoNoGravado", sql.Money, 0);
-  request.input("moneda", sql.NVarChar(4), truncate(currency, 4));
-  request.input("idVendedor", sql.NVarChar(4), context.vendorId);
-  request.input("clasePrecio", sql.Int, context.classPrice);
-  request.input("unegocioDestino", sql.NVarChar(4), context.unitBusiness);
-  request.input("idLista", sql.NVarChar(4), context.priceListId);
-  request.input("idMotivoCpraVta", sql.NVarChar(4), context.saleReasonId);
-  request.input("idDeposito", sql.NVarChar(4), context.depositId);
-  request.input("alicIva", sql.Float, maxTaxRate);
-  request.input("unegocio", sql.NVarChar(4), context.unitBusiness);
-  request.input("fechaHoraGrabacion", sql.DateTime, new Date());
-  request.input("sucursal", sql.NVarChar(4), comprobante.sucursal);
-  request.input("numero", sql.NVarChar(8), comprobante.numero);
-  request.input("letra", sql.NVarChar(1), comprobante.letra);
-  request.input("usuario", sql.NVarChar(50), truncate(context.orderUser, 50));
+  setInput(request, "condicionIva", context.ivaCondition);
+  setInput(request, "idCondCpraVta", context.paymentCondition);
+  setInput(request, "comentarios", buildOrderComment(payload.customer));
+  setInput(request, "observaciones", buildOrderNotes(payload.customer));
+  setInput(request, "importe", total);
+  setInput(request, "importeSinIva", netTotal);
+  setInput(request, "importeInsumos", netTotal);
+  setInput(request, "importeIva", taxTotal);
+  setInput(request, "netoGravado", netTotal);
+  setInput(request, "netoNoGravado", 0);
+  setInput(request, "moneda", truncate(currency, 4));
+  setInput(request, "idVendedor", context.vendorId);
+  setInput(request, "clasePrecio", context.classPrice);
+  setInput(request, "unegocioDestino", context.unitBusiness);
+  setInput(request, "idLista", context.priceListId);
+  setInput(request, "idMotivoCpraVta", context.saleReasonId);
+  setInput(request, "idDeposito", context.depositId);
+  setInput(request, "alicIva", maxTaxRate);
+  setInput(request, "unegocio", context.unitBusiness);
+  setInput(request, "fechaHoraGrabacion", new Date());
+  setInput(request, "sucursal", comprobante.sucursal);
+  setInput(request, "numero", comprobante.numero);
+  setInput(request, "letra", comprobante.letra);
+  setInput(request, "usuario", truncate(context.orderUser, 50));
 
   const result: IResult<HeaderInsertRow> = await request.query(`
     INSERT INTO dbo.V_MV_Cpte (
@@ -409,35 +413,35 @@ async function insertDetailLine(
 ) {
   const request = createRequest(executor);
 
-  request.input("tc", sql.NVarChar(4), context.tc);
-  request.input("idComprobante", sql.NVarChar(13), comprobante.idComprobante);
-  request.input("secuencia", sql.Int, line.sequence);
-  request.input("clasePrecio", sql.SmallInt, context.classPrice);
-  request.input("idArticulo", sql.NVarChar(25), line.product.id);
-  request.input("descripcion", sql.NVarChar(100), truncate(line.product.description, 100));
-  request.input("idUnidad", sql.NVarChar(4), normalizeCode(line.product.unitId || "1", 4));
-  request.input("cantidadUd", sql.Float, line.quantity);
-  request.input("cantidad", sql.Float, line.quantity);
-  request.input("importeSinIva", sql.Money, line.product.netPrice);
-  request.input("importe", sql.Money, line.product.netPrice);
-  request.input("impuestos", sql.Money, line.lineTax);
-  request.input("total", sql.Money, line.lineTotal);
-  request.input("exento", sql.Bit, line.product.taxRate === 0 ? 1 : 0);
-  request.input("idLista", sql.NVarChar(4), context.priceListId);
-  request.input("porcDto", sql.Float, 0);
-  request.input("importeDto", sql.Money, 0);
-  request.input("alicIva", sql.Money, line.product.taxRate);
-  request.input("idUnidadBase", sql.NVarChar(4), normalizeCode(line.product.unitId || "1", 4));
-  request.input("totalFinal", sql.Money, line.lineTotal);
-  request.input("codigoBarra", sql.NVarChar(25), line.product.barcode);
-  request.input("presentacion", sql.NVarChar(50), truncate(line.product.presentation || "", 50));
-  request.input("idTipo", sql.NVarChar(4), normalizeCode(line.product.typeId || "1", 4));
-  request.input("costo", sql.Money, line.product.cost);
-  request.input("equivUnidadBase", sql.Float, 1);
-  request.input("idDeposito", sql.NVarChar(4), context.depositId);
-  request.input("cantBl", sql.Float, 0);
-  request.input("cantKg", sql.Float, 0);
-  request.input("cantM3", sql.Float, 0);
+  setInput(request, "tc", context.tc);
+  setInput(request, "idComprobante", comprobante.idComprobante);
+  setInput(request, "secuencia", line.sequence);
+  setInput(request, "clasePrecio", context.classPrice);
+  setInput(request, "idArticulo", line.product.id);
+  setInput(request, "descripcion", truncate(line.product.description, 100));
+  setInput(request, "idUnidad", normalizeCode(line.product.unitId || "1", 4));
+  setInput(request, "cantidadUd", line.quantity);
+  setInput(request, "cantidad", line.quantity);
+  setInput(request, "importeSinIva", line.product.netPrice);
+  setInput(request, "importe", line.product.netPrice);
+  setInput(request, "impuestos", line.lineTax);
+  setInput(request, "total", line.lineTotal);
+  setInput(request, "exento", line.product.taxRate === 0 ? 1 : 0);
+  setInput(request, "idLista", context.priceListId);
+  setInput(request, "porcDto", 0);
+  setInput(request, "importeDto", 0);
+  setInput(request, "alicIva", line.product.taxRate);
+  setInput(request, "idUnidadBase", normalizeCode(line.product.unitId || "1", 4));
+  setInput(request, "totalFinal", line.lineTotal);
+  setInput(request, "codigoBarra", line.product.barcode);
+  setInput(request, "presentacion", truncate(line.product.presentation || "", 50));
+  setInput(request, "idTipo", normalizeCode(line.product.typeId || "1", 4));
+  setInput(request, "costo", line.product.cost);
+  setInput(request, "equivUnidadBase", 1);
+  setInput(request, "idDeposito", context.depositId);
+  setInput(request, "cantBl", 0);
+  setInput(request, "cantKg", 0);
+  setInput(request, "cantM3", 0);
 
   await request.query(`
     INSERT INTO dbo.V_MV_CpteInsumos (
@@ -517,33 +521,33 @@ async function insertStockMovement(
 
   const request = createRequest(executor);
 
-  request.input("tc", sql.NVarChar(4), context.tc);
-  request.input("idComprobante", sql.NVarChar(13), comprobante.idComprobante);
-  request.input("secuencia", sql.Int, line.sequence);
-  request.input("fecha", sql.DateTime, new Date());
-  request.input("idArticulo", sql.NVarChar(25), line.product.id);
-  request.input("descripcion", sql.NVarChar(100), truncate(line.product.description, 100));
-  request.input("idUnidad", sql.NVarChar(4), normalizeCode(line.product.unitId || "1", 4));
-  request.input("cantidadUd", sql.Float, line.quantity * -1);
-  request.input("cantidad", sql.Float, line.quantity * -1);
-  request.input("costo", sql.Money, line.product.cost);
-  request.input("precioVenta", sql.Money, line.product.price);
-  request.input("ivari", sql.Money, line.product.taxRate);
-  request.input("impuestos", sql.Money, line.lineTax);
-  request.input("idLista", sql.NVarChar(4), context.priceListId);
-  request.input("clasePrecio", sql.SmallInt, context.classPrice);
-  request.input("cuentaProveedor", sql.NVarChar(15), line.product.supplierAccount || "");
-  request.input("idDeposito", sql.NVarChar(4), context.depositId);
-  request.input("idMotivoStock", sql.NVarChar(4), context.stockReasonId);
-  request.input("idUnidadBase", sql.NVarChar(4), normalizeCode(line.product.unitId || "1", 4));
-  request.input("idVendedor", sql.NVarChar(4), context.vendorId);
-  request.input("unegocio", sql.NVarChar(4), context.unitBusiness);
-  request.input("importeSinIva", sql.Money, line.product.netPrice);
-  request.input("udPr", sql.NVarChar(4), normalizeCode(line.product.unitId || "1", 4));
-  request.input("importeUd", sql.Money, line.product.netPrice);
-  request.input("cantBl", sql.Float, 0);
-  request.input("cantKg", sql.Float, 0);
-  request.input("cantM3", sql.Float, 0);
+  setInput(request, "tc", context.tc);
+  setInput(request, "idComprobante", comprobante.idComprobante);
+  setInput(request, "secuencia", line.sequence);
+  setInput(request, "fecha", new Date());
+  setInput(request, "idArticulo", line.product.id);
+  setInput(request, "descripcion", truncate(line.product.description, 100));
+  setInput(request, "idUnidad", normalizeCode(line.product.unitId || "1", 4));
+  setInput(request, "cantidadUd", line.quantity * -1);
+  setInput(request, "cantidad", line.quantity * -1);
+  setInput(request, "costo", line.product.cost);
+  setInput(request, "precioVenta", line.product.price);
+  setInput(request, "ivari", line.product.taxRate);
+  setInput(request, "impuestos", line.lineTax);
+  setInput(request, "idLista", context.priceListId);
+  setInput(request, "clasePrecio", context.classPrice);
+  setInput(request, "cuentaProveedor", line.product.supplierAccount || "");
+  setInput(request, "idDeposito", context.depositId);
+  setInput(request, "idMotivoStock", context.stockReasonId);
+  setInput(request, "idUnidadBase", normalizeCode(line.product.unitId || "1", 4));
+  setInput(request, "idVendedor", context.vendorId);
+  setInput(request, "unegocio", context.unitBusiness);
+  setInput(request, "importeSinIva", line.product.netPrice);
+  setInput(request, "udPr", normalizeCode(line.product.unitId || "1", 4));
+  setInput(request, "importeUd", line.product.netPrice);
+  setInput(request, "cantBl", 0);
+  setInput(request, "cantKg", 0);
+  setInput(request, "cantM3", 0);
 
   await request.query(`
     INSERT INTO dbo.V_MV_Stock (
