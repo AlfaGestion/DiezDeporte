@@ -106,11 +106,8 @@ function parseBrandImages(html: string, baseUrl: string) {
     }
 
     const decodedSrc = decodeHtml(rawSrc);
-    if (
-      !/MARCAS|SALOMON|Mesa%20de%20trabajo|Mesa de trabajo|logo%20diez%20deportes/i.test(
-        decodedSrc,
-      )
-    ) {
+    const metadata = getBrandMetadata(decodedSrc);
+    if (!metadata) {
       continue;
     }
 
@@ -118,14 +115,15 @@ function parseBrandImages(html: string, baseUrl: string) {
     if (seen.has(src)) continue;
     seen.add(src);
 
-    const fileName = decodeURIComponent(decodedSrc.split("/").pop() || "Marca");
     images.push({
       src,
-      alt: fileName.replace(/\?.*$/, ""),
+      alt: metadata.label,
+      label: metadata.label,
+      aliases: metadata.aliases,
     });
   }
 
-  return images.slice(0, 12);
+  return images.slice(0, 6);
 }
 
 function parseHeroImage(html: string, baseUrl: string) {
@@ -138,7 +136,11 @@ function parseHeroImage(html: string, baseUrl: string) {
 }
 
 function parsePromoTiles(html: string, baseUrl: string) {
-  const labels = ["Hombre", "Mujer", "Kids"];
+  const definitions = [
+    { label: "Ninez", filterValue: "ninez" },
+    { label: "Mujeres", filterValue: "mujeres" },
+    { label: "Hombres", filterValue: "hombres" },
+  ];
   const tiles: PromoTile[] = [];
   const regex =
     /<a href="([^"]+)"[^>]*><img src="([^"]+Mesa%20de%20trabajo[^"]+)" alt="([^"]*)"/gi;
@@ -147,15 +149,48 @@ function parsePromoTiles(html: string, baseUrl: string) {
     if (index > 5) break;
 
     const [, href, src, alt] = match;
+    const definition = definitions[index] || {
+      label: `Destacado ${index + 1}`,
+      filterValue: "all",
+    };
     tiles.push({
       href: absoluteUrl(baseUrl, href),
       src: absoluteUrl(baseUrl, src),
-      alt: decodeHtml(alt) || labels[index] || `Promo ${index + 1}`,
-      label: labels[index] || `Destacado ${index + 1}`,
+      alt: decodeHtml(alt) || definition.label,
+      label: definition.label,
+      filterValue: definition.filterValue,
     });
   }
 
   return tiles;
+}
+
+function getBrandMetadata(decodedSrc: string) {
+  if (/MARCAS%20DIEZ%20DEPORTES-06/i.test(decodedSrc)) {
+    return { label: "Puma", aliases: ["PUMA"] };
+  }
+
+  if (/MARCAS%20DIEZ%20DEPORTES-05/i.test(decodedSrc)) {
+    return { label: "Reebok", aliases: ["REEBOK", "RBK"] };
+  }
+
+  if (/MARCAS%20DIEZ%20DEPORTES-04/i.test(decodedSrc)) {
+    return { label: "Topper", aliases: ["TOPPER"] };
+  }
+
+  if (/SALOMON/i.test(decodedSrc)) {
+    return { label: "Salomon", aliases: ["SALOMON"] };
+  }
+
+  if (/MARCAS%20DIEZ%20DEPORTES-02/i.test(decodedSrc)) {
+    return { label: "Montagne", aliases: ["MONTAGNE", "TREVO"] };
+  }
+
+  if (/MARCAS%20DIEZ%20DEPORTES-01/i.test(decodedSrc)) {
+    return { label: "Merrell", aliases: ["MERRELL"] };
+  }
+
+  return null;
 }
 
 async function fetchHtml(url: string) {

@@ -69,6 +69,8 @@ export type PublicStoreSettings = {
 export type BrandImage = {
   src: string;
   alt: string;
+  label: string;
+  aliases: string[];
 };
 
 export type PromoTile = {
@@ -76,4 +78,5 @@ export type PromoTile = {
   href: string;
   alt: string;
   label: string;
+  filterValue: string;
 };

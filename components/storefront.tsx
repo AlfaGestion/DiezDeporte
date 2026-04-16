@@ -41,6 +41,7 @@ const emptyCustomer: CheckoutCustomer = {
 type SortOption = "featured" | "name-asc" | "price-asc" | "price-desc";
 type StockOption = "all" | "available" | "low" | "empty";
 type ThemeMode = "light" | "dark";
+type AudienceFilter = "all" | "ninez" | "mujeres" | "hombres";
 
 type StorefrontProps = {
   initialProducts: Product[];
@@ -63,6 +64,8 @@ export function Storefront({
   const [sortBy, setSortBy] = useState<SortOption>("featured");
   const [stockFilter, setStockFilter] = useState<StockOption>("all");
   const [selectedFamily, setSelectedFamily] = useState("all");
+  const [selectedAudience, setSelectedAudience] = useState<AudienceFilter>("all");
+  const [selectedBrand, setSelectedBrand] = useState("all");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [customer, setCustomer] = useState<CheckoutCustomer>(emptyCustomer);
   const [submitting, setSubmitting] = useState(false);
@@ -115,17 +118,39 @@ export function Storefront({
   const prices = initialProducts.map((product) => product.price);
   const minPrice = prices.length > 0 ? Math.min(...prices) : 0;
   const maxPrice = prices.length > 0 ? Math.max(...prices) : 0;
+  const normalizedBrandImages = brandImages.map((brand, index) => {
+    const label = brand.label || ["Puma", "Reebok", "Topper", "Salomon", "Montagne", "Merrell"][index] || brand.alt;
+    return {
+      ...brand,
+      label,
+      aliases: brand.aliases?.length ? brand.aliases : [label.toUpperCase()],
+    };
+  });
+  const brandOptions = normalizedBrandImages.filter((brand) => Boolean(brand.label));
+  const activeBrand =
+    selectedBrand === "all"
+      ? null
+      : brandOptions.find((brand) => brand.label === selectedBrand) || null;
 
   const filteredProducts = initialProducts
     .filter((product) => {
+      const normalizedDescription = normalizeFilterValue(product.description);
+      const normalizedCode = normalizeFilterValue(product.code);
       const normalizedSearch = search.trim().toLowerCase();
       const matchesSearch =
         normalizedSearch === "" ||
-        product.description.toLowerCase().includes(normalizedSearch) ||
-        product.code.toLowerCase().includes(normalizedSearch);
+        normalizedDescription.includes(normalizeFilterValue(normalizedSearch)) ||
+        normalizedCode.includes(normalizeFilterValue(normalizedSearch));
 
       const matchesFamily =
         selectedFamily === "all" || product.familyId.trim() === selectedFamily;
+
+      const matchesAudience = matchesAudienceFilter(normalizedDescription, selectedAudience);
+      const matchesBrand = matchesBrandFilter(
+        normalizedDescription,
+        normalizedCode,
+        activeBrand?.aliases || [],
+      );
 
       const matchesStock =
         stockFilter === "all" ||
@@ -133,7 +158,13 @@ export function Storefront({
         (stockFilter === "low" && product.stock > 0 && product.stock <= 3) ||
         (stockFilter === "empty" && product.stock <= 0);
 
-      if (!matchesSearch || !matchesFamily || !matchesStock) {
+      if (
+        !matchesSearch ||
+        !matchesFamily ||
+        !matchesAudience ||
+        !matchesBrand ||
+        !matchesStock
+      ) {
         return false;
       }
 
@@ -176,9 +207,20 @@ export function Storefront({
     : undefined;
   const mapEmbedUrl = buildMapEmbedUrl(settings.storeAddress);
 
-  const featuredTiles =
+  const normalizedPromoTiles =
     promoTiles.length > 0
-      ? promoTiles.slice(0, 3)
+      ? promoTiles.slice(0, 3).map((tile, index) => ({
+          ...tile,
+          label: tile.label || ["Ninez", "Mujeres", "Hombres"][index] || "Destacado",
+          filterValue:
+            tile.filterValue ||
+            (["ninez", "mujeres", "hombres"][index] || "all"),
+        }))
+      : [];
+
+  const featuredTiles =
+    normalizedPromoTiles.length > 0
+      ? normalizedPromoTiles
       : initialProducts
           .filter((product) => Boolean(product.imageUrl))
           .slice(0, 3)
@@ -186,8 +228,28 @@ export function Storefront({
             src: product.imageUrl || "",
             href: "#catalogo",
             alt: product.description,
-            label: ["Novedades", "Rendimiento", "Coleccion"][index] || "Destacado",
+            label: ["Ninez", "Mujeres", "Hombres"][index] || "Destacado",
+            filterValue: (["ninez", "mujeres", "hombres"][index] || "all") as AudienceFilter,
           }));
+  const audienceOptions: Array<{ value: AudienceFilter; label: string }> = [
+    { value: "all", label: "Todo" },
+    { value: "ninez", label: "Ninez" },
+    { value: "mujeres", label: "Mujeres" },
+    { value: "hombres", label: "Hombres" },
+  ];
+  const activeAudienceLabel =
+    audienceOptions.find((option) => option.value === selectedAudience)?.label || "Todo";
+
+  function applyAudienceFilter(nextAudience: AudienceFilter) {
+    setSelectedAudience((current) => (current === nextAudience ? "all" : nextAudience));
+    setSelectedFamily("all");
+    scrollToCatalog();
+  }
+
+  function applyBrandFilter(nextBrand: string) {
+    setSelectedBrand((current) => (current === nextBrand ? "all" : nextBrand));
+    scrollToCatalog();
+  }
 
   function addToCart(product: Product) {
     setErrorMessage(null);
@@ -251,6 +313,15 @@ export function Storefront({
     document.getElementById("pedido")?.scrollIntoView({
       behavior: "smooth",
       block: "start",
+    });
+  }
+
+  function scrollToCatalog() {
+    requestAnimationFrame(() => {
+      document.getElementById("catalogo")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
     });
   }
 
@@ -418,10 +489,17 @@ export function Storefront({
 
         {brandImages.length > 0 ? (
           <section className="brand-strip" aria-label="Marcas destacadas">
-            {brandImages.slice(0, 6).map((image) => (
-              <div className="brand-chip" key={image.src}>
+            {normalizedBrandImages.slice(0, 6).map((image) => (
+              <button
+                type="button"
+                className={`brand-chip ${selectedBrand === image.label ? "active" : ""}`}
+                key={image.src}
+                onClick={() => applyBrandFilter(image.label)}
+                aria-label={`Filtrar por ${image.label}`}
+                title={`Filtrar por ${image.label}`}
+              >
                 <img src={image.src} alt={image.alt} loading="lazy" />
-              </div>
+              </button>
             ))}
           </section>
         ) : null}
@@ -435,16 +513,20 @@ export function Storefront({
 
             <div className="promo-grid">
               {featuredTiles.map((tile) => (
-                <a
-                  className="promo-tile"
-                  href={tile.href}
+                <button
+                  type="button"
+                  className={`promo-tile ${selectedAudience === tile.filterValue ? "active" : ""}`}
                   key={`${tile.src}-${tile.label}`}
-                  target={tile.href.startsWith("http") ? "_blank" : undefined}
-                  rel={tile.href.startsWith("http") ? "noreferrer" : undefined}
+                  onClick={() => applyAudienceFilter(tile.filterValue as AudienceFilter)}
                 >
-                  <img src={tile.src} alt={tile.alt} loading="lazy" />
-                  <span>{tile.label}</span>
-                </a>
+                  <div className="promo-tile-media">
+                    <img src={tile.src} alt={tile.alt} loading="lazy" />
+                  </div>
+                  <div className="promo-tile-copy">
+                    <strong>{tile.label}</strong>
+                    <span>Filtrar catalogo</span>
+                  </div>
+                </button>
               ))}
             </div>
           </section>
@@ -521,6 +603,47 @@ export function Storefront({
             </div>
 
             <div className="panel-block">
+              <h3>Publico</h3>
+              <div className="filter-list">
+                {audienceOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`filter-chip ${selectedAudience === option.value ? "active" : ""}`}
+                    onClick={() => setSelectedAudience(option.value)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {brandOptions.length > 0 ? (
+              <div className="panel-block">
+                <h3>Marcas</h3>
+                <div className="filter-list">
+                  <button
+                    type="button"
+                    className={`filter-chip ${selectedBrand === "all" ? "active" : ""}`}
+                    onClick={() => setSelectedBrand("all")}
+                  >
+                    Todas
+                  </button>
+                  {brandOptions.map((brand) => (
+                    <button
+                      key={brand.label}
+                      type="button"
+                      className={`filter-chip ${selectedBrand === brand.label ? "active" : ""}`}
+                      onClick={() => setSelectedBrand(brand.label)}
+                    >
+                      {brand.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="panel-block">
               <h3>Rango de precio</h3>
               <p className="panel-note">
                 Desde {formatCurrency(minPrice)} hasta {formatCurrency(maxPrice)}
@@ -531,8 +654,18 @@ export function Storefront({
           <section className="catalog-panel">
             <div className="catalog-toolbar">
               <div>
-                <h2>Todos los productos</h2>
-                <p>{filteredProducts.length} resultados</p>
+                <h2>
+                  {selectedBrand !== "all"
+                    ? selectedBrand
+                    : selectedAudience !== "all"
+                      ? activeAudienceLabel
+                      : "Todos los productos"}
+                </h2>
+                <p>
+                  {filteredProducts.length} resultados
+                  {selectedBrand !== "all" ? ` · Marca ${selectedBrand}` : ""}
+                  {selectedAudience !== "all" ? ` · ${activeAudienceLabel}` : ""}
+                </p>
               </div>
 
               <label className="sort-box">
@@ -1019,6 +1152,51 @@ function resolveWhatsappHref(rawValue: string) {
 function buildMapEmbedUrl(address: string) {
   const encodedAddress = encodeURIComponent(address.trim());
   return `https://maps.google.com/maps?q=${encodedAddress}&t=m&z=18&ie=UTF8&iwloc=&output=embed`;
+}
+
+function normalizeFilterValue(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function matchesAudienceFilter(
+  normalizedDescription: string,
+  audience: AudienceFilter,
+) {
+  if (audience === "all") {
+    return true;
+  }
+
+  const haystack = ` ${normalizedDescription} `;
+  const audienceKeywords: Record<Exclude<AudienceFilter, "all">, string[]> = {
+    hombres: [" men ", " hombre ", " masculino ", " caballero "],
+    mujeres: [" women ", " mujer ", " femenino ", " dama ", " lady "],
+    ninez: [" nino ", " nina ", " kids ", " kid ", " junior ", " infantil ", " jr "],
+  };
+
+  return audienceKeywords[audience].some((keyword) =>
+    haystack.includes(keyword),
+  );
+}
+
+function matchesBrandFilter(
+  normalizedDescription: string,
+  normalizedCode: string,
+  aliases: string[],
+) {
+  if (aliases.length === 0) {
+    return true;
+  }
+
+  return aliases.some((alias) => {
+    const normalizedAlias = normalizeFilterValue(alias);
+    return (
+      normalizedDescription.includes(normalizedAlias) ||
+      normalizedCode.includes(normalizedAlias)
+    );
+  });
 }
 
 function IconCart() {
