@@ -58,6 +58,7 @@ export type PublicStoreSettings = {
   storeTagline: string;
   allowBackorders: boolean;
   showOutOfStock: boolean;
+  heroImageUrl: string;
   supportWhatsapp: string;
   supportEmail: string;
   supportPhone: string;

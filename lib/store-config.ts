@@ -53,6 +53,9 @@ export function getPublicStoreSettings(): PublicStoreSettings {
       "Equipamiento deportivo con stock real y pedido directo",
     allowBackorders: settings.allowBackorders,
     showOutOfStock: settings.showOutOfStock,
+    heroImageUrl:
+      process.env.NEXT_PUBLIC_HERO_IMAGE_URL?.trim() ||
+      "https://diezdeportes.odoo.com/web/image/1120-f02b7f1a/image%20%286%29.webp",
     supportWhatsapp:
       process.env.NEXT_PUBLIC_SUPPORT_WHATSAPP?.trim() ||
       "https://wa.me/message/DMXTLZXT6GVRG1",

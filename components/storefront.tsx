@@ -147,9 +147,10 @@ export function Storefront({
   const itemCount = cartItemCount(cart);
 
   const whatsappHref = resolveWhatsappHref(settings.supportWhatsapp);
-  const heroStyle = heroImageUrl
+  const resolvedHeroImageUrl = heroImageUrl || settings.heroImageUrl;
+  const heroStyle = resolvedHeroImageUrl
     ? {
-        backgroundImage: `linear-gradient(90deg, rgba(6, 10, 18, 0.72), rgba(6, 10, 18, 0.2)), url("${heroImageUrl}")`,
+        backgroundImage: `linear-gradient(90deg, rgba(6, 10, 18, 0.72), rgba(6, 10, 18, 0.2)), url("${resolvedHeroImageUrl}")`,
       }
     : undefined;
 
