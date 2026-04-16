@@ -164,7 +164,7 @@ svg {
 .shop-page {
   max-width: 1560px;
   margin: 0 auto;
-  padding: 8px 18px 32px;
+  padding: 0 18px 32px;
 }
 
 .site-header {
@@ -173,7 +173,9 @@ svg {
   align-items: center;
   gap: 24px;
   min-height: 64px;
-  margin-bottom: 10px;
+  position: relative;
+  z-index: 3;
+  margin-bottom: -22px;
   padding: 10px 22px;
   border-radius: 0 0 24px 24px;
   background: var(--header-bg);
@@ -318,15 +320,16 @@ svg {
 
 .hero-immersive {
   display: grid;
-  min-height: 430px;
+  min-height: 470px;
   margin-bottom: 0;
-  padding: 68px 84px;
+  padding: 96px 84px 68px;
   align-items: center;
   background:
     linear-gradient(90deg, rgba(6, 10, 18, 0.78), rgba(6, 10, 18, 0.28)),
     linear-gradient(135deg, #23304b, #5874a6);
-  background-position: center;
-  background-size: cover;
+  background-position: 53% 0%;
+  background-repeat: no-repeat;
+  background-size: 100% auto;
 }
 
 .shop-hero-copy {
@@ -1122,6 +1125,7 @@ svg {
   .site-header {
     justify-items: start;
     border-radius: 0 0 22px 22px;
+    margin-bottom: -16px;
   }
 
   .site-nav {
@@ -1134,7 +1138,9 @@ svg {
 
   .hero-immersive {
     min-height: 360px;
-    padding: 40px 28px;
+    padding: 64px 28px 40px;
+    background-size: cover;
+    background-position: 56% 0%;
   }
 
   .brand-strip,
@@ -1185,6 +1191,10 @@ svg {
     padding: 18px;
   }
 
+  .site-header {
+    margin-bottom: -12px;
+  }
+
   .site-actions {
     gap: 10px;
   }
@@ -1195,7 +1205,9 @@ svg {
 
   .hero-immersive {
     min-height: 320px;
-    padding: 32px 20px;
+    padding: 54px 20px 32px;
+    background-size: cover;
+    background-position: 60% 0%;
   }
 
   .catalog-toolbar,
