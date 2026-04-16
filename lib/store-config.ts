@@ -53,6 +53,19 @@ export function getPublicStoreSettings(): PublicStoreSettings {
       "Equipamiento deportivo con stock real y pedido directo",
     allowBackorders: settings.allowBackorders,
     showOutOfStock: settings.showOutOfStock,
-    supportWhatsapp: process.env.NEXT_PUBLIC_SUPPORT_WHATSAPP?.trim() || "",
+    supportWhatsapp:
+      process.env.NEXT_PUBLIC_SUPPORT_WHATSAPP?.trim() ||
+      "https://wa.me/message/DMXTLZXT6GVRG1",
+    supportEmail:
+      process.env.NEXT_PUBLIC_SUPPORT_EMAIL?.trim() ||
+      "deportes10elbolson@yahoo.com.ar",
+    supportPhone:
+      process.env.NEXT_PUBLIC_SUPPORT_PHONE?.trim() || "+54 9 294 467-4525",
+    storeAddress:
+      process.env.NEXT_PUBLIC_STORE_ADDRESS?.trim() ||
+      "Castelli, Av. Sarmiento esq, R8430 El Bolson, Rio Negro.",
+    supportBlurb:
+      process.env.NEXT_PUBLIC_SUPPORT_BLURB?.trim() ||
+      "En Diez Deportes trabajamos para ofrecerte atencion personalizada, envios seguros a todo el pais y una experiencia de compra simple.",
   };
 }

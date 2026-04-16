@@ -15,10 +15,13 @@ import type {
   CreateOrderPayload,
   OrderSummary,
   Product,
+  PromoTile,
   PublicStoreSettings,
 } from "@/lib/types";
 
 const LOCAL_STORAGE_CART_KEY = "diezdeportes-cart";
+const ODOO_FACEBOOK_URL = "https://diezdeportes.odoo.com/website/social/facebook";
+const ODOO_INSTAGRAM_URL = "https://diezdeportes.odoo.com/website/social/instagram";
 
 const emptyCustomer: CheckoutCustomer = {
   fullName: "",
@@ -41,6 +44,8 @@ type StorefrontProps = {
   initialProducts: Product[];
   settings: PublicStoreSettings;
   brandImages: BrandImage[];
+  heroImageUrl: string | null;
+  promoTiles: PromoTile[];
   loadError?: string;
 };
 
@@ -48,6 +53,8 @@ export function Storefront({
   initialProducts,
   settings,
   brandImages,
+  heroImageUrl,
+  promoTiles,
   loadError,
 }: StorefrontProps) {
   const [search, setSearch] = useState("");
@@ -139,6 +146,26 @@ export function Storefront({
   const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const itemCount = cartItemCount(cart);
 
+  const whatsappHref = resolveWhatsappHref(settings.supportWhatsapp);
+  const heroStyle = heroImageUrl
+    ? {
+        backgroundImage: `linear-gradient(90deg, rgba(6, 10, 18, 0.72), rgba(6, 10, 18, 0.2)), url("${heroImageUrl}")`,
+      }
+    : undefined;
+
+  const featuredTiles =
+    promoTiles.length > 0
+      ? promoTiles.slice(0, 3)
+      : initialProducts
+          .filter((product) => Boolean(product.imageUrl))
+          .slice(0, 3)
+          .map((product, index) => ({
+            src: product.imageUrl || "",
+            href: "#catalogo",
+            alt: product.description,
+            label: ["Novedades", "Rendimiento", "Coleccion"][index] || "Destacado",
+          }));
+
   function addToCart(product: Product) {
     setErrorMessage(null);
     setOrder(null);
@@ -190,6 +217,18 @@ export function Storefront({
 
   function updateCustomerField(field: keyof CheckoutCustomer, value: string) {
     setCustomer((current) => ({ ...current, [field]: value }));
+  }
+
+  function openCartPanel() {
+    if (window.innerWidth <= 1180) {
+      setMobileCartOpen(true);
+      return;
+    }
+
+    document.getElementById("pedido")?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
   }
 
   async function handleCheckoutSubmit(event: FormEvent<HTMLFormElement>) {
@@ -257,20 +296,67 @@ export function Storefront({
 
   return (
     <>
-      <main className="shop-page">
-        <section className="shop-hero">
+      <main className="shop-page" id="top">
+        <header className="site-header">
+          <a className="site-logo" href="#top" aria-label={settings.storeName}>
+            <span>Diez</span>
+            <span>Deportes</span>
+          </a>
+
+          <nav className="site-nav" aria-label="Principal">
+            <a href="#top">Inicio</a>
+            <a href="#sobre-nosotros">Sobre nosotros</a>
+          </nav>
+
+          <div className="site-actions">
+            <button
+              type="button"
+              className="site-cart-pill"
+              onClick={openCartPanel}
+              aria-label="Abrir pedido"
+            >
+              <span className="site-cart-count">{itemCount}</span>
+              <IconCart />
+            </button>
+
+            <div className="site-socials" aria-label="Redes">
+              <a href={ODOO_FACEBOOK_URL} target="_blank" rel="noreferrer" aria-label="Facebook">
+                <IconFacebook />
+              </a>
+              <a
+                href={ODOO_INSTAGRAM_URL}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Instagram"
+              >
+                <IconInstagram />
+              </a>
+            </div>
+
+            <a className="site-email" href={`mailto:${settings.supportEmail}`}>
+              {settings.supportEmail}
+            </a>
+
+            <a className="site-contact-button" href="#contacto">
+              Contactanos
+            </a>
+          </div>
+        </header>
+
+        <section className="shop-hero hero-immersive" style={heroStyle}>
           <div className="shop-hero-copy">
-            <span className="shop-kicker">Catalogo online inspirado en su tienda Odoo</span>
+            <span className="shop-kicker">Store online</span>
             <h1>La casa del deporte</h1>
             <p>{settings.storeTagline}</p>
+
             <div className="hero-actions">
               <a className="hero-primary" href="#catalogo">
                 Ver productos
               </a>
-              {settings.supportWhatsapp ? (
+              {whatsappHref ? (
                 <a
-                  className="hero-secondary"
-                  href={`https://wa.me/${settings.supportWhatsapp.replace(/\D/g, "")}`}
+                  className="hero-secondary hero-whatsapp"
+                  href={whatsappHref}
                   target="_blank"
                   rel="noreferrer"
                 >
@@ -278,33 +364,77 @@ export function Storefront({
                 </a>
               ) : null}
             </div>
-          </div>
 
-          <div className="shop-hero-card">
-            <div className="hero-stat">
-              <strong>{initialProducts.length}</strong>
-              <span>productos publicados</span>
-            </div>
-            <div className="hero-stat">
-              <strong>{itemCount}</strong>
-              <span>unidades en el pedido</span>
-            </div>
-            <div className="hero-stat">
-              <strong>{formatCurrency(total)}</strong>
-              <span>total estimado</span>
+            <div className="hero-metrics">
+              <div className="hero-stat-inline">
+                <strong>{initialProducts.length}</strong>
+                <span>productos</span>
+              </div>
+              <div className="hero-stat-inline">
+                <strong>{itemCount}</strong>
+                <span>en tu pedido</span>
+              </div>
+              <div className="hero-stat-inline">
+                <strong>{formatCurrency(total)}</strong>
+                <span>estimado</span>
+              </div>
             </div>
           </div>
         </section>
 
         {brandImages.length > 0 ? (
           <section className="brand-strip" aria-label="Marcas destacadas">
-            {brandImages.map((image) => (
+            {brandImages.slice(0, 6).map((image) => (
               <div className="brand-chip" key={image.src}>
                 <img src={image.src} alt={image.alt} loading="lazy" />
               </div>
             ))}
           </section>
         ) : null}
+
+        {featuredTiles.length > 0 ? (
+          <section className="promo-section" aria-label="Colecciones destacadas">
+            <div className="section-heading">
+              <span className="section-kicker">Colecciones</span>
+              <h2>Bloques destacados</h2>
+            </div>
+
+            <div className="promo-grid">
+              {featuredTiles.map((tile) => (
+                <a
+                  className="promo-tile"
+                  href={tile.href}
+                  key={`${tile.src}-${tile.label}`}
+                  target={tile.href.startsWith("http") ? "_blank" : undefined}
+                  rel={tile.href.startsWith("http") ? "noreferrer" : undefined}
+                >
+                  <img src={tile.src} alt={tile.alt} loading="lazy" />
+                  <span>{tile.label}</span>
+                </a>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        <section className="support-band" id="sobre-nosotros">
+          <div>
+            <span className="section-kicker">Atencion personalizada</span>
+            <h2>Comprometidos con tu satisfaccion</h2>
+            <p>{settings.supportBlurb}</p>
+          </div>
+
+          <div className="support-band-actions">
+            <a href={`tel:${settings.supportPhone.replace(/\s+/g, "")}`}>
+              {settings.supportPhone}
+            </a>
+            <a href={`mailto:${settings.supportEmail}`}>{settings.supportEmail}</a>
+            {whatsappHref ? (
+              <a href={whatsappHref} target="_blank" rel="noreferrer">
+                WhatsApp
+              </a>
+            ) : null}
+          </div>
+        </section>
 
         <div className="shop-layout" id="catalogo">
           <aside className="filters-panel">
@@ -491,9 +621,47 @@ export function Storefront({
             />
           </aside>
         </div>
+
+        <footer className="site-footer" id="contacto">
+          <div className="site-footer-copy">
+            <a className="site-logo footer-logo" href="#top" aria-label={settings.storeName}>
+              <span>Diez</span>
+              <span>Deportes</span>
+            </a>
+            <p>{settings.storeAddress}</p>
+          </div>
+
+          <div className="site-footer-links">
+            <a href={`tel:${settings.supportPhone.replace(/\s+/g, "")}`}>
+              {settings.supportPhone}
+            </a>
+            <a href={`mailto:${settings.supportEmail}`}>{settings.supportEmail}</a>
+            {whatsappHref ? (
+              <a href={whatsappHref} target="_blank" rel="noreferrer">
+                WhatsApp
+              </a>
+            ) : null}
+          </div>
+
+          <div className="site-socials footer-socials" aria-label="Redes">
+            <a href={ODOO_FACEBOOK_URL} target="_blank" rel="noreferrer" aria-label="Facebook">
+              <IconFacebook />
+            </a>
+            <a
+              href={ODOO_INSTAGRAM_URL}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Instagram"
+            >
+              <IconInstagram />
+            </a>
+          </div>
+        </footer>
       </main>
 
-      {mobileCartOpen ? <div className="mobile-backdrop" /> : null}
+      {mobileCartOpen ? (
+        <div className="mobile-backdrop" onClick={() => setMobileCartOpen(false)} />
+      ) : null}
 
       <button
         type="button"
@@ -779,5 +947,42 @@ function CartContent({
         </button>
       </form>
     </>
+  );
+}
+
+function resolveWhatsappHref(rawValue: string) {
+  const value = rawValue.trim();
+  if (!value) return "";
+  if (/^https?:\/\//i.test(value)) {
+    return value;
+  }
+
+  const digits = value.replace(/\D/g, "");
+  if (!digits) return "";
+
+  return `https://wa.me/${digits}`;
+}
+
+function IconCart() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M7 18a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm9 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4ZM5 4h-2v2h1.2l2.16 8.64A2 2 0 0 0 8.3 16H18v-2H8.3l-.25-1H18a2 2 0 0 0 1.94-1.52L21.6 5H7.1L6.65 3.2A1.5 1.5 0 0 0 5.2 2H5v2Z" />
+    </svg>
+  );
+}
+
+function IconFacebook() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M13.5 22v-8h2.7l.4-3h-3.1V9.1c0-.9.3-1.6 1.7-1.6h1.5V4.8c-.3 0-1.2-.1-2.3-.1-2.3 0-3.9 1.4-3.9 4V11H8v3h2.5v8h3Z" />
+    </svg>
+  );
+}
+
+function IconInstagram() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M7.5 3h9A4.5 4.5 0 0 1 21 7.5v9a4.5 4.5 0 0 1-4.5 4.5h-9A4.5 4.5 0 0 1 3 16.5v-9A4.5 4.5 0 0 1 7.5 3Zm0 2A2.5 2.5 0 0 0 5 7.5v9A2.5 2.5 0 0 0 7.5 19h9a2.5 2.5 0 0 0 2.5-2.5v-9A2.5 2.5 0 0 0 16.5 5h-9Zm9.75 1.5a.75.75 0 1 1 0 1.5.75.75 0 0 1 0-1.5ZM12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8Zm0 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z" />
+    </svg>
   );
 }

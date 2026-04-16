@@ -1,5 +1,5 @@
 import "server-only";
-import type { BrandImage } from "@/lib/types";
+import type { BrandImage, PromoTile } from "@/lib/types";
 import { parseBoolean } from "@/lib/commerce";
 
 type OdooProductImage = {
@@ -12,6 +12,8 @@ type OdooProductImage = {
 type OdooAssets = {
   brandImages: BrandImage[];
   productImages: Map<string, OdooProductImage>;
+  heroImageUrl: string | null;
+  promoTiles: PromoTile[];
   fetchedAt: number;
 };
 
@@ -126,6 +128,36 @@ function parseBrandImages(html: string, baseUrl: string) {
   return images.slice(0, 12);
 }
 
+function parseHeroImage(html: string, baseUrl: string) {
+  const match = html.match(/background-image:\s*url\((?:&#34;|")([^"')]+)(?:&#34;|")\)/i);
+  if (!match) {
+    return null;
+  }
+
+  return absoluteUrl(baseUrl, match[1]);
+}
+
+function parsePromoTiles(html: string, baseUrl: string) {
+  const labels = ["Hombre", "Mujer", "Kids"];
+  const tiles: PromoTile[] = [];
+  const regex =
+    /<a href="([^"]+)"[^>]*><img src="([^"]+Mesa%20de%20trabajo[^"]+)" alt="([^"]*)"/gi;
+
+  for (const [index, match] of [...html.matchAll(regex)].entries()) {
+    if (index > 5) break;
+
+    const [, href, src, alt] = match;
+    tiles.push({
+      href: absoluteUrl(baseUrl, href),
+      src: absoluteUrl(baseUrl, src),
+      alt: decodeHtml(alt) || labels[index] || `Promo ${index + 1}`,
+      label: labels[index] || `Destacado ${index + 1}`,
+    });
+  }
+
+  return tiles;
+}
+
 async function fetchHtml(url: string) {
   const response = await fetch(url, {
     cache: "no-store",
@@ -147,13 +179,21 @@ export async function getOdooAssets(): Promise<OdooAssets> {
     return {
       brandImages: [],
       productImages: new Map(),
+      heroImageUrl: null,
+      promoTiles: [],
       fetchedAt: Date.now(),
     };
   }
 
   const cached = global.__diezDeportesOdooAssets;
   if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
-    return cached;
+    return {
+      brandImages: cached.brandImages ?? [],
+      productImages: cached.productImages ?? new Map(),
+      heroImageUrl: cached.heroImageUrl ?? null,
+      promoTiles: cached.promoTiles ?? [],
+      fetchedAt: cached.fetchedAt,
+    };
   }
 
   const firstPageHtml = await fetchHtml(shopUrl);
@@ -184,6 +224,8 @@ export async function getOdooAssets(): Promise<OdooAssets> {
 
   const assets: OdooAssets = {
     brandImages: parseBrandImages(firstPageHtml, shopUrl),
+    heroImageUrl: parseHeroImage(firstPageHtml, shopUrl),
+    promoTiles: parsePromoTiles(firstPageHtml, shopUrl),
     productImages,
     fetchedAt: Date.now(),
   };

@@ -59,9 +59,20 @@ export type PublicStoreSettings = {
   allowBackorders: boolean;
   showOutOfStock: boolean;
   supportWhatsapp: string;
+  supportEmail: string;
+  supportPhone: string;
+  storeAddress: string;
+  supportBlurb: string;
 };
 
 export type BrandImage = {
   src: string;
   alt: string;
+};
+
+export type PromoTile = {
+  src: string;
+  href: string;
+  alt: string;
+  label: string;
 };

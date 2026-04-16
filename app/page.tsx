@@ -20,6 +20,8 @@ export default async function HomePage() {
         initialProducts={products}
         settings={settings}
         brandImages={odooAssets.brandImages}
+        heroImageUrl={odooAssets.heroImageUrl ?? null}
+        promoTiles={odooAssets.promoTiles ?? []}
       />
     );
   } catch (error) {
@@ -33,6 +35,8 @@ export default async function HomePage() {
         initialProducts={[]}
         settings={settings}
         brandImages={[]}
+        heroImageUrl={null}
+        promoTiles={[]}
         loadError={message}
       />
     );
