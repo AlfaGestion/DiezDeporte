@@ -1,5 +1,6 @@
 import { Storefront } from "@/components/storefront";
 import { listProducts } from "@/lib/catalog";
+import { getOdooAssets } from "@/lib/odoo";
 import { getPublicStoreSettings } from "@/lib/store-config";
 
 export const dynamic = "force-dynamic";
@@ -9,9 +10,18 @@ export default async function HomePage() {
   const settings = getPublicStoreSettings();
 
   try {
-    const products = await listProducts();
+    const [products, odooAssets] = await Promise.all([
+      listProducts(),
+      getOdooAssets(),
+    ]);
 
-    return <Storefront initialProducts={products} settings={settings} />;
+    return (
+      <Storefront
+        initialProducts={products}
+        settings={settings}
+        brandImages={odooAssets.brandImages}
+      />
+    );
   } catch (error) {
     const message =
       error instanceof Error
@@ -22,6 +32,7 @@ export default async function HomePage() {
       <Storefront
         initialProducts={[]}
         settings={settings}
+        brandImages={[]}
         loadError={message}
       />
     );

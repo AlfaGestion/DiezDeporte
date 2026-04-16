@@ -60,3 +60,8 @@ export type PublicStoreSettings = {
   showOutOfStock: boolean;
   supportWhatsapp: string;
 };
+
+export type BrandImage = {
+  src: string;
+  alt: string;
+};

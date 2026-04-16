@@ -2,6 +2,7 @@ import "server-only";
 import type { ConnectionPool, IResult, Transaction } from "mssql";
 import { getPriceBreakdown, resolveImageUrl, toNumber } from "@/lib/commerce";
 import { getConnection, sql } from "@/lib/db";
+import { getOdooAssets } from "@/lib/odoo";
 import { getServerSettings } from "@/lib/store-config";
 import type { Product } from "@/lib/types";
 
@@ -104,7 +105,21 @@ export async function listProducts() {
     ORDER BY a.DESCRIPCION ASC;
   `);
 
-  return result.recordset.map(mapProduct);
+  const products = result.recordset.map(mapProduct);
+  const odooAssets = await getOdooAssets();
+
+  return products.map((product) => {
+    const odooImage = odooAssets.productImages.get(product.id.trim().toUpperCase());
+
+    if (!odooImage) {
+      return product;
+    }
+
+    return {
+      ...product,
+      imageUrl: odooImage.imageUrl,
+    };
+  });
 }
 
 export async function getProductsByIds(

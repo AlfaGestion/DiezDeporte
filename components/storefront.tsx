@@ -9,6 +9,7 @@ import {
   toCartItem,
 } from "@/lib/commerce";
 import type {
+  BrandImage,
   CartItem,
   CheckoutCustomer,
   CreateOrderPayload,
@@ -33,18 +34,26 @@ const emptyCustomer: CheckoutCustomer = {
   paymentMethod: "Coordinar pago",
 };
 
+type SortOption = "featured" | "name-asc" | "price-asc" | "price-desc";
+type StockOption = "all" | "available" | "low" | "empty";
+
 type StorefrontProps = {
   initialProducts: Product[];
   settings: PublicStoreSettings;
+  brandImages: BrandImage[];
   loadError?: string;
 };
 
 export function Storefront({
   initialProducts,
   settings,
+  brandImages,
   loadError,
 }: StorefrontProps) {
   const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState<SortOption>("featured");
+  const [stockFilter, setStockFilter] = useState<StockOption>("all");
+  const [selectedFamily, setSelectedFamily] = useState("all");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [customer, setCustomer] = useState<CheckoutCustomer>(emptyCustomer);
   const [submitting, setSubmitting] = useState(false);
@@ -57,8 +66,7 @@ export function Storefront({
     if (!savedCart) return;
 
     try {
-      const parsed = JSON.parse(savedCart) as CartItem[];
-      setCart(parsed);
+      setCart(JSON.parse(savedCart) as CartItem[]);
     } catch {
       window.localStorage.removeItem(LOCAL_STORAGE_CART_KEY);
     }
@@ -68,18 +76,63 @@ export function Storefront({
     window.localStorage.setItem(LOCAL_STORAGE_CART_KEY, JSON.stringify(cart));
   }, [cart]);
 
-  const filteredProducts = initialProducts.filter((product) => {
-    const matchesSearch =
-      search.trim() === "" ||
-      product.description.toLowerCase().includes(search.toLowerCase()) ||
-      product.code.toLowerCase().includes(search.toLowerCase()) ||
-      product.familyId.toLowerCase().includes(search.toLowerCase());
+  const families = Array.from(
+    new Set(
+      initialProducts
+        .map((product) => product.familyId.trim())
+        .filter(Boolean),
+    ),
+  ).sort((left, right) => left.localeCompare(right));
 
-    if (!matchesSearch) return false;
-    if (settings.showOutOfStock) return true;
+  const prices = initialProducts.map((product) => product.price);
+  const minPrice = prices.length > 0 ? Math.min(...prices) : 0;
+  const maxPrice = prices.length > 0 ? Math.max(...prices) : 0;
 
-    return product.stock > 0;
-  });
+  const filteredProducts = initialProducts
+    .filter((product) => {
+      const normalizedSearch = search.trim().toLowerCase();
+      const matchesSearch =
+        normalizedSearch === "" ||
+        product.description.toLowerCase().includes(normalizedSearch) ||
+        product.code.toLowerCase().includes(normalizedSearch);
+
+      const matchesFamily =
+        selectedFamily === "all" || product.familyId.trim() === selectedFamily;
+
+      const matchesStock =
+        stockFilter === "all" ||
+        (stockFilter === "available" && product.stock > 0) ||
+        (stockFilter === "low" && product.stock > 0 && product.stock <= 3) ||
+        (stockFilter === "empty" && product.stock <= 0);
+
+      if (!matchesSearch || !matchesFamily || !matchesStock) {
+        return false;
+      }
+
+      if (settings.showOutOfStock) {
+        return true;
+      }
+
+      return product.stock > 0;
+    })
+    .sort((left, right) => {
+      if (sortBy === "name-asc") {
+        return left.description.localeCompare(right.description);
+      }
+
+      if (sortBy === "price-asc") {
+        return left.price - right.price;
+      }
+
+      if (sortBy === "price-desc") {
+        return right.price - left.price;
+      }
+
+      return (
+        right.stock - left.stock ||
+        left.description.localeCompare(right.description)
+      );
+    });
 
   const subtotal = cart.reduce((sum, item) => sum + item.netPrice * item.quantity, 0);
   const taxTotal = cart.reduce((sum, item) => sum + item.taxAmount * item.quantity, 0);
@@ -135,10 +188,7 @@ export function Storefront({
     );
   }
 
-  function updateCustomerField(
-    field: keyof CheckoutCustomer,
-    value: string,
-  ) {
+  function updateCustomerField(field: keyof CheckoutCustomer, value: string) {
     setCustomer((current) => ({ ...current, [field]: value }));
   }
 
@@ -148,13 +198,13 @@ export function Storefront({
     setOrder(null);
 
     if (cart.length === 0) {
-      setErrorMessage("Agregá al menos un producto antes de enviar el pedido.");
+      setErrorMessage("Agrega al menos un producto antes de enviar el pedido.");
       return;
     }
 
     if (!customer.fullName || !customer.phone || !customer.address || !customer.city) {
       setErrorMessage(
-        "Completá nombre, teléfono, dirección y localidad para grabar el pedido.",
+        "Completa nombre, telefono, direccion y localidad para grabar el pedido.",
       );
       return;
     }
@@ -201,66 +251,165 @@ export function Storefront({
     }
   }
 
-  const cartPanelClassName = mobileCartOpen
-    ? "cart-panel mobile-sheet"
-    : "cart-panel mobile-hidden";
+  const desktopCartClassName = mobileCartOpen
+    ? "order-panel mobile-sheet"
+    : "order-panel mobile-hidden";
 
   return (
     <>
-      <main className="page-shell">
-        <section className="hero">
-          <div className="hero-grid">
-            <div>
-              <span className="eyebrow">Tienda directa desde SQL Server</span>
-              <h1>{settings.storeName}</h1>
-              <p>{settings.storeTagline}</p>
+      <main className="shop-page">
+        <section className="shop-hero">
+          <div className="shop-hero-copy">
+            <span className="shop-kicker">Catalogo online inspirado en su tienda Odoo</span>
+            <h1>La casa del deporte</h1>
+            <p>{settings.storeTagline}</p>
+            <div className="hero-actions">
+              <a className="hero-primary" href="#catalogo">
+                Ver productos
+              </a>
               {settings.supportWhatsapp ? (
                 <a
-                  className="support-link"
+                  className="hero-secondary"
                   href={`https://wa.me/${settings.supportWhatsapp.replace(/\D/g, "")}`}
                   target="_blank"
                   rel="noreferrer"
                 >
-                  WhatsApp para soporte comercial
+                  WhatsApp
                 </a>
               ) : null}
             </div>
+          </div>
 
-            <div className="hero-stats">
-              <article className="hero-stat">
-                <strong>{initialProducts.length}</strong>
-                <span>artículos publicados</span>
-              </article>
-              <article className="hero-stat">
-                <strong>{itemCount}</strong>
-                <span>unidades en el carrito</span>
-              </article>
-              <article className="hero-stat">
-                <strong>{formatCurrency(total)}</strong>
-                <span>total estimado del pedido</span>
-              </article>
+          <div className="shop-hero-card">
+            <div className="hero-stat">
+              <strong>{initialProducts.length}</strong>
+              <span>productos publicados</span>
+            </div>
+            <div className="hero-stat">
+              <strong>{itemCount}</strong>
+              <span>unidades en el pedido</span>
+            </div>
+            <div className="hero-stat">
+              <strong>{formatCurrency(total)}</strong>
+              <span>total estimado</span>
             </div>
           </div>
         </section>
 
-        <div className="layout-grid">
-          <section className="catalog-panel">
-            <div className="panel-header">
-              <h2>Catálogo</h2>
+        {brandImages.length > 0 ? (
+          <section className="brand-strip" aria-label="Marcas destacadas">
+            {brandImages.map((image) => (
+              <div className="brand-chip" key={image.src}>
+                <img src={image.src} alt={image.alt} loading="lazy" />
+              </div>
+            ))}
+          </section>
+        ) : null}
+
+        <div className="shop-layout" id="catalogo">
+          <aside className="filters-panel">
+            <div className="panel-block">
+              <h2>Buscar</h2>
               <input
-                className="search-bar"
+                className="search-input"
                 type="search"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Buscar por código, descripción o familia"
+                placeholder="Codigo o descripcion"
               />
+            </div>
+
+            <div className="panel-block">
+              <h3>Categorias</h3>
+              <div className="filter-list">
+                <button
+                  type="button"
+                  className={`filter-chip ${selectedFamily === "all" ? "active" : ""}`}
+                  onClick={() => setSelectedFamily("all")}
+                >
+                  Todos los productos
+                </button>
+                {families.map((family) => (
+                  <button
+                    key={family}
+                    type="button"
+                    className={`filter-chip ${selectedFamily === family ? "active" : ""}`}
+                    onClick={() => setSelectedFamily(family)}
+                  >
+                    Familia {family}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="panel-block">
+              <h3>Stock</h3>
+              <div className="filter-list">
+                <button
+                  type="button"
+                  className={`filter-chip ${stockFilter === "all" ? "active" : ""}`}
+                  onClick={() => setStockFilter("all")}
+                >
+                  Todo
+                </button>
+                <button
+                  type="button"
+                  className={`filter-chip ${stockFilter === "available" ? "active" : ""}`}
+                  onClick={() => setStockFilter("available")}
+                >
+                  Disponible
+                </button>
+                <button
+                  type="button"
+                  className={`filter-chip ${stockFilter === "low" ? "active" : ""}`}
+                  onClick={() => setStockFilter("low")}
+                >
+                  Bajo
+                </button>
+                <button
+                  type="button"
+                  className={`filter-chip ${stockFilter === "empty" ? "active" : ""}`}
+                  onClick={() => setStockFilter("empty")}
+                >
+                  Sin stock
+                </button>
+              </div>
+            </div>
+
+            <div className="panel-block">
+              <h3>Rango de precio</h3>
+              <p className="panel-note">
+                Desde {formatCurrency(minPrice)} hasta {formatCurrency(maxPrice)}
+              </p>
+            </div>
+          </aside>
+
+          <section className="catalog-panel">
+            <div className="catalog-toolbar">
+              <div>
+                <h2>Todos los productos</h2>
+                <p>{filteredProducts.length} resultados</p>
+              </div>
+
+              <label className="sort-box">
+                <span>Ordenar por</span>
+                <select
+                  value={sortBy}
+                  onChange={(event) => setSortBy(event.target.value as SortOption)}
+                >
+                  <option value="featured">Destacado</option>
+                  <option value="name-asc">Nombre (A-Z)</option>
+                  <option value="price-asc">Precio - bajo a alto</option>
+                  <option value="price-desc">Precio - alto a bajo</option>
+                </select>
+              </label>
             </div>
 
             {loadError ? (
               <div className="message error">
                 {loadError}
-                <div style={{ marginTop: 8 }}>
-                  Revisá la configuración de `.env` y la conectividad a SQL Server.
+                <div className="message-detail">
+                  Revisa la configuracion de `.env` y la conectividad a SQL Server.
                 </div>
               </div>
             ) : null}
@@ -273,12 +422,12 @@ export function Storefront({
 
             <div className="catalog-grid">
               {filteredProducts.map((product) => {
-                const isOutOfStock = product.stock <= 0;
-                const disableAddButton = isOutOfStock && !settings.allowBackorders;
+                const outOfStock = product.stock <= 0;
+                const disableAddButton = outOfStock && !settings.allowBackorders;
 
                 return (
-                  <article className="product-card" key={product.id}>
-                    <div className="product-media">
+                  <article className="catalog-card" key={product.id}>
+                    <a className="catalog-card-media" href="#pedido">
                       {product.imageUrl ? (
                         <img
                           src={product.imageUrl}
@@ -286,44 +435,37 @@ export function Storefront({
                           loading="lazy"
                         />
                       ) : (
-                        <div className="product-placeholder">
+                        <div className="catalog-card-placeholder">
                           {product.code.slice(0, 3)}
                         </div>
                       )}
-                    </div>
+                    </a>
 
-                    <div className="product-body">
-                      <div className="product-meta">
-                        <span className="pill">{product.familyId || "General"}</span>
-                        <span className={`pill ${getStockBadgeClass(product.stock)}`}>
-                          Stock: {product.stock.toFixed(2)}
+                    <div className="catalog-card-body">
+                      <div className="catalog-card-tags">
+                        <span className="catalog-tag">Cod. {product.code}</span>
+                        <span className={`catalog-tag ${getStockBadgeClass(product.stock)}`}>
+                          Stock {product.stock.toFixed(0)}
                         </span>
                       </div>
 
-                      <div>
-                        <h3 className="product-title">{product.description}</h3>
-                        <div className="product-code">Cod. {product.code}</div>
-                      </div>
+                      <h3>{product.description}</h3>
 
-                      <div className="product-code">
-                        {product.presentation || product.unitId || "Unidad estándar"}
-                      </div>
+                      <p className="catalog-card-subtitle">
+                        {product.presentation || product.unitId || "Unidad"}
+                      </p>
 
-                      <div className="product-price">{formatCurrency(product.price)}</div>
+                      <div className="catalog-card-price">{formatCurrency(product.price)}</div>
+                      <p className="catalog-card-tax">Precio s/Imp. Nac.</p>
 
-                      <div className="product-actions">
-                        <button
-                          type="button"
-                          className="product-button"
-                          onClick={() => addToCart(product)}
-                          disabled={disableAddButton}
-                        >
-                          {disableAddButton ? "Sin stock" : "Agregar"}
-                        </button>
-                        <span className="product-code">
-                          IVA {product.taxRate.toFixed(0)}%
-                        </span>
-                      </div>
+                      <button
+                        type="button"
+                        className="catalog-card-button"
+                        onClick={() => addToCart(product)}
+                        disabled={disableAddButton}
+                      >
+                        {disableAddButton ? "Sin stock" : "Anadir al carrito"}
+                      </button>
                     </div>
                   </article>
                 );
@@ -331,7 +473,7 @@ export function Storefront({
             </div>
           </section>
 
-          <aside className="cart-panel">
+          <aside className="order-panel desktop-only" id="pedido">
             <CartContent
               cart={cart}
               customer={customer}
@@ -351,17 +493,17 @@ export function Storefront({
         </div>
       </main>
 
-      {mobileCartOpen ? <div className="mobile-sheet-backdrop" /> : null}
+      {mobileCartOpen ? <div className="mobile-backdrop" /> : null}
 
       <button
         type="button"
         className="mobile-cart-button"
         onClick={() => setMobileCartOpen((current) => !current)}
       >
-        Carrito {itemCount > 0 ? `(${itemCount})` : ""}
+        Pedido ({itemCount})
       </button>
 
-      <aside className={cartPanelClassName}>
+      <aside className={desktopCartClassName}>
         <CartContent
           cart={cart}
           customer={customer}
@@ -415,15 +557,18 @@ function CartContent({
 }: CartContentProps) {
   return (
     <>
-      <div className="panel-header">
-        <h2>Carrito</h2>
-        <span className="pill">{itemCount} unidades</span>
+      <div className="order-panel-header">
+        <div>
+          <h2>Tu pedido</h2>
+          <p>{itemCount} unidades</p>
+        </div>
+        <span className="order-badge">Web</span>
       </div>
 
       {order ? (
         <div className="message success">
-          Pedido grabado con éxito.
-          <div style={{ marginTop: 8 }}>
+          Pedido grabado con exito.
+          <div className="message-detail">
             Comprobante: <strong>{order.tc} {order.idComprobante}</strong>
           </div>
         </div>
@@ -432,33 +577,31 @@ function CartContent({
       {errorMessage ? <div className="message error">{errorMessage}</div> : null}
 
       {cart.length === 0 ? (
-        <div className="empty-state">
-          Todavía no agregaste productos. El carrito se guarda en este navegador.
+        <div className="empty-state compact">
+          Aun no agregaste productos. El carrito se guarda en este navegador.
         </div>
       ) : (
-        <div className="cart-items">
+        <div className="order-items">
           {cart.map((item) => (
-            <article className="cart-item" key={item.id}>
-              <div className="cart-item-header">
+            <article className="order-item" key={item.id}>
+              <div className="order-item-top">
                 <div>
-                  <p className="cart-item-title">{item.description}</p>
-                  <div className="cart-item-subtitle">
-                    {item.code} · {formatCurrency(item.price)} c/u
-                  </div>
+                  <h3>{item.description}</h3>
+                  <p>{item.code} · {formatCurrency(item.price)} c/u</p>
                 </div>
                 <button
                   type="button"
-                  className="ghost-button"
+                  className="link-button"
                   onClick={() => onItemRemove(item.id)}
                 >
                   Quitar
                 </button>
               </div>
 
-              <div className="cart-qty">
+              <div className="order-item-controls">
                 <button
                   type="button"
-                  className="icon-button"
+                  className="qty-button"
                   onClick={() => onItemQuantityChange(item.id, item.quantity - 1)}
                 >
                   -
@@ -466,12 +609,12 @@ function CartContent({
                 <strong>{item.quantity}</strong>
                 <button
                   type="button"
-                  className="icon-button"
+                  className="qty-button"
                   onClick={() => onItemQuantityChange(item.id, item.quantity + 1)}
                 >
                   +
                 </button>
-                <span style={{ marginLeft: "auto", fontWeight: 700 }}>
+                <span className="order-item-total">
                   {formatCurrency(item.price * item.quantity)}
                 </span>
               </div>
@@ -480,16 +623,16 @@ function CartContent({
         </div>
       )}
 
-      <div className="cart-summary">
-        <div className="summary-line">
+      <div className="order-summary">
+        <div className="summary-row">
           <span>Subtotal neto</span>
           <span>{formatCurrency(subtotal)}</span>
         </div>
-        <div className="summary-line">
+        <div className="summary-row">
           <span>IVA</span>
           <span>{formatCurrency(taxTotal)}</span>
         </div>
-        <div className="summary-line">
+        <div className="summary-row total">
           <span>Total pedido</span>
           <strong>{formatCurrency(total)}</strong>
         </div>
@@ -503,13 +646,13 @@ function CartContent({
               id="fullName"
               value={customer.fullName}
               onChange={(event) => onCustomerChange("fullName", event.target.value)}
-              placeholder="Quién recibe el pedido"
+              placeholder="Quien recibe el pedido"
               required
             />
           </div>
 
           <div className="field">
-            <label htmlFor="phone">Teléfono</label>
+            <label htmlFor="phone">Telefono</label>
             <input
               id="phone"
               value={customer.phone}
@@ -531,7 +674,7 @@ function CartContent({
           </div>
 
           <div className="field span-2">
-            <label htmlFor="address">Dirección</label>
+            <label htmlFor="address">Direccion</label>
             <input
               id="address"
               value={customer.address}
@@ -563,7 +706,7 @@ function CartContent({
           </div>
 
           <div className="field">
-            <label htmlFor="postalCode">Código postal</label>
+            <label htmlFor="postalCode">Codigo postal</label>
             <input
               id="postalCode"
               value={customer.postalCode}
@@ -594,7 +737,7 @@ function CartContent({
               }
             >
               <option>Retiro en local</option>
-              <option>Envío a domicilio</option>
+              <option>Envio a domicilio</option>
               <option>Coordinar por WhatsApp</option>
             </select>
           </div>
@@ -622,14 +765,14 @@ function CartContent({
               rows={4}
               value={customer.notes}
               onChange={(event) => onCustomerChange("notes", event.target.value)}
-              placeholder="Horario de entrega, talle, color o cualquier observación"
+              placeholder="Horario de entrega, talle, color o cualquier observacion"
             />
           </div>
         </div>
 
         <button
           type="submit"
-          className="checkout-button"
+          className="submit-order-button"
           disabled={submitting || cart.length === 0}
         >
           {submitting ? "Grabando pedido..." : "Confirmar pedido"}
@@ -638,4 +781,3 @@ function CartContent({
     </>
   );
 }
-  onCheckoutSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>;
