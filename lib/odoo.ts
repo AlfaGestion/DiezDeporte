@@ -136,11 +136,6 @@ function parseHeroImage(html: string, baseUrl: string) {
 }
 
 function parsePromoTiles(html: string, baseUrl: string) {
-  const definitions = [
-    { label: "Ninez", filterValue: "ninez" },
-    { label: "Mujeres", filterValue: "mujeres" },
-    { label: "Hombres", filterValue: "hombres" },
-  ];
   const tiles: PromoTile[] = [];
   const regex =
     /<a href="([^"]+)"[^>]*><img src="([^"]+Mesa%20de%20trabajo[^"]+)" alt="([^"]*)"/gi;
@@ -149,12 +144,10 @@ function parsePromoTiles(html: string, baseUrl: string) {
     if (index > 5) break;
 
     const [, href, src, alt] = match;
-    const definition = definitions[index] || {
-      label: `Destacado ${index + 1}`,
-      filterValue: "all",
-    };
+    const absoluteHref = absoluteUrl(baseUrl, href);
+    const definition = getPromoMetadata(absoluteHref, index);
     tiles.push({
-      href: absoluteUrl(baseUrl, href),
+      href: absoluteHref,
       src: absoluteUrl(baseUrl, src),
       alt: decodeHtml(alt) || definition.label,
       label: definition.label,
@@ -191,6 +184,33 @@ function getBrandMetadata(decodedSrc: string) {
   }
 
   return null;
+}
+
+function getPromoMetadata(href: string, index: number) {
+  if (/attribute_values=13-102/i.test(href)) {
+    return { label: "Ninez", filterValue: "ninez" };
+  }
+
+  if (/attribute_values=13-99/i.test(href)) {
+    return { label: "Mujeres", filterValue: "mujeres" };
+  }
+
+  if (/attribute_values=13-98/i.test(href)) {
+    return { label: "Hombres", filterValue: "hombres" };
+  }
+
+  const fallbacks = [
+    { label: "Ninez", filterValue: "ninez" },
+    { label: "Mujeres", filterValue: "mujeres" },
+    { label: "Hombres", filterValue: "hombres" },
+  ];
+
+  return (
+    fallbacks[index] || {
+      label: `Destacado ${index + 1}`,
+      filterValue: "all",
+    }
+  );
 }
 
 async function fetchHtml(url: string) {

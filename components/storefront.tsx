@@ -118,7 +118,7 @@ export function Storefront({
   const prices = initialProducts.map((product) => product.price);
   const minPrice = prices.length > 0 ? Math.min(...prices) : 0;
   const maxPrice = prices.length > 0 ? Math.max(...prices) : 0;
-  const normalizedBrandImages = brandImages.map((brand, index) => {
+  const normalizedBrandImages = brandImages.slice(0, 6).map((brand, index) => {
     const label = brand.label || ["Puma", "Reebok", "Topper", "Salomon", "Montagne", "Merrell"][index] || brand.alt;
     return {
       ...brand,
@@ -209,13 +209,15 @@ export function Storefront({
 
   const normalizedPromoTiles =
     promoTiles.length > 0
-      ? promoTiles.slice(0, 3).map((tile, index) => ({
+      ? promoTiles.slice(0, 3).map((tile, index) => {
+          const promoDefinition = getPromoDefinition(tile.href, index);
+
+          return {
           ...tile,
-          label: tile.label || ["Ninez", "Mujeres", "Hombres"][index] || "Destacado",
-          filterValue:
-            tile.filterValue ||
-            (["ninez", "mujeres", "hombres"][index] || "all"),
-        }))
+          label: promoDefinition.label,
+          filterValue: promoDefinition.filterValue,
+        };
+        })
       : [];
 
   const featuredTiles =
@@ -1152,6 +1154,33 @@ function resolveWhatsappHref(rawValue: string) {
 function buildMapEmbedUrl(address: string) {
   const encodedAddress = encodeURIComponent(address.trim());
   return `https://maps.google.com/maps?q=${encodedAddress}&t=m&z=18&ie=UTF8&iwloc=&output=embed`;
+}
+
+function getPromoDefinition(href: string, index: number) {
+  if (/attribute_values=13-102/i.test(href)) {
+    return { label: "Ninez", filterValue: "ninez" as AudienceFilter };
+  }
+
+  if (/attribute_values=13-99/i.test(href)) {
+    return { label: "Mujeres", filterValue: "mujeres" as AudienceFilter };
+  }
+
+  if (/attribute_values=13-98/i.test(href)) {
+    return { label: "Hombres", filterValue: "hombres" as AudienceFilter };
+  }
+
+  const fallbacks = [
+    { label: "Ninez", filterValue: "ninez" as AudienceFilter },
+    { label: "Mujeres", filterValue: "mujeres" as AudienceFilter },
+    { label: "Hombres", filterValue: "hombres" as AudienceFilter },
+  ];
+
+  return (
+    fallbacks[index] || {
+      label: "Destacado",
+      filterValue: "all" as AudienceFilter,
+    }
+  );
 }
 
 function normalizeFilterValue(value: string) {
