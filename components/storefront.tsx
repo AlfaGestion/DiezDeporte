@@ -385,7 +385,7 @@ export function Storefront({
 
             <div className="hero-actions">
               <a className="hero-primary" href="#catalogo">
-                Ver productos
+                Explorar catalogo
               </a>
               {whatsappHref ? (
                 <a

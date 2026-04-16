@@ -395,15 +395,26 @@ svg {
   transition:
     transform 160ms ease,
     background-color 160ms ease,
-    opacity 160ms ease;
+    opacity 160ms ease,
+    box-shadow 160ms ease,
+    border-color 160ms ease;
 }
 
-.hero-primary,
 .catalog-card-button,
 .submit-order-button,
 .mobile-cart-button {
   background: var(--primary);
   color: var(--surface);
+}
+
+.hero-primary {
+  padding: 12px 20px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(11, 16, 24, 0.34);
+  color: white;
+  backdrop-filter: blur(8px);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
 }
 
 .hero-secondary {
@@ -427,6 +438,13 @@ svg {
   transform: translateY(-1px);
 }
 
+.hero-primary:hover {
+  border-color: rgba(255, 255, 255, 0.34);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 10px 20px rgba(7, 11, 18, 0.2);
+}
+
 .catalog-card-button:disabled,
 .submit-order-button:disabled {
   opacity: 0.55;
@@ -435,29 +453,48 @@ svg {
 }
 
 .hero-metrics {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
   margin-top: 28px;
+  max-width: 540px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(19, 25, 36, 0.52), rgba(19, 25, 36, 0.36));
+  box-shadow: 0 18px 34px rgba(7, 11, 18, 0.2);
+  backdrop-filter: blur(14px);
 }
 
 .hero-stat-inline {
-  min-width: 140px;
-  padding: 14px 16px;
-  border-radius: 18px;
-  background: var(--hero-stat-bg);
-  backdrop-filter: blur(8px);
+  position: relative;
+  min-width: 0;
+  padding: 18px 16px 16px;
+  background: transparent;
+}
+
+.hero-stat-inline:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 16px;
+  right: 0;
+  bottom: 16px;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .hero-stat-inline strong {
   display: block;
-  font-size: 1.4rem;
+  margin-bottom: 4px;
+  font-size: 1.05rem;
   font-family: var(--display-font);
 }
 
 .hero-stat-inline span {
   color: var(--hero-stat-text);
-  font-size: 0.88rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .brand-strip {
