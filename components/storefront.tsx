@@ -153,6 +153,7 @@ export function Storefront({
         backgroundImage: `linear-gradient(90deg, rgba(6, 10, 18, 0.72), rgba(6, 10, 18, 0.2)), url("${resolvedHeroImageUrl}")`,
       }
     : undefined;
+  const mapEmbedUrl = buildMapEmbedUrl(settings.storeAddress);
 
   const featuredTiles =
     promoTiles.length > 0
@@ -417,26 +418,6 @@ export function Storefront({
           </section>
         ) : null}
 
-        <section className="support-band" id="sobre-nosotros">
-          <div>
-            <span className="section-kicker">Atencion personalizada</span>
-            <h2>Comprometidos con tu satisfaccion</h2>
-            <p>{settings.supportBlurb}</p>
-          </div>
-
-          <div className="support-band-actions">
-            <a href={`tel:${settings.supportPhone.replace(/\s+/g, "")}`}>
-              {settings.supportPhone}
-            </a>
-            <a href={`mailto:${settings.supportEmail}`}>{settings.supportEmail}</a>
-            {whatsappHref ? (
-              <a href={whatsappHref} target="_blank" rel="noreferrer">
-                WhatsApp
-              </a>
-            ) : null}
-          </div>
-        </section>
-
         <div className="shop-layout" id="catalogo">
           <aside className="filters-panel">
             <div className="panel-block">
@@ -623,41 +604,80 @@ export function Storefront({
           </aside>
         </div>
 
-        <footer className="site-footer" id="contacto">
-          <div className="site-footer-copy">
-            <a className="site-logo footer-logo" href="#top" aria-label={settings.storeName}>
-              <span>Diez</span>
-              <span>Deportes</span>
-            </a>
-            <p>{settings.storeAddress}</p>
-          </div>
+        <section className="contact-zone" id="sobre-nosotros">
+          <section className="support-band" id="contacto">
+            <div>
+              <span className="section-kicker">Atencion personalizada</span>
+              <h2>Comprometidos con tu satisfaccion</h2>
+              <p>{settings.supportBlurb}</p>
+            </div>
 
-          <div className="site-footer-links">
-            <a href={`tel:${settings.supportPhone.replace(/\s+/g, "")}`}>
-              {settings.supportPhone}
-            </a>
-            <a href={`mailto:${settings.supportEmail}`}>{settings.supportEmail}</a>
-            {whatsappHref ? (
-              <a href={whatsappHref} target="_blank" rel="noreferrer">
-                WhatsApp
+            <div className="support-band-actions">
+              <a href={`tel:${settings.supportPhone.replace(/\s+/g, "")}`}>
+                {settings.supportPhone}
               </a>
-            ) : null}
-          </div>
+              <a href={`mailto:${settings.supportEmail}`}>{settings.supportEmail}</a>
+              {whatsappHref ? (
+                <a href={whatsappHref} target="_blank" rel="noreferrer">
+                  WhatsApp
+                </a>
+              ) : null}
+            </div>
+          </section>
 
-          <div className="site-socials footer-socials" aria-label="Redes">
-            <a href={ODOO_FACEBOOK_URL} target="_blank" rel="noreferrer" aria-label="Facebook">
-              <IconFacebook />
-            </a>
-            <a
-              href={ODOO_INSTAGRAM_URL}
-              target="_blank"
-              rel="noreferrer"
-              aria-label="Instagram"
-            >
-              <IconInstagram />
-            </a>
-          </div>
-        </footer>
+          <section className="map-section" aria-label="Ubicacion del local">
+            <div className="map-copy">
+              <span className="section-kicker">Donde estamos</span>
+              <h2>Visitanos en el local</h2>
+              <p>{settings.storeAddress}</p>
+            </div>
+
+            <div className="map-frame">
+              <iframe
+                src={mapEmbedUrl}
+                title="Mapa del local"
+                loading="lazy"
+                referrerPolicy="no-referrer-when-downgrade"
+              />
+            </div>
+          </section>
+
+          <footer className="site-footer">
+            <div className="site-footer-copy">
+              <a className="site-logo footer-logo" href="#top" aria-label={settings.storeName}>
+                <span>Diez</span>
+                <span>Deportes</span>
+              </a>
+              <p>{settings.storeAddress}</p>
+            </div>
+
+            <div className="site-footer-links">
+              <a href={`tel:${settings.supportPhone.replace(/\s+/g, "")}`}>
+                {settings.supportPhone}
+              </a>
+              <a href={`mailto:${settings.supportEmail}`}>{settings.supportEmail}</a>
+              {whatsappHref ? (
+                <a href={whatsappHref} target="_blank" rel="noreferrer">
+                  WhatsApp
+                </a>
+              ) : null}
+            </div>
+
+            <div className="site-socials footer-socials" aria-label="Redes">
+              <a href={ODOO_FACEBOOK_URL} target="_blank" rel="noreferrer" aria-label="Facebook">
+                <IconFacebook />
+              </a>
+              <a
+                href={ODOO_INSTAGRAM_URL}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Instagram"
+              >
+                <IconInstagram />
+              </a>
+            </div>
+          </footer>
+        </section>
       </main>
 
       {mobileCartOpen ? (
@@ -962,6 +982,11 @@ function resolveWhatsappHref(rawValue: string) {
   if (!digits) return "";
 
   return `https://wa.me/${digits}`;
+}
+
+function buildMapEmbedUrl(address: string) {
+  const encodedAddress = encodeURIComponent(address.trim());
+  return `https://maps.google.com/maps?q=${encodedAddress}&t=m&z=18&ie=UTF8&iwloc=&output=embed`;
 }
 
 function IconCart() {
