@@ -230,12 +230,12 @@ export function Storefront({
             src: product.imageUrl || "",
             href: "#catalogo",
             alt: product.description,
-            label: ["Ninez", "Mujeres", "Hombres"][index] || "Destacado",
+            label: ["Kids", "Mujeres", "Hombres"][index] || "Destacado",
             filterValue: (["ninez", "mujeres", "hombres"][index] || "all") as AudienceFilter,
           }));
   const audienceOptions: Array<{ value: AudienceFilter; label: string }> = [
     { value: "all", label: "Todo" },
-    { value: "ninez", label: "Ninez" },
+    { value: "ninez", label: "Kids" },
     { value: "mujeres", label: "Mujeres" },
     { value: "hombres", label: "Hombres" },
   ];
@@ -1158,7 +1158,7 @@ function buildMapEmbedUrl(address: string) {
 
 function getPromoDefinition(href: string, index: number) {
   if (/attribute_values=13-102/i.test(href)) {
-    return { label: "Ninez", filterValue: "ninez" as AudienceFilter };
+    return { label: "Kids", filterValue: "ninez" as AudienceFilter };
   }
 
   if (/attribute_values=13-99/i.test(href)) {
@@ -1170,7 +1170,7 @@ function getPromoDefinition(href: string, index: number) {
   }
 
   const fallbacks = [
-    { label: "Ninez", filterValue: "ninez" as AudienceFilter },
+    { label: "Kids", filterValue: "ninez" as AudienceFilter },
     { label: "Mujeres", filterValue: "mujeres" as AudienceFilter },
     { label: "Hombres", filterValue: "hombres" as AudienceFilter },
   ];

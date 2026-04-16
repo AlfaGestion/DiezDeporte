@@ -188,7 +188,7 @@ function getBrandMetadata(decodedSrc: string) {
 
 function getPromoMetadata(href: string, index: number) {
   if (/attribute_values=13-102/i.test(href)) {
-    return { label: "Ninez", filterValue: "ninez" };
+    return { label: "Kids", filterValue: "ninez" };
   }
 
   if (/attribute_values=13-99/i.test(href)) {
@@ -200,7 +200,7 @@ function getPromoMetadata(href: string, index: number) {
   }
 
   const fallbacks = [
-    { label: "Ninez", filterValue: "ninez" },
+    { label: "Kids", filterValue: "ninez" },
     { label: "Mujeres", filterValue: "mujeres" },
     { label: "Hombres", filterValue: "hombres" },
   ];
