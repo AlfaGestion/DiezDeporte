@@ -523,6 +523,9 @@ export function Storefront({
                 >
                   <div className="promo-tile-media">
                     <img src={tile.src} alt={tile.alt} loading="lazy" />
+                    <div className="promo-tile-media-label" aria-hidden="true">
+                      <span>{tile.label}</span>
+                    </div>
                   </div>
                   <div className="promo-tile-copy">
                     <strong>{tile.label}</strong>
