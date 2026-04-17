@@ -23,8 +23,10 @@ import type {
 const LOCAL_STORAGE_CART_KEY = "diezdeportes-cart";
 const LOCAL_STORAGE_THEME_KEY = "diezdeportes-theme";
 const LOCAL_STORAGE_WEB_IMAGE_KEY = "diezdeportes-web-images";
-const ODOO_FACEBOOK_URL = "https://diezdeportes.odoo.com/website/social/facebook";
-const ODOO_INSTAGRAM_URL = "https://diezdeportes.odoo.com/website/social/instagram";
+const ODOO_FACEBOOK_URL =
+  "https://diezdeportes.odoo.com/website/social/facebook";
+const ODOO_INSTAGRAM_URL =
+  "https://diezdeportes.odoo.com/website/social/instagram";
 
 const emptyCustomer: CheckoutCustomer = {
   fullName: "",
@@ -44,6 +46,7 @@ type SortOption = "featured" | "name-asc" | "price-asc" | "price-desc";
 type StockOption = "all" | "available" | "low" | "empty";
 type ThemeMode = "light" | "dark";
 type AudienceFilter = "all" | "ninez" | "mujeres" | "hombres";
+type CheckoutStep = "cart" | "details";
 
 type StorefrontProps = {
   initialProducts: Product[];
@@ -73,7 +76,8 @@ export function Storefront({
   const [sortBy, setSortBy] = useState<SortOption>("featured");
   const [stockFilter, setStockFilter] = useState<StockOption>("all");
   const [selectedFamily, setSelectedFamily] = useState("all");
-  const [selectedAudience, setSelectedAudience] = useState<AudienceFilter>("all");
+  const [selectedAudience, setSelectedAudience] =
+    useState<AudienceFilter>("all");
   const [selectedBrand, setSelectedBrand] = useState("all");
   const [cart, setCart] = useState<CartItem[]>([]);
   const [customer, setCustomer] = useState<CheckoutCustomer>(emptyCustomer);
@@ -81,6 +85,7 @@ export function Storefront({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [order, setOrder] = useState<OrderSummary | null>(null);
   const [mobileCartOpen, setMobileCartOpen] = useState(false);
+  const [checkoutStep, setCheckoutStep] = useState<CheckoutStep>("cart");
   const [theme, setTheme] = useState<ThemeMode>("light");
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [webImageOverrides, setWebImageOverrides] = useState<
@@ -104,11 +109,15 @@ export function Storefront({
   }, [cart]);
 
   useEffect(() => {
-    const savedOverrides = window.localStorage.getItem(LOCAL_STORAGE_WEB_IMAGE_KEY);
+    const savedOverrides = window.localStorage.getItem(
+      LOCAL_STORAGE_WEB_IMAGE_KEY,
+    );
     if (!savedOverrides) return;
 
     try {
-      setWebImageOverrides(JSON.parse(savedOverrides) as Record<string, WebImageOverride | null>);
+      setWebImageOverrides(
+        JSON.parse(savedOverrides) as Record<string, WebImageOverride | null>,
+      );
     } catch {
       window.localStorage.removeItem(LOCAL_STORAGE_WEB_IMAGE_KEY);
     }
@@ -140,6 +149,12 @@ export function Storefront({
   }, [theme]);
 
   useEffect(() => {
+    if (cart.length === 0 && !order) {
+      setCheckoutStep("cart");
+    }
+  }, [cart.length, order]);
+
+  useEffect(() => {
     const shouldLockUi = mobileCartOpen || Boolean(selectedProduct);
     if (!shouldLockUi) return;
 
@@ -169,9 +184,7 @@ export function Storefront({
 
   const families = Array.from(
     new Set(
-      initialProducts
-        .map((product) => product.familyId.trim())
-        .filter(Boolean),
+      initialProducts.map((product) => product.familyId.trim()).filter(Boolean),
     ),
   ).sort((left, right) => left.localeCompare(right));
 
@@ -179,14 +192,19 @@ export function Storefront({
   const minPrice = prices.length > 0 ? Math.min(...prices) : 0;
   const maxPrice = prices.length > 0 ? Math.max(...prices) : 0;
   const normalizedBrandImages = brandImages.slice(0, 6).map((brand, index) => {
-    const label = brand.label || ["Puma", "Reebok", "Topper", "Salomon", "Montagne", "Merrell"][index] || brand.alt;
+    const label =
+      brand.label ||
+      ["Puma", "Reebok", "Topper", "Salomon", "Montagne", "Merrell"][index] ||
+      brand.alt;
     return {
       ...brand,
       label,
       aliases: brand.aliases?.length ? brand.aliases : [label.toUpperCase()],
     };
   });
-  const brandOptions = normalizedBrandImages.filter((brand) => Boolean(brand.label));
+  const brandOptions = normalizedBrandImages.filter((brand) =>
+    Boolean(brand.label),
+  );
   const activeBrand =
     selectedBrand === "all"
       ? null
@@ -199,13 +217,18 @@ export function Storefront({
       const normalizedSearch = search.trim().toLowerCase();
       const matchesSearch =
         normalizedSearch === "" ||
-        normalizedDescription.includes(normalizeFilterValue(normalizedSearch)) ||
+        normalizedDescription.includes(
+          normalizeFilterValue(normalizedSearch),
+        ) ||
         normalizedCode.includes(normalizeFilterValue(normalizedSearch));
 
       const matchesFamily =
         selectedFamily === "all" || product.familyId.trim() === selectedFamily;
 
-      const matchesAudience = matchesAudienceFilter(normalizedDescription, selectedAudience);
+      const matchesAudience = matchesAudienceFilter(
+        normalizedDescription,
+        selectedAudience,
+      );
       const matchesBrand = matchesBrandFilter(
         normalizedDescription,
         normalizedCode,
@@ -253,8 +276,14 @@ export function Storefront({
       );
     });
 
-  const subtotal = cart.reduce((sum, item) => sum + item.netPrice * item.quantity, 0);
-  const taxTotal = cart.reduce((sum, item) => sum + item.taxAmount * item.quantity, 0);
+  const subtotal = cart.reduce(
+    (sum, item) => sum + item.netPrice * item.quantity,
+    0,
+  );
+  const taxTotal = cart.reduce(
+    (sum, item) => sum + item.taxAmount * item.quantity,
+    0,
+  );
   const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const itemCount = cartItemCount(cart);
 
@@ -293,7 +322,8 @@ export function Storefront({
             href: "#catalogo",
             alt: product.description,
             label: ["Kids", "Mujeres", "Hombres"][index] || "Destacado",
-            filterValue: (["ninez", "mujeres", "hombres"][index] || "all") as AudienceFilter,
+            filterValue: (["ninez", "mujeres", "hombres"][index] ||
+              "all") as AudienceFilter,
           }));
   const audienceOptions: Array<{ value: AudienceFilter; label: string }> = [
     { value: "all", label: "Todo" },
@@ -302,9 +332,12 @@ export function Storefront({
     { value: "hombres", label: "Hombres" },
   ];
   const activeAudienceLabel =
-    audienceOptions.find((option) => option.value === selectedAudience)?.label || "Todo";
+    audienceOptions.find((option) => option.value === selectedAudience)
+      ?.label || "Todo";
   const resolvedFilteredProducts = filteredProducts.map(resolveProductImage);
-  const resolvedSelectedProduct = selectedProduct ? resolveProductImage(selectedProduct) : null;
+  const resolvedSelectedProduct = selectedProduct
+    ? resolveProductImage(selectedProduct)
+    : null;
   const selectedProductCartItem = resolvedSelectedProduct
     ? cart.find((item) => item.id === resolvedSelectedProduct.id) || null
     : null;
@@ -314,7 +347,10 @@ export function Storefront({
       .filter(shouldAttemptWebImageSearch)
       .slice(0, 12);
 
-    if (resolvedSelectedProduct && shouldAttemptWebImageSearch(resolvedSelectedProduct)) {
+    if (
+      resolvedSelectedProduct &&
+      shouldAttemptWebImageSearch(resolvedSelectedProduct)
+    ) {
       candidates.unshift(resolvedSelectedProduct);
     }
 
@@ -344,7 +380,8 @@ export function Storefront({
 
   async function fetchWebImageForProduct(product: Product) {
     if (!shouldAttemptWebImageSearch(product)) return;
-    if (Object.prototype.hasOwnProperty.call(webImageOverrides, product.id)) return;
+    if (Object.prototype.hasOwnProperty.call(webImageOverrides, product.id))
+      return;
     if (pendingWebImageSearchesRef.current.has(product.id)) return;
 
     pendingWebImageSearchesRef.current.add(product.id);
@@ -383,14 +420,16 @@ export function Storefront({
 
     return Boolean(
       product.imageUrl &&
-        /https?:\/\/diezdeportes\.odoo\.com\/web\/image\/product\.template\//i.test(
-          product.imageUrl,
-        ),
+      /https?:\/\/diezdeportes\.odoo\.com\/web\/image\/product\.template\//i.test(
+        product.imageUrl,
+      ),
     );
   }
 
   function applyAudienceFilter(nextAudience: AudienceFilter) {
-    setSelectedAudience((current) => (current === nextAudience ? "all" : nextAudience));
+    setSelectedAudience((current) =>
+      current === nextAudience ? "all" : nextAudience,
+    );
     setSelectedFamily("all");
     scrollToCatalog();
   }
@@ -446,12 +485,14 @@ export function Storefront({
   function openCartFromDetail() {
     setSelectedProduct(null);
     requestAnimationFrame(() => {
-      openCartPanel();
+      openCartPanel("cart");
     });
   }
 
   function removeFromCart(productId: string) {
-    setCart((currentCart) => currentCart.filter((item) => item.id !== productId));
+    setCart((currentCart) =>
+      currentCart.filter((item) => item.id !== productId),
+    );
   }
 
   function updateItemQuantity(productId: string, nextQuantity: number) {
@@ -480,16 +521,9 @@ export function Storefront({
     setCustomer((current) => ({ ...current, [field]: value }));
   }
 
-  function openCartPanel() {
-    if (window.innerWidth <= 1180) {
-      setMobileCartOpen(true);
-      return;
-    }
-
-    document.getElementById("pedido")?.scrollIntoView({
-      behavior: "smooth",
-      block: "start",
-    });
+  function openCartPanel(step: CheckoutStep = "cart") {
+    setCheckoutStep(step);
+    setMobileCartOpen(true);
   }
 
   function scrollToCatalog() {
@@ -511,7 +545,12 @@ export function Storefront({
       return;
     }
 
-    if (!customer.fullName || !customer.phone || !customer.address || !customer.city) {
+    if (
+      !customer.fullName ||
+      !customer.phone ||
+      !customer.address ||
+      !customer.city
+    ) {
       setErrorMessage(
         "Completa nombre, telefono, direccion y localidad para grabar el pedido.",
       );
@@ -550,7 +589,8 @@ export function Storefront({
       setCart([]);
       setCustomer(emptyCustomer);
       window.localStorage.removeItem(LOCAL_STORAGE_CART_KEY);
-      setMobileCartOpen(false);
+      setCheckoutStep("details");
+      setMobileCartOpen(true);
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : "No se pudo grabar el pedido.",
@@ -560,9 +600,9 @@ export function Storefront({
     }
   }
 
-  const desktopCartClassName = mobileCartOpen
-    ? "order-panel mobile-sheet"
-    : "order-panel mobile-hidden";
+  const checkoutSheetClassName = mobileCartOpen
+    ? "order-panel checkout-sheet-open"
+    : "order-panel checkout-sheet-hidden";
 
   return (
     <>
@@ -593,7 +633,7 @@ export function Storefront({
             <button
               type="button"
               className="site-cart-pill"
-              onClick={openCartPanel}
+              onClick={() => openCartPanel("cart")}
               aria-label="Abrir pedido"
             >
               <span className="site-cart-count">{itemCount}</span>
@@ -601,7 +641,12 @@ export function Storefront({
             </button>
 
             <div className="site-socials" aria-label="Redes">
-              <a href={ODOO_FACEBOOK_URL} target="_blank" rel="noreferrer" aria-label="Facebook">
+              <a
+                href={ODOO_FACEBOOK_URL}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Facebook"
+              >
                 <IconFacebook />
               </a>
               <a
@@ -674,14 +719,21 @@ export function Storefront({
                 aria-label={`Filtrar por ${image.label}`}
                 title={`Filtrar por ${image.label}`}
               >
-                <img src={buildImageProxyUrl(image.src) || image.src} alt={image.alt} loading="lazy" />
+                <img
+                  src={buildImageProxyUrl(image.src) || image.src}
+                  alt={image.alt}
+                  loading="lazy"
+                />
               </button>
             ))}
           </section>
         ) : null}
 
         {featuredTiles.length > 0 ? (
-          <section className="promo-section" aria-label="Colecciones destacadas">
+          <section
+            className="promo-section"
+            aria-label="Colecciones destacadas"
+          >
             <div className="section-heading">
               <span className="section-kicker">Colecciones</span>
               <h2>Bloques destacados</h2>
@@ -693,7 +745,9 @@ export function Storefront({
                   type="button"
                   className={`promo-tile ${selectedAudience === tile.filterValue ? "active" : ""}`}
                   key={`${tile.src}-${tile.label}`}
-                  onClick={() => applyAudienceFilter(tile.filterValue as AudienceFilter)}
+                  onClick={() =>
+                    applyAudienceFilter(tile.filterValue as AudienceFilter)
+                  }
                 >
                   <div className="promo-tile-media">
                     <img
@@ -826,7 +880,8 @@ export function Storefront({
             <div className="panel-block">
               <h3>Rango de precio</h3>
               <p className="panel-note">
-                Desde {formatCurrency(minPrice)} hasta {formatCurrency(maxPrice)}
+                Desde {formatCurrency(minPrice)} hasta{" "}
+                {formatCurrency(maxPrice)}
               </p>
             </div>
           </aside>
@@ -844,7 +899,9 @@ export function Storefront({
                 <p>
                   {resolvedFilteredProducts.length} resultados
                   {selectedBrand !== "all" ? ` · Marca ${selectedBrand}` : ""}
-                  {selectedAudience !== "all" ? ` · ${activeAudienceLabel}` : ""}
+                  {selectedAudience !== "all"
+                    ? ` · ${activeAudienceLabel}`
+                    : ""}
                 </p>
               </div>
 
@@ -852,7 +909,9 @@ export function Storefront({
                 <span>Ordenar por</span>
                 <select
                   value={sortBy}
-                  onChange={(event) => setSortBy(event.target.value as SortOption)}
+                  onChange={(event) =>
+                    setSortBy(event.target.value as SortOption)
+                  }
                 >
                   <option value="featured">Destacado</option>
                   <option value="name-asc">Nombre (A-Z)</option>
@@ -866,7 +925,8 @@ export function Storefront({
               <div className="message error">
                 {loadError}
                 <div className="message-detail">
-                  Revisa la configuracion de `.env` y la conectividad a SQL Server.
+                  Revisa la configuracion de `.env` y la conectividad a SQL
+                  Server.
                 </div>
               </div>
             ) : null}
@@ -880,14 +940,17 @@ export function Storefront({
             <div className="catalog-grid">
               {resolvedFilteredProducts.map((product) => {
                 const outOfStock = product.stock <= 0;
-                const disableAddButton = outOfStock && !settings.allowBackorders;
+                const disableAddButton =
+                  outOfStock && !settings.allowBackorders;
 
                 return (
                   <article
                     className="catalog-card"
                     key={product.id}
                     onClick={() => openProductDetail(product)}
-                    onKeyDown={(event) => handleProductCardKeyDown(event, product)}
+                    onKeyDown={(event) =>
+                      handleProductCardKeyDown(event, product)
+                    }
                     role="button"
                     tabIndex={0}
                     aria-label={`Ver detalle de ${product.description}`}
@@ -895,7 +958,10 @@ export function Storefront({
                     <div className="catalog-card-media">
                       {product.imageUrl ? (
                         <img
-                          src={buildImageProxyUrl(product.imageUrl) || product.imageUrl}
+                          src={
+                            buildImageProxyUrl(product.imageUrl) ||
+                            product.imageUrl
+                          }
                           alt={product.description}
                           loading="lazy"
                         />
@@ -909,7 +975,9 @@ export function Storefront({
                     <div className="catalog-card-body">
                       <div className="catalog-card-tags">
                         <span className="catalog-tag">Cod. {product.code}</span>
-                        <span className={`catalog-tag ${getStockBadgeClass(product.stock)}`}>
+                        <span
+                          className={`catalog-tag ${getStockBadgeClass(product.stock)}`}
+                        >
                           Stock {product.stock.toFixed(0)}
                         </span>
                         {product.imageMode === "illustrative" ? (
@@ -925,11 +993,16 @@ export function Storefront({
                         {product.presentation || product.unitId || "Unidad"}
                       </p>
 
-                      {product.imageMode === "illustrative" && product.imageNote ? (
-                        <p className="catalog-card-image-note">{product.imageNote}</p>
+                      {product.imageMode === "illustrative" &&
+                      product.imageNote ? (
+                        <p className="catalog-card-image-note">
+                          {product.imageNote}
+                        </p>
                       ) : null}
 
-                      <div className="catalog-card-price">{formatCurrency(product.price)}</div>
+                      <div className="catalog-card-price">
+                        {formatCurrency(product.price)}
+                      </div>
                       <p className="catalog-card-tax">Precio s/Imp. Nac.</p>
 
                       <button
@@ -943,31 +1016,15 @@ export function Storefront({
                       >
                         {disableAddButton ? "Sin stock" : "Anadir al carrito"}
                       </button>
-                      <span className="catalog-card-detail-link">Ver detalle</span>
+                      <span className="catalog-card-detail-link">
+                        Ver detalle
+                      </span>
                     </div>
                   </article>
                 );
               })}
             </div>
           </section>
-
-          <aside className="order-panel desktop-only" id="pedido">
-            <CartContent
-              cart={cart}
-              customer={customer}
-              errorMessage={errorMessage}
-              itemCount={itemCount}
-              onCheckoutSubmit={handleCheckoutSubmit}
-              onCustomerChange={updateCustomerField}
-              onItemQuantityChange={updateItemQuantity}
-              onItemRemove={removeFromCart}
-              order={order}
-              submitting={submitting}
-              subtotal={subtotal}
-              taxTotal={taxTotal}
-              total={total}
-            />
-          </aside>
         </div>
 
         <section className="contact-zone" id="sobre-nosotros">
@@ -982,7 +1039,9 @@ export function Storefront({
               <a href={`tel:${settings.supportPhone.replace(/\s+/g, "")}`}>
                 {settings.supportPhone}
               </a>
-              <a href={`mailto:${settings.supportEmail}`}>{settings.supportEmail}</a>
+              <a href={`mailto:${settings.supportEmail}`}>
+                {settings.supportEmail}
+              </a>
               {whatsappHref ? (
                 <a href={whatsappHref} target="_blank" rel="noreferrer">
                   WhatsApp
@@ -1010,7 +1069,11 @@ export function Storefront({
 
           <footer className="site-footer">
             <div className="site-footer-copy">
-              <a className="site-logo footer-logo" href="#top" aria-label={settings.storeName}>
+              <a
+                className="site-logo footer-logo"
+                href="#top"
+                aria-label={settings.storeName}
+              >
                 <span>Diez</span>
                 <span>Deportes</span>
               </a>
@@ -1021,7 +1084,9 @@ export function Storefront({
               <a href={`tel:${settings.supportPhone.replace(/\s+/g, "")}`}>
                 {settings.supportPhone}
               </a>
-              <a href={`mailto:${settings.supportEmail}`}>{settings.supportEmail}</a>
+              <a href={`mailto:${settings.supportEmail}`}>
+                {settings.supportEmail}
+              </a>
               {whatsappHref ? (
                 <a href={whatsappHref} target="_blank" rel="noreferrer">
                   WhatsApp
@@ -1030,7 +1095,12 @@ export function Storefront({
             </div>
 
             <div className="site-socials footer-socials" aria-label="Redes">
-              <a href={ODOO_FACEBOOK_URL} target="_blank" rel="noreferrer" aria-label="Facebook">
+              <a
+                href={ODOO_FACEBOOK_URL}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Facebook"
+              >
                 <IconFacebook />
               </a>
               <a
@@ -1048,7 +1118,10 @@ export function Storefront({
 
       {resolvedSelectedProduct ? (
         <>
-          <div className="mobile-backdrop product-detail-backdrop" onClick={closeProductDetail} />
+          <div
+            className="mobile-backdrop product-detail-backdrop"
+            onClick={closeProductDetail}
+          />
           <section
             className="product-detail-modal"
             role="dialog"
@@ -1061,7 +1134,7 @@ export function Storefront({
               onClick={closeProductDetail}
               aria-label="Cerrar detalle del producto"
             >
-              ×
+              Cerrar
             </button>
 
             <div className="product-detail-grid">
@@ -1085,14 +1158,20 @@ export function Storefront({
               <div className="product-detail-copy">
                 <div className="product-detail-heading">
                   <span className="section-kicker">Detalle del producto</span>
-                  <h2 id="product-detail-title">{resolvedSelectedProduct.description}</h2>
+                  <h2 id="product-detail-title">
+                    {resolvedSelectedProduct.description}
+                  </h2>
                   <p className="product-detail-subtitle">
-                    {resolvedSelectedProduct.presentation || resolvedSelectedProduct.unitId || "Unidad"}
+                    {resolvedSelectedProduct.presentation ||
+                      resolvedSelectedProduct.unitId ||
+                      "Unidad"}
                   </p>
                 </div>
 
                 <div className="product-detail-tags">
-                  <span className="catalog-tag">Cod. {resolvedSelectedProduct.code}</span>
+                  <span className="catalog-tag">
+                    Cod. {resolvedSelectedProduct.code}
+                  </span>
                   <span
                     className={`catalog-tag ${getStockBadgeClass(resolvedSelectedProduct.stock)}`}
                   >
@@ -1104,7 +1183,9 @@ export function Storefront({
                     </span>
                   ) : null}
                   {resolvedSelectedProduct.barcode ? (
-                    <span className="catalog-tag">EAN {resolvedSelectedProduct.barcode}</span>
+                    <span className="catalog-tag">
+                      EAN {resolvedSelectedProduct.barcode}
+                    </span>
                   ) : null}
                 </div>
 
@@ -1116,11 +1197,15 @@ export function Storefront({
                 <div className="product-detail-specs">
                   <div className="product-detail-spec">
                     <span>Unidad</span>
-                    <strong>{resolvedSelectedProduct.unitId || "Unidad"}</strong>
+                    <strong>
+                      {resolvedSelectedProduct.unitId || "Unidad"}
+                    </strong>
                   </div>
                   <div className="product-detail-spec">
                     <span>Presentacion</span>
-                    <strong>{resolvedSelectedProduct.presentation || "Estandar"}</strong>
+                    <strong>
+                      {resolvedSelectedProduct.presentation || "Estandar"}
+                    </strong>
                   </div>
                   <div className="product-detail-spec">
                     <span>Moneda</span>
@@ -1128,16 +1213,20 @@ export function Storefront({
                   </div>
                   <div className="product-detail-spec">
                     <span>IVA</span>
-                    <strong>{resolvedSelectedProduct.taxRate.toFixed(0)}%</strong>
+                    <strong>
+                      {resolvedSelectedProduct.taxRate.toFixed(0)}%
+                    </strong>
                   </div>
                 </div>
 
                 <p className="product-detail-note">
-                  Si necesitas talle, color o mas informacion sobre este articulo, escribinos por
-                  WhatsApp y te ayudamos con la variante correcta.
+                  Si necesitas talle, color o mas informacion sobre este
+                  articulo, escribinos por WhatsApp y te ayudamos con la
+                  variante correcta.
                 </p>
 
-                {resolvedSelectedProduct.imageMode === "illustrative" && resolvedSelectedProduct.imageNote ? (
+                {resolvedSelectedProduct.imageMode === "illustrative" &&
+                resolvedSelectedProduct.imageNote ? (
                   <div className="product-detail-illustrative">
                     <p>{resolvedSelectedProduct.imageNote}</p>
                     {resolvedSelectedProduct.imageSourceUrl ? (
@@ -1155,7 +1244,8 @@ export function Storefront({
                 {selectedProductCartItem ? (
                   <div className="message success product-detail-message">
                     Ya tienes {selectedProductCartItem.quantity} unidad
-                    {selectedProductCartItem.quantity === 1 ? "" : "es"} en tu pedido.
+                    {selectedProductCartItem.quantity === 1 ? "" : "es"} en tu
+                    pedido.
                   </div>
                 ) : null}
 
@@ -1164,9 +1254,13 @@ export function Storefront({
                     type="button"
                     className="catalog-card-button"
                     onClick={() => addToCart(resolvedSelectedProduct)}
-                    disabled={resolvedSelectedProduct.stock <= 0 && !settings.allowBackorders}
+                    disabled={
+                      resolvedSelectedProduct.stock <= 0 &&
+                      !settings.allowBackorders
+                    }
                   >
-                    {resolvedSelectedProduct.stock <= 0 && !settings.allowBackorders
+                    {resolvedSelectedProduct.stock <= 0 &&
+                    !settings.allowBackorders
                       ? "Sin stock"
                       : "Anadir al carrito"}
                   </button>
@@ -1185,24 +1279,30 @@ export function Storefront({
       ) : null}
 
       {mobileCartOpen ? (
-        <div className="mobile-backdrop" onClick={() => setMobileCartOpen(false)} />
+        <div
+          className="mobile-backdrop"
+          onClick={() => setMobileCartOpen(false)}
+        />
       ) : null}
 
       <button
         type="button"
         className="mobile-cart-button"
-        onClick={() => setMobileCartOpen((current) => !current)}
+        onClick={() => openCartPanel("cart")}
       >
-        Pedido ({itemCount})
+        Carrito ({itemCount})
       </button>
 
-      <aside className={desktopCartClassName}>
+      <aside className={checkoutSheetClassName}>
         <CartContent
           cart={cart}
           customer={customer}
+          checkoutStep={checkoutStep}
           errorMessage={errorMessage}
           itemCount={itemCount}
+          onCheckoutStepChange={setCheckoutStep}
           onCheckoutSubmit={handleCheckoutSubmit}
+          onClose={() => setMobileCartOpen(false)}
           onCustomerChange={updateCustomerField}
           onItemQuantityChange={updateItemQuantity}
           onItemRemove={removeFromCart}
@@ -1220,9 +1320,12 @@ export function Storefront({
 type CartContentProps = {
   cart: CartItem[];
   customer: CheckoutCustomer;
+  checkoutStep: CheckoutStep;
   errorMessage: string | null;
   itemCount: number;
+  onCheckoutStepChange: (step: CheckoutStep) => void;
   onCheckoutSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onClose: () => void;
   onCustomerChange: (field: keyof CheckoutCustomer, value: string) => void;
   onItemQuantityChange: (productId: string, quantity: number) => void;
   onItemRemove: (productId: string) => void;
@@ -1236,9 +1339,12 @@ type CartContentProps = {
 function CartContent({
   cart,
   customer,
+  checkoutStep,
   errorMessage,
   itemCount,
+  onCheckoutStepChange,
   onCheckoutSubmit,
+  onClose,
   onCustomerChange,
   onItemQuantityChange,
   onItemRemove,
@@ -1248,229 +1354,357 @@ function CartContent({
   taxTotal,
   total,
 }: CartContentProps) {
+  const orderCompleted = Boolean(order) && cart.length === 0;
+  const cartStepActive = checkoutStep === "cart" && !orderCompleted;
+  const stepLabel = orderCompleted
+    ? "Pedido confirmado"
+    : cartStepActive
+      ? "Paso 1 de 2"
+      : "Paso 2 de 2";
+  const heading = orderCompleted
+    ? "Tu pedido"
+    : cartStepActive
+      ? "Carrito"
+      : "Tu pedido";
+  const subtitle = orderCompleted
+    ? "Recibimos tu compra y la dejamos registrada."
+    : cartStepActive
+      ? `${itemCount} unidades`
+      : "Completa tus datos para confirmar la compra.";
+
   return (
     <>
       <div className="order-panel-header">
         <div>
-          <h2>Tu pedido</h2>
-          <p>{itemCount} unidades</p>
+          <p className="checkout-step-label">{stepLabel}</p>
+          <h2>{heading}</h2>
+          <p>{subtitle}</p>
         </div>
-        <span className="order-badge">Web</span>
+        <div className="checkout-header-actions">
+          <span className="order-badge">Web</span>
+          <button
+            type="button"
+            className="checkout-close-button"
+            onClick={onClose}
+            aria-label="Cerrar carrito"
+          >
+            X
+          </button>
+        </div>
       </div>
 
-      {order ? (
+      {orderCompleted ? (
         <div className="message success">
           Pedido grabado con exito.
           <div className="message-detail">
-            Comprobante: <strong>{order.tc} {order.idComprobante}</strong>
+            Comprobante:{" "}
+            <strong>
+              {order?.tc} {order?.idComprobante}
+            </strong>
           </div>
         </div>
       ) : null}
 
-      {errorMessage ? <div className="message error">{errorMessage}</div> : null}
+      {cartStepActive ? null : errorMessage ? (
+        <div className="message error">{errorMessage}</div>
+      ) : null}
 
-      {cart.length === 0 ? (
-        <div className="empty-state compact">
-          Aun no agregaste productos. El carrito se guarda en este navegador.
-        </div>
-      ) : (
-        <div className="order-items">
-          {cart.map((item) => (
-            <article className="order-item" key={item.id}>
-              <div className="order-item-top">
-                <div>
-                  <h3>{item.description}</h3>
-                  <p>{item.code} · {formatCurrency(item.price)} c/u</p>
+      {cartStepActive ? (
+        cart.length === 0 ? (
+          <div className="empty-state compact">
+            Aun no agregaste productos. El carrito se guarda en este navegador.
+          </div>
+        ) : (
+          <div className="order-items">
+            {cart.map((item) => (
+              <article className="order-item" key={item.id}>
+                <div className="order-item-top">
+                  <div>
+                    <h3>{item.description}</h3>
+                    <p>
+                      {item.code} - {formatCurrency(item.price)} c/u
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="link-button"
+                    onClick={() => onItemRemove(item.id)}
+                  >
+                    Quitar
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  className="link-button"
-                  onClick={() => onItemRemove(item.id)}
-                >
-                  Quitar
-                </button>
-              </div>
 
-              <div className="order-item-controls">
-                <button
-                  type="button"
-                  className="qty-button"
-                  onClick={() => onItemQuantityChange(item.id, item.quantity - 1)}
-                >
-                  -
-                </button>
-                <strong>{item.quantity}</strong>
-                <button
-                  type="button"
-                  className="qty-button"
-                  onClick={() => onItemQuantityChange(item.id, item.quantity + 1)}
-                >
-                  +
-                </button>
-                <span className="order-item-total">
-                  {formatCurrency(item.price * item.quantity)}
-                </span>
-              </div>
-            </article>
-          ))}
-        </div>
-      )}
+                <div className="order-item-controls">
+                  <button
+                    type="button"
+                    className="qty-button"
+                    onClick={() =>
+                      onItemQuantityChange(item.id, item.quantity - 1)
+                    }
+                  >
+                    -
+                  </button>
+                  <strong>{item.quantity}</strong>
+                  <button
+                    type="button"
+                    className="qty-button"
+                    onClick={() =>
+                      onItemQuantityChange(item.id, item.quantity + 1)
+                    }
+                  >
+                    +
+                  </button>
+                  <span className="order-item-total">
+                    {formatCurrency(item.price * item.quantity)}
+                  </span>
+                </div>
+              </article>
+            ))}
+          </div>
+        )
+      ) : null}
 
       <div className="order-summary">
-        <div className="summary-row">
-          <span>Subtotal neto</span>
-          <span>{formatCurrency(subtotal)}</span>
-        </div>
-        <div className="summary-row">
-          <span>IVA</span>
-          <span>{formatCurrency(taxTotal)}</span>
-        </div>
-        <div className="summary-row total">
-          <span>Total pedido</span>
-          <strong>{formatCurrency(total)}</strong>
-        </div>
+        {orderCompleted ? (
+          <>
+            <div className="summary-row">
+              <span>Articulos</span>
+              <span>{order?.itemCount ?? 0}</span>
+            </div>
+            <div className="summary-row total">
+              <span>Total confirmado</span>
+              <strong>{formatCurrency(order?.total ?? 0)}</strong>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="summary-row">
+              <span>Subtotal neto</span>
+              <span>{formatCurrency(subtotal)}</span>
+            </div>
+            <div className="summary-row">
+              <span>IVA</span>
+              <span>{formatCurrency(taxTotal)}</span>
+            </div>
+            <div className="summary-row total">
+              <span>Total pedido</span>
+              <strong>{formatCurrency(total)}</strong>
+            </div>
+          </>
+        )}
       </div>
 
-      <form className="checkout-form" onSubmit={onCheckoutSubmit}>
-        <div className="checkout-grid">
-          <div className="field span-2">
-            <label htmlFor="fullName">Nombre y apellido</label>
-            <input
-              id="fullName"
-              value={customer.fullName}
-              onChange={(event) => onCustomerChange("fullName", event.target.value)}
-              placeholder="Quien recibe el pedido"
-              required
-            />
-          </div>
-
-          <div className="field">
-            <label htmlFor="phone">Telefono</label>
-            <input
-              id="phone"
-              value={customer.phone}
-              onChange={(event) => onCustomerChange("phone", event.target.value)}
-              placeholder="WhatsApp o celular"
-              required
-            />
-          </div>
-
-          <div className="field">
-            <label htmlFor="email">Email</label>
-            <input
-              id="email"
-              type="email"
-              value={customer.email}
-              onChange={(event) => onCustomerChange("email", event.target.value)}
-              placeholder="correo@cliente.com"
-            />
-          </div>
-
-          <div className="field span-2">
-            <label htmlFor="address">Direccion</label>
-            <input
-              id="address"
-              value={customer.address}
-              onChange={(event) => onCustomerChange("address", event.target.value)}
-              placeholder="Calle, altura y referencias"
-              required
-            />
-          </div>
-
-          <div className="field">
-            <label htmlFor="city">Localidad</label>
-            <input
-              id="city"
-              value={customer.city}
-              onChange={(event) => onCustomerChange("city", event.target.value)}
-              placeholder="Ciudad"
-              required
-            />
-          </div>
-
-          <div className="field">
-            <label htmlFor="province">Provincia</label>
-            <input
-              id="province"
-              value={customer.province}
-              onChange={(event) => onCustomerChange("province", event.target.value)}
-              placeholder="Provincia"
-            />
-          </div>
-
-          <div className="field">
-            <label htmlFor="postalCode">Codigo postal</label>
-            <input
-              id="postalCode"
-              value={customer.postalCode}
-              onChange={(event) => onCustomerChange("postalCode", event.target.value)}
-              placeholder="CP"
-            />
-          </div>
-
-          <div className="field">
-            <label htmlFor="documentNumber">Documento</label>
-            <input
-              id="documentNumber"
-              value={customer.documentNumber}
-              onChange={(event) =>
-                onCustomerChange("documentNumber", event.target.value)
-              }
-              placeholder="DNI / CUIT"
-            />
-          </div>
-
-          <div className="field">
-            <label htmlFor="deliveryMethod">Entrega</label>
-            <select
-              id="deliveryMethod"
-              value={customer.deliveryMethod}
-              onChange={(event) =>
-                onCustomerChange("deliveryMethod", event.target.value)
-              }
-            >
-              <option>Retiro en local</option>
-              <option>Envio a domicilio</option>
-              <option>Coordinar por WhatsApp</option>
-            </select>
-          </div>
-
-          <div className="field">
-            <label htmlFor="paymentMethod">Pago</label>
-            <select
-              id="paymentMethod"
-              value={customer.paymentMethod}
-              onChange={(event) =>
-                onCustomerChange("paymentMethod", event.target.value)
-              }
-            >
-              <option>Coordinar pago</option>
-              <option>Transferencia</option>
-              <option>Efectivo</option>
-              <option>Tarjeta</option>
-            </select>
-          </div>
-
-          <div className="field span-2">
-            <label htmlFor="notes">Notas</label>
-            <textarea
-              id="notes"
-              rows={4}
-              value={customer.notes}
-              onChange={(event) => onCustomerChange("notes", event.target.value)}
-              placeholder="Horario de entrega, talle, color o cualquier observacion"
-            />
-          </div>
+      {cartStepActive ? (
+        <div className="checkout-actions">
+          <button
+            type="button"
+            className="checkout-secondary-button"
+            onClick={onClose}
+          >
+            Seguir viendo productos
+          </button>
+          <button
+            type="button"
+            className="submit-order-button"
+            onClick={() => onCheckoutStepChange("details")}
+            disabled={cart.length === 0}
+          >
+            Continuar compra
+          </button>
         </div>
+      ) : orderCompleted ? (
+        <div className="checkout-success-actions">
+          <button
+            type="button"
+            className="checkout-secondary-button"
+            onClick={onClose}
+          >
+            Seguir comprando
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="checkout-step-summary">
+            <div>
+              <strong>{itemCount} unidades listas para confirmar</strong>
+              <p>Revisa tus datos y completa el pedido.</p>
+            </div>
+            <button
+              type="button"
+              className="checkout-secondary-button"
+              onClick={() => onCheckoutStepChange("cart")}
+            >
+              Editar carrito
+            </button>
+          </div>
 
-        <button
-          type="submit"
-          className="submit-order-button"
-          disabled={submitting || cart.length === 0}
-        >
-          {submitting ? "Grabando pedido..." : "Confirmar pedido"}
-        </button>
-      </form>
+          <form className="checkout-form" onSubmit={onCheckoutSubmit}>
+            <div className="checkout-grid">
+              <div className="field span-2">
+                <label htmlFor="fullName">Nombre y apellido</label>
+                <input
+                  id="fullName"
+                  value={customer.fullName}
+                  onChange={(event) =>
+                    onCustomerChange("fullName", event.target.value)
+                  }
+                  placeholder="Quien recibe el pedido"
+                  required
+                />
+              </div>
+
+              <div className="field">
+                <label htmlFor="phone">Telefono</label>
+                <input
+                  id="phone"
+                  value={customer.phone}
+                  onChange={(event) =>
+                    onCustomerChange("phone", event.target.value)
+                  }
+                  placeholder="WhatsApp o celular"
+                  required
+                />
+              </div>
+
+              <div className="field">
+                <label htmlFor="email">Email</label>
+                <input
+                  id="email"
+                  type="email"
+                  value={customer.email}
+                  onChange={(event) =>
+                    onCustomerChange("email", event.target.value)
+                  }
+                  placeholder="correo@cliente.com"
+                />
+              </div>
+
+              <div className="field span-2">
+                <label htmlFor="address">Direccion</label>
+                <input
+                  id="address"
+                  value={customer.address}
+                  onChange={(event) =>
+                    onCustomerChange("address", event.target.value)
+                  }
+                  placeholder="Calle, altura y referencias"
+                  required
+                />
+              </div>
+
+              <div className="field">
+                <label htmlFor="city">Localidad</label>
+                <input
+                  id="city"
+                  value={customer.city}
+                  onChange={(event) =>
+                    onCustomerChange("city", event.target.value)
+                  }
+                  placeholder="Ciudad"
+                  required
+                />
+              </div>
+
+              <div className="field">
+                <label htmlFor="province">Provincia</label>
+                <input
+                  id="province"
+                  value={customer.province}
+                  onChange={(event) =>
+                    onCustomerChange("province", event.target.value)
+                  }
+                  placeholder="Provincia"
+                />
+              </div>
+
+              <div className="field">
+                <label htmlFor="postalCode">Codigo postal</label>
+                <input
+                  id="postalCode"
+                  value={customer.postalCode}
+                  onChange={(event) =>
+                    onCustomerChange("postalCode", event.target.value)
+                  }
+                  placeholder="CP"
+                />
+              </div>
+
+              <div className="field">
+                <label htmlFor="documentNumber">Documento</label>
+                <input
+                  id="documentNumber"
+                  value={customer.documentNumber}
+                  onChange={(event) =>
+                    onCustomerChange("documentNumber", event.target.value)
+                  }
+                  placeholder="DNI / CUIT"
+                />
+              </div>
+
+              <div className="field">
+                <label htmlFor="deliveryMethod">Entrega</label>
+                <select
+                  id="deliveryMethod"
+                  value={customer.deliveryMethod}
+                  onChange={(event) =>
+                    onCustomerChange("deliveryMethod", event.target.value)
+                  }
+                >
+                  <option>Retiro en local</option>
+                  <option>Envio a domicilio</option>
+                  <option>Coordinar por WhatsApp</option>
+                </select>
+              </div>
+
+              <div className="field">
+                <label htmlFor="paymentMethod">Pago</label>
+                <select
+                  id="paymentMethod"
+                  value={customer.paymentMethod}
+                  onChange={(event) =>
+                    onCustomerChange("paymentMethod", event.target.value)
+                  }
+                >
+                  <option>Coordinar pago</option>
+                  <option>Transferencia</option>
+                  <option>Efectivo</option>
+                  <option>Tarjeta</option>
+                </select>
+              </div>
+
+              <div className="field span-2">
+                <label htmlFor="notes">Notas</label>
+                <textarea
+                  id="notes"
+                  rows={4}
+                  value={customer.notes}
+                  onChange={(event) =>
+                    onCustomerChange("notes", event.target.value)
+                  }
+                  placeholder="Horario de entrega, talle, color o cualquier observacion"
+                />
+              </div>
+            </div>
+
+            <div className="checkout-actions">
+              <button
+                type="button"
+                className="checkout-secondary-button"
+                onClick={() => onCheckoutStepChange("cart")}
+              >
+                Volver al carrito
+              </button>
+              <button
+                type="submit"
+                className="submit-order-button"
+                disabled={submitting || cart.length === 0}
+              >
+                {submitting ? "Grabando pedido..." : "Confirmar pedido"}
+              </button>
+            </div>
+          </form>
+        </>
+      )}
     </>
   );
 }
@@ -1555,7 +1789,15 @@ function matchesAudienceFilter(
   const audienceKeywords: Record<Exclude<AudienceFilter, "all">, string[]> = {
     hombres: [" men ", " hombre ", " masculino ", " caballero "],
     mujeres: [" women ", " mujer ", " femenino ", " dama ", " lady "],
-    ninez: [" nino ", " nina ", " kids ", " kid ", " junior ", " infantil ", " jr "],
+    ninez: [
+      " nino ",
+      " nina ",
+      " kids ",
+      " kid ",
+      " junior ",
+      " infantil ",
+      " jr ",
+    ],
   };
 
   return audienceKeywords[audience].some((keyword) =>
