@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { FormEvent } from "react";
+import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   cartItemCount,
   formatCurrency,
@@ -73,6 +73,7 @@ export function Storefront({
   const [order, setOrder] = useState<OrderSummary | null>(null);
   const [mobileCartOpen, setMobileCartOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeMode>("light");
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
 
   useEffect(() => {
     const savedCart = window.localStorage.getItem(LOCAL_STORAGE_CART_KEY);
@@ -106,6 +107,34 @@ export function Storefront({
     document.documentElement.style.colorScheme = theme;
     window.localStorage.setItem(LOCAL_STORAGE_THEME_KEY, theme);
   }, [theme]);
+
+  useEffect(() => {
+    const shouldLockUi = mobileCartOpen || Boolean(selectedProduct);
+    if (!shouldLockUi) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+
+      if (selectedProduct) {
+        setSelectedProduct(null);
+        return;
+      }
+
+      if (mobileCartOpen) {
+        setMobileCartOpen(false);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [mobileCartOpen, selectedProduct]);
 
   const families = Array.from(
     new Set(
@@ -242,6 +271,9 @@ export function Storefront({
   ];
   const activeAudienceLabel =
     audienceOptions.find((option) => option.value === selectedAudience)?.label || "Todo";
+  const selectedProductCartItem = selectedProduct
+    ? cart.find((item) => item.id === selectedProduct.id) || null
+    : null;
 
   function applyAudienceFilter(nextAudience: AudienceFilter) {
     setSelectedAudience((current) => (current === nextAudience ? "all" : nextAudience));
@@ -274,6 +306,33 @@ export function Storefront({
 
         return { ...item, quantity: nextQuantity };
       });
+    });
+  }
+
+  function openProductDetail(product: Product) {
+    setSelectedProduct(product);
+  }
+
+  function closeProductDetail() {
+    setSelectedProduct(null);
+  }
+
+  function handleProductCardKeyDown(
+    event: ReactKeyboardEvent<HTMLElement>,
+    product: Product,
+  ) {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+
+    event.preventDefault();
+    openProductDetail(product);
+  }
+
+  function openCartFromDetail() {
+    setSelectedProduct(null);
+    requestAnimationFrame(() => {
+      openCartPanel();
     });
   }
 
@@ -706,8 +765,16 @@ export function Storefront({
                 const disableAddButton = outOfStock && !settings.allowBackorders;
 
                 return (
-                  <article className="catalog-card" key={product.id}>
-                    <a className="catalog-card-media" href="#pedido">
+                  <article
+                    className="catalog-card"
+                    key={product.id}
+                    onClick={() => openProductDetail(product)}
+                    onKeyDown={(event) => handleProductCardKeyDown(event, product)}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Ver detalle de ${product.description}`}
+                  >
+                    <div className="catalog-card-media">
                       {product.imageUrl ? (
                         <img
                           src={product.imageUrl}
@@ -719,7 +786,7 @@ export function Storefront({
                           {product.code.slice(0, 3)}
                         </div>
                       )}
-                    </a>
+                    </div>
 
                     <div className="catalog-card-body">
                       <div className="catalog-card-tags">
@@ -741,11 +808,15 @@ export function Storefront({
                       <button
                         type="button"
                         className="catalog-card-button"
-                        onClick={() => addToCart(product)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          addToCart(product);
+                        }}
                         disabled={disableAddButton}
                       >
                         {disableAddButton ? "Sin stock" : "Anadir al carrito"}
                       </button>
+                      <span className="catalog-card-detail-link">Ver detalle</span>
                     </div>
                   </article>
                 );
@@ -847,6 +918,121 @@ export function Storefront({
           </footer>
         </section>
       </main>
+
+      {selectedProduct ? (
+        <>
+          <div className="mobile-backdrop product-detail-backdrop" onClick={closeProductDetail} />
+          <section
+            className="product-detail-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="product-detail-title"
+          >
+            <button
+              type="button"
+              className="product-detail-close"
+              onClick={closeProductDetail}
+              aria-label="Cerrar detalle del producto"
+            >
+              ×
+            </button>
+
+            <div className="product-detail-grid">
+              <div className="product-detail-media">
+                {selectedProduct.imageUrl ? (
+                  <img
+                    src={selectedProduct.imageUrl}
+                    alt={selectedProduct.description}
+                    loading="eager"
+                  />
+                ) : (
+                  <div className="catalog-card-placeholder product-detail-placeholder">
+                    {selectedProduct.code.slice(0, 3)}
+                  </div>
+                )}
+              </div>
+
+              <div className="product-detail-copy">
+                <div className="product-detail-heading">
+                  <span className="section-kicker">Detalle del producto</span>
+                  <h2 id="product-detail-title">{selectedProduct.description}</h2>
+                  <p className="product-detail-subtitle">
+                    {selectedProduct.presentation || selectedProduct.unitId || "Unidad"}
+                  </p>
+                </div>
+
+                <div className="product-detail-tags">
+                  <span className="catalog-tag">Cod. {selectedProduct.code}</span>
+                  <span
+                    className={`catalog-tag ${getStockBadgeClass(selectedProduct.stock)}`}
+                  >
+                    Stock {selectedProduct.stock.toFixed(0)}
+                  </span>
+                  {selectedProduct.barcode ? (
+                    <span className="catalog-tag">EAN {selectedProduct.barcode}</span>
+                  ) : null}
+                </div>
+
+                <div className="product-detail-price">
+                  {formatCurrency(selectedProduct.price)}
+                </div>
+                <p className="catalog-card-tax">Precio s/Imp. Nac.</p>
+
+                <div className="product-detail-specs">
+                  <div className="product-detail-spec">
+                    <span>Unidad</span>
+                    <strong>{selectedProduct.unitId || "Unidad"}</strong>
+                  </div>
+                  <div className="product-detail-spec">
+                    <span>Presentacion</span>
+                    <strong>{selectedProduct.presentation || "Estandar"}</strong>
+                  </div>
+                  <div className="product-detail-spec">
+                    <span>Moneda</span>
+                    <strong>{selectedProduct.currency}</strong>
+                  </div>
+                  <div className="product-detail-spec">
+                    <span>IVA</span>
+                    <strong>{selectedProduct.taxRate.toFixed(0)}%</strong>
+                  </div>
+                </div>
+
+                <p className="product-detail-note">
+                  Si necesitas talle, color o mas informacion sobre este articulo, escribinos por
+                  WhatsApp y te ayudamos con la variante correcta.
+                </p>
+
+                {selectedProductCartItem ? (
+                  <div className="message success product-detail-message">
+                    Ya tienes {selectedProductCartItem.quantity} unidad
+                    {selectedProductCartItem.quantity === 1 ? "" : "es"} en tu pedido.
+                  </div>
+                ) : null}
+
+                <div className="product-detail-actions">
+                  <button
+                    type="button"
+                    className="catalog-card-button"
+                    onClick={() => addToCart(selectedProduct)}
+                    disabled={selectedProduct.stock <= 0 && !settings.allowBackorders}
+                  >
+                    {selectedProduct.stock <= 0 && !settings.allowBackorders
+                      ? "Sin stock"
+                      : "Anadir al carrito"}
+                  </button>
+                  <button
+                    type="button"
+                    className="product-detail-secondary"
+                    onClick={openCartFromDetail}
+                  >
+                    Ver pedido
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </>
+      ) : null}
 
       {mobileCartOpen ? (
         <div className="mobile-backdrop" onClick={() => setMobileCartOpen(false)} />
