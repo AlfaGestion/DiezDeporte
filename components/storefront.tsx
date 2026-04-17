@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   cartItemCount,
@@ -21,6 +21,7 @@ import type {
 
 const LOCAL_STORAGE_CART_KEY = "diezdeportes-cart";
 const LOCAL_STORAGE_THEME_KEY = "diezdeportes-theme";
+const LOCAL_STORAGE_WEB_IMAGE_KEY = "diezdeportes-web-images";
 const ODOO_FACEBOOK_URL = "https://diezdeportes.odoo.com/website/social/facebook";
 const ODOO_INSTAGRAM_URL = "https://diezdeportes.odoo.com/website/social/instagram";
 
@@ -52,6 +53,13 @@ type StorefrontProps = {
   loadError?: string;
 };
 
+type WebImageOverride = {
+  imageUrl: string;
+  imageMode: "illustrative";
+  imageNote: string;
+  imageSourceUrl: string | null;
+};
+
 export function Storefront({
   initialProducts,
   settings,
@@ -74,6 +82,10 @@ export function Storefront({
   const [mobileCartOpen, setMobileCartOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeMode>("light");
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [webImageOverrides, setWebImageOverrides] = useState<
+    Record<string, WebImageOverride | null>
+  >({});
+  const pendingWebImageSearchesRef = useRef(new Set<string>());
 
   useEffect(() => {
     const savedCart = window.localStorage.getItem(LOCAL_STORAGE_CART_KEY);
@@ -89,6 +101,24 @@ export function Storefront({
   useEffect(() => {
     window.localStorage.setItem(LOCAL_STORAGE_CART_KEY, JSON.stringify(cart));
   }, [cart]);
+
+  useEffect(() => {
+    const savedOverrides = window.localStorage.getItem(LOCAL_STORAGE_WEB_IMAGE_KEY);
+    if (!savedOverrides) return;
+
+    try {
+      setWebImageOverrides(JSON.parse(savedOverrides) as Record<string, WebImageOverride | null>);
+    } catch {
+      window.localStorage.removeItem(LOCAL_STORAGE_WEB_IMAGE_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      LOCAL_STORAGE_WEB_IMAGE_KEY,
+      JSON.stringify(webImageOverrides),
+    );
+  }, [webImageOverrides]);
 
   useEffect(() => {
     const savedTheme = window.localStorage.getItem(LOCAL_STORAGE_THEME_KEY);
@@ -271,9 +301,82 @@ export function Storefront({
   ];
   const activeAudienceLabel =
     audienceOptions.find((option) => option.value === selectedAudience)?.label || "Todo";
-  const selectedProductCartItem = selectedProduct
-    ? cart.find((item) => item.id === selectedProduct.id) || null
+  const resolvedFilteredProducts = filteredProducts.map(resolveProductImage);
+  const resolvedSelectedProduct = selectedProduct ? resolveProductImage(selectedProduct) : null;
+  const selectedProductCartItem = resolvedSelectedProduct
+    ? cart.find((item) => item.id === resolvedSelectedProduct.id) || null
     : null;
+
+  useEffect(() => {
+    const candidates = resolvedFilteredProducts
+      .filter((product) => product.imageMode === "none")
+      .slice(0, 12);
+
+    if (resolvedSelectedProduct && resolvedSelectedProduct.imageMode === "none") {
+      candidates.unshift(resolvedSelectedProduct);
+    }
+
+    const uniqueCandidates = Array.from(
+      new Map(candidates.map((product) => [product.id, product])).values(),
+    );
+
+    uniqueCandidates.forEach((product) => {
+      void fetchWebImageForProduct(product);
+    });
+  }, [resolvedFilteredProducts, resolvedSelectedProduct]);
+
+  function resolveProductImage(product: Product): Product {
+    if (product.imageMode !== "none") {
+      return product;
+    }
+
+    const override = webImageOverrides[product.id];
+    if (!override) {
+      return product;
+    }
+
+    return {
+      ...product,
+      imageUrl: override.imageUrl,
+      imageMode: override.imageMode,
+      imageNote: override.imageNote,
+      imageSourceUrl: override.imageSourceUrl,
+    };
+  }
+
+  async function fetchWebImageForProduct(product: Product) {
+    if (product.imageMode !== "none") return;
+    if (Object.prototype.hasOwnProperty.call(webImageOverrides, product.id)) return;
+    if (pendingWebImageSearchesRef.current.has(product.id)) return;
+
+    pendingWebImageSearchesRef.current.add(product.id);
+
+    try {
+      const response = await fetch(
+        `/api/product-image-search?code=${encodeURIComponent(product.code)}&description=${encodeURIComponent(product.description)}`,
+      );
+
+      if (!response.ok) {
+        throw new Error("No se pudo buscar la imagen web.");
+      }
+
+      const result = (await response.json()) as {
+        result?: WebImageOverride | null;
+      };
+
+      setWebImageOverrides((current) => ({
+        ...current,
+        [product.id]: result.result ?? null,
+      }));
+    } catch {
+      setWebImageOverrides((current) => ({
+        ...current,
+        [product.id]: null,
+      }));
+    } finally {
+      pendingWebImageSearchesRef.current.delete(product.id);
+    }
+  }
 
   function applyAudienceFilter(nextAudience: AudienceFilter) {
     setSelectedAudience((current) => (current === nextAudience ? "all" : nextAudience));
@@ -724,7 +827,7 @@ export function Storefront({
                       : "Todos los productos"}
                 </h2>
                 <p>
-                  {filteredProducts.length} resultados
+                  {resolvedFilteredProducts.length} resultados
                   {selectedBrand !== "all" ? ` · Marca ${selectedBrand}` : ""}
                   {selectedAudience !== "all" ? ` · ${activeAudienceLabel}` : ""}
                 </p>
@@ -753,14 +856,14 @@ export function Storefront({
               </div>
             ) : null}
 
-            {!loadError && filteredProducts.length === 0 ? (
+            {!loadError && resolvedFilteredProducts.length === 0 ? (
               <div className="empty-state">
                 No hay productos para mostrar con los filtros actuales.
               </div>
             ) : null}
 
             <div className="catalog-grid">
-              {filteredProducts.map((product) => {
+              {resolvedFilteredProducts.map((product) => {
                 const outOfStock = product.stock <= 0;
                 const disableAddButton = outOfStock && !settings.allowBackorders;
 
@@ -928,7 +1031,7 @@ export function Storefront({
         </section>
       </main>
 
-      {selectedProduct ? (
+      {resolvedSelectedProduct ? (
         <>
           <div className="mobile-backdrop product-detail-backdrop" onClick={closeProductDetail} />
           <section
@@ -948,15 +1051,15 @@ export function Storefront({
 
             <div className="product-detail-grid">
               <div className="product-detail-media">
-                {selectedProduct.imageUrl ? (
+                {resolvedSelectedProduct.imageUrl ? (
                   <img
-                    src={selectedProduct.imageUrl}
-                    alt={selectedProduct.description}
+                    src={resolvedSelectedProduct.imageUrl}
+                    alt={resolvedSelectedProduct.description}
                     loading="eager"
                   />
                 ) : (
                   <div className="catalog-card-placeholder product-detail-placeholder">
-                    {selectedProduct.code.slice(0, 3)}
+                    {resolvedSelectedProduct.code.slice(0, 3)}
                   </div>
                 )}
               </div>
@@ -964,50 +1067,50 @@ export function Storefront({
               <div className="product-detail-copy">
                 <div className="product-detail-heading">
                   <span className="section-kicker">Detalle del producto</span>
-                  <h2 id="product-detail-title">{selectedProduct.description}</h2>
+                  <h2 id="product-detail-title">{resolvedSelectedProduct.description}</h2>
                   <p className="product-detail-subtitle">
-                    {selectedProduct.presentation || selectedProduct.unitId || "Unidad"}
+                    {resolvedSelectedProduct.presentation || resolvedSelectedProduct.unitId || "Unidad"}
                   </p>
                 </div>
 
                 <div className="product-detail-tags">
-                  <span className="catalog-tag">Cod. {selectedProduct.code}</span>
+                  <span className="catalog-tag">Cod. {resolvedSelectedProduct.code}</span>
                   <span
-                    className={`catalog-tag ${getStockBadgeClass(selectedProduct.stock)}`}
+                    className={`catalog-tag ${getStockBadgeClass(resolvedSelectedProduct.stock)}`}
                   >
-                    Stock {selectedProduct.stock.toFixed(0)}
+                    Stock {resolvedSelectedProduct.stock.toFixed(0)}
                   </span>
-                  {selectedProduct.imageMode === "illustrative" ? (
+                  {resolvedSelectedProduct.imageMode === "illustrative" ? (
                     <span className="catalog-tag image-illustrative">
                       Imagen ilustrativa
                     </span>
                   ) : null}
-                  {selectedProduct.barcode ? (
-                    <span className="catalog-tag">EAN {selectedProduct.barcode}</span>
+                  {resolvedSelectedProduct.barcode ? (
+                    <span className="catalog-tag">EAN {resolvedSelectedProduct.barcode}</span>
                   ) : null}
                 </div>
 
                 <div className="product-detail-price">
-                  {formatCurrency(selectedProduct.price)}
+                  {formatCurrency(resolvedSelectedProduct.price)}
                 </div>
                 <p className="catalog-card-tax">Precio s/Imp. Nac.</p>
 
                 <div className="product-detail-specs">
                   <div className="product-detail-spec">
                     <span>Unidad</span>
-                    <strong>{selectedProduct.unitId || "Unidad"}</strong>
+                    <strong>{resolvedSelectedProduct.unitId || "Unidad"}</strong>
                   </div>
                   <div className="product-detail-spec">
                     <span>Presentacion</span>
-                    <strong>{selectedProduct.presentation || "Estandar"}</strong>
+                    <strong>{resolvedSelectedProduct.presentation || "Estandar"}</strong>
                   </div>
                   <div className="product-detail-spec">
                     <span>Moneda</span>
-                    <strong>{selectedProduct.currency}</strong>
+                    <strong>{resolvedSelectedProduct.currency}</strong>
                   </div>
                   <div className="product-detail-spec">
                     <span>IVA</span>
-                    <strong>{selectedProduct.taxRate.toFixed(0)}%</strong>
+                    <strong>{resolvedSelectedProduct.taxRate.toFixed(0)}%</strong>
                   </div>
                 </div>
 
@@ -1016,12 +1119,12 @@ export function Storefront({
                   WhatsApp y te ayudamos con la variante correcta.
                 </p>
 
-                {selectedProduct.imageMode === "illustrative" && selectedProduct.imageNote ? (
+                {resolvedSelectedProduct.imageMode === "illustrative" && resolvedSelectedProduct.imageNote ? (
                   <div className="product-detail-illustrative">
-                    <p>{selectedProduct.imageNote}</p>
-                    {selectedProduct.imageSourceUrl ? (
+                    <p>{resolvedSelectedProduct.imageNote}</p>
+                    {resolvedSelectedProduct.imageSourceUrl ? (
                       <a
-                        href={selectedProduct.imageSourceUrl}
+                        href={resolvedSelectedProduct.imageSourceUrl}
                         target="_blank"
                         rel="noreferrer"
                       >
@@ -1042,10 +1145,10 @@ export function Storefront({
                   <button
                     type="button"
                     className="catalog-card-button"
-                    onClick={() => addToCart(selectedProduct)}
-                    disabled={selectedProduct.stock <= 0 && !settings.allowBackorders}
+                    onClick={() => addToCart(resolvedSelectedProduct)}
+                    disabled={resolvedSelectedProduct.stock <= 0 && !settings.allowBackorders}
                   >
-                    {selectedProduct.stock <= 0 && !settings.allowBackorders
+                    {resolvedSelectedProduct.stock <= 0 && !settings.allowBackorders
                       ? "Sin stock"
                       : "Anadir al carrito"}
                   </button>
