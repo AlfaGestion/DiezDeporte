@@ -594,45 +594,6 @@ svg {
   object-fit: cover;
 }
 
-.promo-tile-media-label {
-  position: absolute;
-  left: 24px;
-  bottom: 22px;
-  z-index: 1;
-  display: flex;
-  align-items: flex-end;
-  min-width: min(72%, 320px);
-  min-height: 92px;
-  padding: 18px 24px 16px;
-  pointer-events: none;
-}
-
-.promo-tile-media-label::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 24px;
-  background: linear-gradient(
-    102deg,
-    rgba(246, 244, 236, 0.98) 0%,
-    rgba(246, 244, 236, 0.98) 74%,
-    rgba(246, 244, 236, 0) 100%
-  );
-  box-shadow: 0 18px 30px rgba(7, 11, 18, 0.12);
-}
-
-.promo-tile-media-label span {
-  position: relative;
-  z-index: 1;
-  color: #0b1018;
-  font-family: var(--display-font);
-  font-size: clamp(2.2rem, 4.5vw, 3.8rem);
-  font-weight: 900;
-  line-height: 0.86;
-  letter-spacing: 0.01em;
-  text-transform: uppercase;
-}
-
 .promo-tile-copy {
   display: flex;
   align-items: center;
@@ -1356,18 +1317,6 @@ svg {
   .brand-strip,
   .promo-grid {
     grid-template-columns: 1fr;
-  }
-
-  .promo-tile-media-label {
-    left: 18px;
-    right: 18px;
-    min-width: auto;
-    min-height: 80px;
-    padding: 16px 18px 14px;
-  }
-
-  .promo-tile-media-label span {
-    font-size: clamp(1.9rem, 9vw, 2.8rem);
   }
 
   .hero-metrics {

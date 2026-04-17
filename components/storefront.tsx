@@ -213,10 +213,11 @@ export function Storefront({
           const promoDefinition = getPromoDefinition(tile.href, index);
 
           return {
-          ...tile,
-          label: promoDefinition.label,
-          filterValue: promoDefinition.filterValue,
-        };
+            ...tile,
+            src: getPromoImageOverride(tile.href) || tile.src,
+            label: promoDefinition.label,
+            filterValue: promoDefinition.filterValue,
+          };
         })
       : [];
 
@@ -523,9 +524,6 @@ export function Storefront({
                 >
                   <div className="promo-tile-media">
                     <img src={tile.src} alt={tile.alt} loading="lazy" />
-                    <div className="promo-tile-media-label" aria-hidden="true">
-                      <span>{tile.label}</span>
-                    </div>
                   </div>
                   <div className="promo-tile-copy">
                     <strong>{tile.label}</strong>
@@ -1184,6 +1182,22 @@ function getPromoDefinition(href: string, index: number) {
       filterValue: "all" as AudienceFilter,
     }
   );
+}
+
+function getPromoImageOverride(href: string) {
+  if (/attribute_values=13-102/i.test(href)) {
+    return "/promos/promo-kids.png";
+  }
+
+  if (/attribute_values=13-99/i.test(href)) {
+    return "/promos/promo-mujeres.png";
+  }
+
+  if (/attribute_values=13-98/i.test(href)) {
+    return "/promos/promo-hombres.png";
+  }
+
+  return null;
 }
 
 function normalizeFilterValue(value: string) {

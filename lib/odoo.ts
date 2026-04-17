@@ -148,7 +148,7 @@ function parsePromoTiles(html: string, baseUrl: string) {
     const definition = getPromoMetadata(absoluteHref, index);
     tiles.push({
       href: absoluteHref,
-      src: absoluteUrl(baseUrl, src),
+      src: getPromoImageSource(absoluteHref) || absoluteUrl(baseUrl, src),
       alt: decodeHtml(alt) || definition.label,
       label: definition.label,
       filterValue: definition.filterValue,
@@ -211,6 +211,22 @@ function getPromoMetadata(href: string, index: number) {
       filterValue: "all",
     }
   );
+}
+
+function getPromoImageSource(href: string) {
+  if (/attribute_values=13-102/i.test(href)) {
+    return "/promos/promo-kids.png";
+  }
+
+  if (/attribute_values=13-99/i.test(href)) {
+    return "/promos/promo-mujeres.png";
+  }
+
+  if (/attribute_values=13-98/i.test(href)) {
+    return "/promos/promo-hombres.png";
+  }
+
+  return null;
 }
 
 async function fetchHtml(url: string) {
