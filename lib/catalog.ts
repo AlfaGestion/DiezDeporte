@@ -1,6 +1,10 @@
 import "server-only";
 import type { ConnectionPool, IResult, Transaction } from "mssql";
-import { getPriceBreakdown, resolveImageUrl, toNumber } from "@/lib/commerce";
+import {
+  getPriceBreakdown,
+  resolveImageUrl,
+  toNumber,
+} from "@/lib/commerce";
 import { getConnection, sql } from "@/lib/db";
 import { getOdooAssets } from "@/lib/odoo";
 import { getServerSettings } from "@/lib/store-config";
@@ -42,6 +46,11 @@ function mapProduct(record: ProductRecord) {
     taxRate,
     settings.pricesIncludeTax,
   );
+  const resolvedImageUrl = resolveImageUrl(
+    record.RutaImagen?.trim() || null,
+    record.URL1?.trim() || null,
+    settings.imageBaseUrl,
+  );
 
   const product: Product = {
     id: record.IDARTICULO.trim(),
@@ -60,11 +69,10 @@ function mapProduct(record: ProductRecord) {
     presentation: record.Presentacion?.trim() || "",
     supplierAccount: record.CUENTAPROVEEDOR?.trim() || "",
     barcode: record.CODIGOBARRA?.trim() || null,
-    imageUrl: resolveImageUrl(
-      record.RutaImagen?.trim() || null,
-      record.URL1?.trim() || null,
-      settings.imageBaseUrl,
-    ),
+    imageUrl: resolvedImageUrl,
+    imageMode: resolvedImageUrl ? "exact" : "none",
+    imageNote: null,
+    imageSourceUrl: null,
     cost: toNumber(record.COSTO),
   };
 
@@ -115,17 +123,32 @@ export async function listProducts() {
 
   const products = result.recordset.map(mapProduct);
   const odooAssets = await getOdooAssets();
+  const odooProductImages = Array.from(odooAssets.productImages.values());
 
-  return products.map((product) => {
+  return products.map<Product>((product) => {
     const odooImage = odooAssets.productImages.get(product.id.trim().toUpperCase());
 
     if (!odooImage) {
-      return product;
+      const illustrativeImage = findIllustrativeImage(product, odooProductImages);
+      if (!illustrativeImage) {
+        return product;
+      }
+
+      return {
+        ...product,
+        imageUrl: illustrativeImage.imageUrl,
+        imageMode: "illustrative" as const,
+        imageNote: "Imagen ilustrativa tomada de un articulo similar publicado online.",
+        imageSourceUrl: illustrativeImage.href,
+      };
     }
 
     return {
       ...product,
       imageUrl: odooImage.imageUrl,
+      imageMode: "exact" as const,
+      imageNote: null,
+      imageSourceUrl: odooImage.href,
     };
   });
 }
@@ -187,3 +210,145 @@ function createRequest(executor: Executor) {
 
   return executor.request();
 }
+
+function findIllustrativeImage(
+  product: Product,
+  candidates: Array<{
+    code: string;
+    imageUrl: string;
+    title: string;
+    href: string;
+  }>,
+) {
+  const productCode = product.code.trim().toUpperCase();
+  const baseCode = getBaseCode(productCode);
+
+  const codeMatch = candidates.find((candidate) => {
+    const candidateCode = candidate.code.trim().toUpperCase();
+    const candidateBaseCode = getBaseCode(candidateCode);
+
+    return (
+      candidateCode !== productCode &&
+      (candidateCode === baseCode ||
+        candidateCode.startsWith(`${baseCode}|`) ||
+        candidateBaseCode === baseCode)
+    );
+  });
+
+  if (codeMatch) {
+    return codeMatch;
+  }
+
+  const targetTokens = tokenizeDescription(product.description);
+  if (targetTokens.length === 0) {
+    return null;
+  }
+
+  let bestMatch: (typeof candidates)[number] | null = null;
+  let bestScore = 0;
+
+  for (const candidate of candidates) {
+    const candidateCode = candidate.code.trim().toUpperCase();
+    if (candidateCode === productCode) continue;
+
+    const score = scoreCandidate(targetTokens, candidate.title);
+    if (score > bestScore) {
+      bestScore = score;
+      bestMatch = candidate;
+    }
+  }
+
+  return bestScore >= 3 ? bestMatch : null;
+}
+
+function getBaseCode(value: string) {
+  return value.split("|")[0]?.trim().toUpperCase() || value.trim().toUpperCase();
+}
+
+function tokenizeDescription(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter((token) => {
+      return (
+        token.length >= 3 &&
+        !STOP_WORDS.has(token) &&
+        !COLOR_WORDS.has(token) &&
+        !SIZE_WORDS.has(token)
+      );
+    });
+}
+
+function scoreCandidate(targetTokens: string[], candidateTitle: string) {
+  const candidateTokens = new Set(tokenizeDescription(candidateTitle));
+  let score = 0;
+
+  for (const token of targetTokens) {
+    if (candidateTokens.has(token)) {
+      score += token.length >= 6 ? 2 : 1;
+    }
+  }
+
+  return score;
+}
+
+const STOP_WORDS = new Set([
+  "para",
+  "con",
+  "sin",
+  "the",
+  "and",
+  "men",
+  "man",
+  "mujer",
+  "hombre",
+  "kids",
+  "adulto",
+  "adulta",
+  "junior",
+  "nino",
+  "nina",
+  "niño",
+  "niña",
+  "blist",
+]);
+
+const COLOR_WORDS = new Set([
+  "negro",
+  "negra",
+  "blanco",
+  "blanca",
+  "gris",
+  "rojo",
+  "roja",
+  "azul",
+  "verde",
+  "rosa",
+  "fucsia",
+  "violeta",
+  "amarillo",
+  "amarilla",
+  "naranja",
+  "marron",
+  "bordo",
+  "celeste",
+  "colores",
+  "multicolor",
+]);
+
+const SIZE_WORDS = new Set([
+  "xxs",
+  "xs",
+  "s",
+  "m",
+  "l",
+  "xl",
+  "xxl",
+  "xxxl",
+  "uni",
+  "unico",
+  "talle",
+]);

@@ -794,6 +794,11 @@ export function Storefront({
                         <span className={`catalog-tag ${getStockBadgeClass(product.stock)}`}>
                           Stock {product.stock.toFixed(0)}
                         </span>
+                        {product.imageMode === "illustrative" ? (
+                          <span className="catalog-tag image-illustrative">
+                            Imagen ilustrativa
+                          </span>
+                        ) : null}
                       </div>
 
                       <h3>{product.description}</h3>
@@ -801,6 +806,10 @@ export function Storefront({
                       <p className="catalog-card-subtitle">
                         {product.presentation || product.unitId || "Unidad"}
                       </p>
+
+                      {product.imageMode === "illustrative" && product.imageNote ? (
+                        <p className="catalog-card-image-note">{product.imageNote}</p>
+                      ) : null}
 
                       <div className="catalog-card-price">{formatCurrency(product.price)}</div>
                       <p className="catalog-card-tax">Precio s/Imp. Nac.</p>
@@ -968,6 +977,11 @@ export function Storefront({
                   >
                     Stock {selectedProduct.stock.toFixed(0)}
                   </span>
+                  {selectedProduct.imageMode === "illustrative" ? (
+                    <span className="catalog-tag image-illustrative">
+                      Imagen ilustrativa
+                    </span>
+                  ) : null}
                   {selectedProduct.barcode ? (
                     <span className="catalog-tag">EAN {selectedProduct.barcode}</span>
                   ) : null}
@@ -1001,6 +1015,21 @@ export function Storefront({
                   Si necesitas talle, color o mas informacion sobre este articulo, escribinos por
                   WhatsApp y te ayudamos con la variante correcta.
                 </p>
+
+                {selectedProduct.imageMode === "illustrative" && selectedProduct.imageNote ? (
+                  <div className="product-detail-illustrative">
+                    <p>{selectedProduct.imageNote}</p>
+                    {selectedProduct.imageSourceUrl ? (
+                      <a
+                        href={selectedProduct.imageSourceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Ver articulo similar online
+                      </a>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 {selectedProductCartItem ? (
                   <div className="message success product-detail-message">

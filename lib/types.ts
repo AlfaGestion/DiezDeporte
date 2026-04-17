@@ -1,3 +1,5 @@
+export type ProductImageMode = "none" | "exact" | "illustrative";
+
 export type Product = {
   id: string;
   code: string;
@@ -16,6 +18,9 @@ export type Product = {
   supplierAccount: string;
   barcode: string | null;
   imageUrl: string | null;
+  imageMode: ProductImageMode;
+  imageNote: string | null;
+  imageSourceUrl: string | null;
   cost: number;
 };
 

@@ -934,6 +934,11 @@ svg {
   color: var(--danger-text);
 }
 
+.catalog-tag.image-illustrative {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
 .catalog-card-body h3 {
   margin: 0;
   font-size: 1rem;
@@ -945,6 +950,13 @@ svg {
   margin: 0;
   color: var(--text-soft);
   font-size: 0.9rem;
+}
+
+.catalog-card-image-note {
+  margin: -4px 0 0;
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  line-height: 1.45;
 }
 
 .catalog-card-price {
@@ -1096,6 +1108,26 @@ svg {
   margin: 0;
   color: var(--text-soft);
   line-height: 1.65;
+}
+
+.product-detail-illustrative {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface-soft);
+}
+
+.product-detail-illustrative p {
+  margin: 0;
+  color: var(--text-soft);
+  line-height: 1.6;
+}
+
+.product-detail-illustrative a {
+  color: var(--accent);
+  font-weight: 700;
 }
 
 .product-detail-message {
