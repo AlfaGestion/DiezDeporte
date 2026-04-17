@@ -74,6 +74,12 @@ export function resolveImageUrl(
   return `${base}${cleanPath}`;
 }
 
+export function buildImageProxyUrl(imageUrl: string | null) {
+  if (!imageUrl) return null;
+  if (!/^https?:\/\//i.test(imageUrl)) return imageUrl;
+  return `/api/image-proxy?url=${encodeURIComponent(imageUrl)}`;
+}
+
 export function formatCurrency(value: number) {
   return new Intl.NumberFormat("es-AR", {
     style: "currency",

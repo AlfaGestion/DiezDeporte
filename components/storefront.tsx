@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
+  buildImageProxyUrl,
   cartItemCount,
   formatCurrency,
   getStockBadgeClass,
@@ -259,9 +260,10 @@ export function Storefront({
 
   const whatsappHref = resolveWhatsappHref(settings.supportWhatsapp);
   const resolvedHeroImageUrl = heroImageUrl || settings.heroImageUrl;
+  const displayHeroImageUrl = buildImageProxyUrl(resolvedHeroImageUrl);
   const heroStyle = resolvedHeroImageUrl
     ? {
-        backgroundImage: `linear-gradient(90deg, rgba(6, 10, 18, 0.72), rgba(6, 10, 18, 0.2)), url("${resolvedHeroImageUrl}")`,
+        backgroundImage: `linear-gradient(90deg, rgba(6, 10, 18, 0.72), rgba(6, 10, 18, 0.2)), url("${displayHeroImageUrl}")`,
       }
     : undefined;
   const mapEmbedUrl = buildMapEmbedUrl(settings.storeAddress);
@@ -672,7 +674,7 @@ export function Storefront({
                 aria-label={`Filtrar por ${image.label}`}
                 title={`Filtrar por ${image.label}`}
               >
-                <img src={image.src} alt={image.alt} loading="lazy" />
+                <img src={buildImageProxyUrl(image.src) || image.src} alt={image.alt} loading="lazy" />
               </button>
             ))}
           </section>
@@ -694,7 +696,11 @@ export function Storefront({
                   onClick={() => applyAudienceFilter(tile.filterValue as AudienceFilter)}
                 >
                   <div className="promo-tile-media">
-                    <img src={tile.src} alt={tile.alt} loading="lazy" />
+                    <img
+                      src={buildImageProxyUrl(tile.src) || tile.src}
+                      alt={tile.alt}
+                      loading="lazy"
+                    />
                   </div>
                   <div className="promo-tile-copy">
                     <strong>{tile.label}</strong>
@@ -889,7 +895,7 @@ export function Storefront({
                     <div className="catalog-card-media">
                       {product.imageUrl ? (
                         <img
-                          src={product.imageUrl}
+                          src={buildImageProxyUrl(product.imageUrl) || product.imageUrl}
                           alt={product.description}
                           loading="lazy"
                         />
@@ -1062,7 +1068,10 @@ export function Storefront({
               <div className="product-detail-media">
                 {resolvedSelectedProduct.imageUrl ? (
                   <img
-                    src={resolvedSelectedProduct.imageUrl}
+                    src={
+                      buildImageProxyUrl(resolvedSelectedProduct.imageUrl) ||
+                      resolvedSelectedProduct.imageUrl
+                    }
                     alt={resolvedSelectedProduct.description}
                     loading="eager"
                   />
