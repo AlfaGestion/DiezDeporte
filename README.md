@@ -35,6 +35,18 @@ npm run dev
 
 Abrir `http://localhost:3000`.
 
+## Exponer por internet
+
+Para usarlo con `ngrok` o un tunel similar, conviene levantarlo en modo preview:
+
+```bash
+npm run preview
+```
+
+Despues apuntar el tunel al puerto `3000`.
+
+`next dev` sirve para trabajo local, pero por tuneles puede fallar la parte interactiva del cliente por el websocket de HMR.
+
 ## Notas de integracion
 
 - El catalogo usa la columna de precio indicada en `APP_PRICE_COLUMN` sobre `V_MA_ARTICULOS`.

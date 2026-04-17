@@ -4,8 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:webpack": "next dev --webpack",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "preview": "next build && next start -H 0.0.0.0"
   },
   "dependencies": {
     "mssql": "^12.3.0",
