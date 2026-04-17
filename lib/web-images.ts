@@ -12,21 +12,41 @@ type CachedSearch = {
   fetchedAt: number;
 };
 
+type CachedPlaceholderCheck = {
+  isPlaceholder: boolean;
+  fetchedAt: number;
+};
+
 declare global {
   // eslint-disable-next-line no-var
   var __diezDeportesWebImageCache: Map<string, CachedSearch> | undefined;
+  // eslint-disable-next-line no-var
+  var __diezDeportesPlaceholderCache: Map<string, CachedPlaceholderCheck> | undefined;
 }
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const BING_IMAGE_SEARCH_URL = "https://www.bing.com/images/search";
 
-export async function searchProductImageOnWeb(code: string, description: string) {
-  const cacheKey = `${code.trim().toUpperCase()}::${description.trim().toUpperCase()}`;
+export async function searchProductImageOnWeb(
+  code: string,
+  description: string,
+  currentImageUrl?: string | null,
+) {
+  const cacheKey = [
+    code.trim().toUpperCase(),
+    description.trim().toUpperCase(),
+    currentImageUrl?.trim() || "",
+  ].join("::");
   const cache = getWebImageCache();
   const cached = cache.get(cacheKey);
 
   if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
     return cached.result;
+  }
+
+  if (currentImageUrl && !(await shouldReplaceCurrentImage(currentImageUrl))) {
+    cache.set(cacheKey, { result: null, fetchedAt: Date.now() });
+    return null;
   }
 
   const query = buildSearchQuery(description, code);
@@ -47,6 +67,14 @@ function getWebImageCache() {
   }
 
   return global.__diezDeportesWebImageCache;
+}
+
+function getPlaceholderCache() {
+  if (!global.__diezDeportesPlaceholderCache) {
+    global.__diezDeportesPlaceholderCache = new Map<string, CachedPlaceholderCheck>();
+  }
+
+  return global.__diezDeportesPlaceholderCache;
 }
 
 function buildSearchQuery(description: string, code: string) {
@@ -71,6 +99,31 @@ async function fetchSearchHtml(query: string) {
   }
 
   return response.text();
+}
+
+async function shouldReplaceCurrentImage(currentImageUrl: string) {
+  if (!isOdooProductImage(currentImageUrl)) {
+    return false;
+  }
+
+  const cache = getPlaceholderCache();
+  const cached = cache.get(currentImageUrl);
+  if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
+    return cached.isPlaceholder;
+  }
+
+  const response = await fetch(currentImageUrl, {
+    method: "HEAD",
+    cache: "no-store",
+    headers: {
+      "User-Agent": "Mozilla/5.0",
+    },
+  });
+
+  const disposition = response.headers.get("content-disposition") || "";
+  const isPlaceholder = /placeholder_thumbnail/i.test(disposition);
+  cache.set(currentImageUrl, { isPlaceholder, fetchedAt: Date.now() });
+  return isPlaceholder;
 }
 
 function pickBestImageResult(html: string, query: string) {
@@ -122,6 +175,10 @@ function normalizeRemoteUrl(value?: string | null) {
   if (!value) return null;
   if (!/^https?:\/\//i.test(value)) return null;
   return value.trim();
+}
+
+function isOdooProductImage(value: string) {
+  return /https?:\/\/diezdeportes\.odoo\.com\/web\/image\/product\.template\//i.test(value);
 }
 
 function scoreBingCandidate(queryTokens: string[], text: string) {

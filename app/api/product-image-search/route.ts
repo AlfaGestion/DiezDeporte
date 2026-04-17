@@ -8,12 +8,17 @@ export async function GET(request: NextRequest) {
   try {
     const code = request.nextUrl.searchParams.get("code")?.trim() || "";
     const description = request.nextUrl.searchParams.get("description")?.trim() || "";
+    const currentImageUrl = request.nextUrl.searchParams.get("currentImageUrl")?.trim() || "";
 
     if (!description) {
       return NextResponse.json({ result: null });
     }
 
-    const result = await searchProductImageOnWeb(code, description);
+    const result = await searchProductImageOnWeb(
+      code,
+      description,
+      currentImageUrl || null,
+    );
     return NextResponse.json({ result });
   } catch (error) {
     const message =

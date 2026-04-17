@@ -309,10 +309,10 @@ export function Storefront({
 
   useEffect(() => {
     const candidates = resolvedFilteredProducts
-      .filter((product) => product.imageMode === "none")
+      .filter(shouldAttemptWebImageSearch)
       .slice(0, 12);
 
-    if (resolvedSelectedProduct && resolvedSelectedProduct.imageMode === "none") {
+    if (resolvedSelectedProduct && shouldAttemptWebImageSearch(resolvedSelectedProduct)) {
       candidates.unshift(resolvedSelectedProduct);
     }
 
@@ -326,10 +326,6 @@ export function Storefront({
   }, [resolvedFilteredProducts, resolvedSelectedProduct]);
 
   function resolveProductImage(product: Product): Product {
-    if (product.imageMode !== "none") {
-      return product;
-    }
-
     const override = webImageOverrides[product.id];
     if (!override) {
       return product;
@@ -345,7 +341,7 @@ export function Storefront({
   }
 
   async function fetchWebImageForProduct(product: Product) {
-    if (product.imageMode !== "none") return;
+    if (!shouldAttemptWebImageSearch(product)) return;
     if (Object.prototype.hasOwnProperty.call(webImageOverrides, product.id)) return;
     if (pendingWebImageSearchesRef.current.has(product.id)) return;
 
@@ -353,7 +349,7 @@ export function Storefront({
 
     try {
       const response = await fetch(
-        `/api/product-image-search?code=${encodeURIComponent(product.code)}&description=${encodeURIComponent(product.description)}`,
+        `/api/product-image-search?code=${encodeURIComponent(product.code)}&description=${encodeURIComponent(product.description)}&currentImageUrl=${encodeURIComponent(product.imageUrl || "")}`,
       );
 
       if (!response.ok) {
@@ -376,6 +372,19 @@ export function Storefront({
     } finally {
       pendingWebImageSearchesRef.current.delete(product.id);
     }
+  }
+
+  function shouldAttemptWebImageSearch(product: Product) {
+    if (product.imageMode === "none") {
+      return true;
+    }
+
+    return Boolean(
+      product.imageUrl &&
+        /https?:\/\/diezdeportes\.odoo\.com\/web\/image\/product\.template\//i.test(
+          product.imageUrl,
+        ),
+    );
   }
 
   function applyAudienceFilter(nextAudience: AudienceFilter) {
