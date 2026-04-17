@@ -203,6 +203,13 @@ svg {
   text-transform: none;
 }
 
+.site-logo img {
+  display: block;
+  width: auto;
+  height: 46px;
+  object-fit: contain;
+}
+
 .site-nav {
   display: flex;
   justify-content: center;
@@ -1441,6 +1448,10 @@ svg {
 
 .footer-logo {
   color: var(--footer-text);
+}
+
+.footer-logo img {
+  height: 52px;
 }
 
 .site-footer-copy p {

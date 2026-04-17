@@ -60,6 +60,7 @@ export type OrderSummary = {
 
 export type PublicStoreSettings = {
   storeName: string;
+  logoUrl: string;
   storeTagline: string;
   allowBackorders: boolean;
   showOutOfStock: boolean;

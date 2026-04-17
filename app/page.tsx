@@ -20,6 +20,7 @@ export default async function HomePage() {
         initialProducts={products}
         settings={settings}
         brandImages={odooAssets.brandImages}
+        logoUrl={odooAssets.logoUrl ?? settings.logoUrl}
         heroImageUrl={odooAssets.heroImageUrl ?? null}
         promoTiles={odooAssets.promoTiles ?? []}
       />
@@ -35,6 +36,7 @@ export default async function HomePage() {
         initialProducts={[]}
         settings={settings}
         brandImages={[]}
+        logoUrl={settings.logoUrl}
         heroImageUrl={null}
         promoTiles={[]}
         loadError={message}

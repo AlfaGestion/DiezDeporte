@@ -52,6 +52,7 @@ type StorefrontProps = {
   initialProducts: Product[];
   settings: PublicStoreSettings;
   brandImages: BrandImage[];
+  logoUrl: string | null;
   heroImageUrl: string | null;
   promoTiles: PromoTile[];
   loadError?: string;
@@ -68,6 +69,7 @@ export function Storefront({
   initialProducts,
   settings,
   brandImages,
+  logoUrl,
   heroImageUrl,
   promoTiles,
   loadError,
@@ -288,6 +290,7 @@ export function Storefront({
   const itemCount = cartItemCount(cart);
 
   const whatsappHref = resolveWhatsappHref(settings.supportWhatsapp);
+  const resolvedLogoUrl = buildImageProxyUrl(logoUrl || settings.logoUrl);
   const resolvedHeroImageUrl = heroImageUrl || settings.heroImageUrl;
   const displayHeroImageUrl = buildImageProxyUrl(resolvedHeroImageUrl);
   const heroStyle = resolvedHeroImageUrl
@@ -609,8 +612,14 @@ export function Storefront({
       <main className="shop-page" id="top">
         <header className="site-header">
           <a className="site-logo" href="#top" aria-label={settings.storeName}>
-            <span>Diez</span>
-            <span>Deportes</span>
+            {resolvedLogoUrl ? (
+              <img src={resolvedLogoUrl} alt={settings.storeName} />
+            ) : (
+              <>
+                <span>Diez</span>
+                <span>Deportes</span>
+              </>
+            )}
           </a>
 
           <nav className="site-nav" aria-label="Principal">
@@ -1074,8 +1083,14 @@ export function Storefront({
                 href="#top"
                 aria-label={settings.storeName}
               >
-                <span>Diez</span>
-                <span>Deportes</span>
+                {resolvedLogoUrl ? (
+                  <img src={resolvedLogoUrl} alt={settings.storeName} />
+                ) : (
+                  <>
+                    <span>Diez</span>
+                    <span>Deportes</span>
+                  </>
+                )}
               </a>
               <p>{settings.storeAddress}</p>
             </div>

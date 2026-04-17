@@ -12,6 +12,7 @@ type OdooProductImage = {
 type OdooAssets = {
   brandImages: BrandImage[];
   productImages: Map<string, OdooProductImage>;
+  logoUrl: string | null;
   heroImageUrl: string | null;
   promoTiles: PromoTile[];
   fetchedAt: number;
@@ -135,6 +136,15 @@ function parseHeroImage(html: string, baseUrl: string) {
   return absoluteUrl(baseUrl, match[1]);
 }
 
+function parseLogoImage(html: string, baseUrl: string) {
+  const match = html.match(/<img[^>]+src="([^"]*\/web\/image\/website\/\d+\/logo\/[^"]+)"/i);
+  if (!match) {
+    return null;
+  }
+
+  return absoluteUrl(baseUrl, match[1]);
+}
+
 function parsePromoTiles(html: string, baseUrl: string) {
   const tiles: PromoTile[] = [];
   const regex =
@@ -250,6 +260,7 @@ export async function getOdooAssets(): Promise<OdooAssets> {
     return {
       brandImages: [],
       productImages: new Map(),
+      logoUrl: null,
       heroImageUrl: null,
       promoTiles: [],
       fetchedAt: Date.now(),
@@ -261,6 +272,7 @@ export async function getOdooAssets(): Promise<OdooAssets> {
     return {
       brandImages: cached.brandImages ?? [],
       productImages: cached.productImages ?? new Map(),
+      logoUrl: cached.logoUrl ?? null,
       heroImageUrl: cached.heroImageUrl ?? null,
       promoTiles: cached.promoTiles ?? [],
       fetchedAt: cached.fetchedAt,
@@ -295,6 +307,7 @@ export async function getOdooAssets(): Promise<OdooAssets> {
 
   const assets: OdooAssets = {
     brandImages: parseBrandImages(firstPageHtml, shopUrl),
+    logoUrl: parseLogoImage(firstPageHtml, shopUrl),
     heroImageUrl: parseHeroImage(firstPageHtml, shopUrl),
     promoTiles: parsePromoTiles(firstPageHtml, shopUrl),
     productImages,

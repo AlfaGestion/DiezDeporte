@@ -48,6 +48,9 @@ export function getPublicStoreSettings(): PublicStoreSettings {
 
   return {
     storeName: process.env.NEXT_PUBLIC_STORE_NAME?.trim() || "Diez Deportes",
+    logoUrl:
+      process.env.NEXT_PUBLIC_STORE_LOGO_URL?.trim() ||
+      "https://diezdeportes.odoo.com/web/image/website/2/logo/Diez%20Deportes?unique=cdf28c5",
     storeTagline:
       process.env.NEXT_PUBLIC_STORE_TAGLINE?.trim() ||
       "Equipamiento deportivo con stock real y pedido directo",
