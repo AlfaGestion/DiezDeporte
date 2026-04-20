@@ -1,5 +1,6 @@
 import "server-only";
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { cookies } from "next/headers";
 import {
   authenticateAdminUser,
   findAdminUserById,
@@ -143,6 +144,11 @@ export async function getAdminSessionUser(token: string | undefined) {
     superAdmin: user.superAdmin,
     enabled: user.enabled,
   } satisfies AdminSessionUser;
+}
+
+export async function getCurrentAdminSessionUser() {
+  const cookieStore = await cookies();
+  return getAdminSessionUser(cookieStore.get(ADMIN_SESSION_COOKIE)?.value);
 }
 
 export function getAdminCookieOptions() {

@@ -11,12 +11,16 @@ import {
 import {
   ADMIN_SESSION_COOKIE,
   createAdminSessionToken,
+  getCurrentAdminSessionUser,
   getAdminCookieOptions,
-  getAdminSessionUser,
   isAdminConfigured,
   verifyAdminCredentials,
 } from "@/lib/admin-auth";
-import { avanzarEstadoPedido } from "@/lib/services/orderService";
+import {
+  avanzarEstadoPedido,
+  updateOrderStatus,
+} from "@/lib/services/orderService";
+import type { OrderState } from "@/lib/types/order";
 import {
   createAdminUser,
   deleteAdminUser,
@@ -27,9 +31,7 @@ import { saveAdminConfig } from "@/lib/admin-config";
 import { resolvePendingPaymentStatus } from "@/lib/web-payments";
 
 async function requireAdminSession() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(ADMIN_SESSION_COOKIE)?.value;
-  const user = await getAdminSessionUser(token);
+  const user = await getCurrentAdminSessionUser();
 
   if (!user) {
     redirect("/admin/login");
@@ -63,6 +65,46 @@ function buildUsersRedirect(input: {
   }
 
   return `/admin?${params.toString()}`;
+}
+
+function buildRedirectWithParams(
+  basePath: string,
+  params: Record<string, string | null | undefined>,
+) {
+  const url = new URL(basePath, "http://admin.local");
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value) {
+      url.searchParams.set(key, value);
+    } else {
+      url.searchParams.delete(key);
+    }
+  }
+
+  const query = url.searchParams.toString();
+  return `${url.pathname}${query ? `?${query}` : ""}`;
+}
+
+function resolveAdminReturnTo(formData: FormData, fallback = "/admin") {
+  const returnTo =
+    typeof formData.get("returnTo") === "string"
+      ? String(formData.get("returnTo"))
+      : "";
+
+  if (returnTo.startsWith("/admin")) {
+    return returnTo;
+  }
+
+  const legacyStatus =
+    typeof formData.get("statusFilter") === "string"
+      ? String(formData.get("statusFilter"))
+      : "";
+
+  if (legacyStatus && legacyStatus !== "orders") {
+    return `/admin?status=${encodeURIComponent(legacyStatus)}`;
+  }
+
+  return fallback;
 }
 
 export async function loginAdminAction(formData: FormData) {
@@ -280,60 +322,86 @@ export async function refreshAdminOrderAction(formData: FormData) {
   await requireAdminSession();
 
   const pendingOrderId = Number(formData.get("pendingOrderId") || "");
-  const statusFilter =
-    typeof formData.get("statusFilter") === "string"
-      ? String(formData.get("statusFilter"))
-      : "orders";
+  const returnTo = resolveAdminReturnTo(formData);
 
   if (Number.isFinite(pendingOrderId) && pendingOrderId > 0) {
     await resolvePendingPaymentStatus({ pendingOrderId });
   }
 
   revalidatePath("/admin");
-  const suffix =
-    statusFilter && statusFilter !== "orders"
-      ? `?status=${encodeURIComponent(statusFilter)}&saved=refresh`
-      : "?saved=refresh";
-  redirect(`/admin${suffix}`);
+  redirect(buildRedirectWithParams(returnTo, { saved: "refresh", error: null }));
 }
 
 export async function advanceAdminOrderAction(formData: FormData) {
   await requireAdminSession();
 
   const orderId = Number(formData.get("orderId") || "");
-  const statusFilter =
-    typeof formData.get("statusFilter") === "string"
-      ? String(formData.get("statusFilter"))
-      : "orders";
+  const returnTo = resolveAdminReturnTo(formData);
 
   try {
     if (Number.isFinite(orderId) && orderId > 0) {
-      await avanzarEstadoPedido(orderId);
+      await avanzarEstadoPedido(orderId, { origin: "admin" });
     }
   } catch (error) {
-    const suffix =
-      statusFilter && statusFilter !== "orders"
-        ? `?status=${encodeURIComponent(statusFilter)}`
-        : "";
-
     if (error instanceof OrderNotFoundError) {
-      redirect(`/admin${suffix}${suffix ? "&" : "?"}error=order-not-found`);
+      redirect(
+        buildRedirectWithParams(returnTo, { error: "order-not-found", saved: null }),
+      );
     }
 
     if (
       error instanceof InvalidOrderTransitionError ||
       error instanceof OrderValidationError
     ) {
-      redirect(`/admin${suffix}${suffix ? "&" : "?"}error=order-advance`);
+      redirect(
+        buildRedirectWithParams(returnTo, { error: "order-advance", saved: null }),
+      );
     }
 
-    redirect(`/admin${suffix}${suffix ? "&" : "?"}error=order-advance`);
+    redirect(buildRedirectWithParams(returnTo, { error: "order-advance", saved: null }));
   }
 
   revalidatePath("/admin");
-  const suffix =
-    statusFilter && statusFilter !== "orders"
-      ? `?status=${encodeURIComponent(statusFilter)}&saved=advance`
-      : "?saved=advance";
-  redirect(`/admin${suffix}`);
+  redirect(buildRedirectWithParams(returnTo, { saved: "advance", error: null }));
+}
+
+export async function updateAdminOrderStateAction(formData: FormData) {
+  await requireAdminSession();
+
+  const orderId = Number(formData.get("orderId") || "");
+  const nextState =
+    typeof formData.get("nextState") === "string"
+      ? (String(formData.get("nextState")) as OrderState)
+      : null;
+  const returnTo = resolveAdminReturnTo(formData);
+
+  if (!nextState) {
+    redirect(buildRedirectWithParams(returnTo, { error: "order-update", saved: null }));
+  }
+
+  try {
+    if (Number.isFinite(orderId) && orderId > 0) {
+      await updateOrderStatus(orderId, nextState, { origin: "admin" });
+    }
+  } catch (error) {
+    if (error instanceof OrderNotFoundError) {
+      redirect(
+        buildRedirectWithParams(returnTo, { error: "order-not-found", saved: null }),
+      );
+    }
+
+    if (
+      error instanceof InvalidOrderTransitionError ||
+      error instanceof OrderValidationError
+    ) {
+      redirect(
+        buildRedirectWithParams(returnTo, { error: "order-update", saved: null }),
+      );
+    }
+
+    redirect(buildRedirectWithParams(returnTo, { error: "order-update", saved: null }));
+  }
+
+  revalidatePath("/admin");
+  redirect(buildRedirectWithParams(returnTo, { saved: "state-updated", error: null }));
 }

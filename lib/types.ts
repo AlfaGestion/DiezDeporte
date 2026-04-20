@@ -1,3 +1,10 @@
+import type {
+  OrderListView,
+  OrderPaymentStatus,
+  OrderState,
+  OrderType,
+} from "@/lib/types/order";
+
 export type ProductImageMode = "none" | "exact" | "illustrative";
 
 export type Product = {
@@ -140,36 +147,49 @@ export type AdminConfigField = {
   placeholder?: string;
 };
 
-export type AdminOrderStatusFilter = PaymentFlowStatus | "orders";
+export type AdminOrderBucket = OrderListView | "cancelados" | "error";
 
 export type AdminOrderItem = {
   productId: string;
   quantity: number;
 };
 
-export type AdminOrderRecord = PaymentStatusResult & {
+export type AdminOrderRecord = {
+  id: number;
   orderNumber: string;
+  externalReference: string;
   orderState: OrderState;
+  orderType: OrderType;
+  paymentStatus: OrderPaymentStatus;
+  paymentStatusDetail: string | null;
+  paymentId: string | null;
+  preferenceId: string | null;
+  total: number;
+  itemCount: number;
   customerPhone: string;
+  customerName: string;
+  customerEmail: string;
   customerAddress: string;
   customerCity: string;
   customerProvince: string;
   customerPostalCode: string;
-  deliveryMethod: string;
   notes: string;
   items: AdminOrderItem[];
   trackingNumber: string | null;
   qrCode: string | null;
-  approvedAt: string;
-  finalizedAt: string;
-  lastSyncAt: string;
+  pickupCode: string | null;
+  createdAt: string;
+  updatedAt: string;
+  nextActionLabel: string | null;
+  bucket: AdminOrderBucket;
+  requiresAttention: boolean;
   paymentMethodId: string | null;
   paymentTypeId: string | null;
 };
 
 export type AdminOrdersSnapshot = {
   orders: AdminOrderRecord[];
-  summary: Record<PaymentFlowStatus, number> & {
+  summary: Record<AdminOrderBucket, number> & {
     total: number;
   };
 };

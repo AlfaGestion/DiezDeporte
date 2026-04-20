@@ -1,15 +1,20 @@
+import {
+  ORDER_LIST_VIEWS,
+  ORDER_PAYMENT_STATES,
+  ORDER_STATES,
+  ORDER_TYPES,
+} from "@/lib/types/order";
 import type {
   Order,
+  OrderFilters,
+  OrderListView,
   OrderPaymentStatus,
   OrderState,
   OrderType,
   StoredOrder,
 } from "@/lib/types/order";
 
-export const ORDER_TRANSITIONS: Record<
-  OrderState,
-  OrderState[]
-> = {
+export const ORDER_TRANSITIONS: Record<OrderState, OrderState[]> = {
   PENDIENTE: ["APROBADO", "CANCELADO", "ERROR"],
   APROBADO: ["FACTURADO", "CANCELADO", "ERROR"],
   FACTURADO: ["PREPARANDO", "CANCELADO", "ERROR"],
@@ -21,15 +26,36 @@ export const ORDER_TRANSITIONS: Record<
   ERROR: [],
 };
 
+export const ORDER_VIEW_STATES: Record<
+  Exclude<OrderListView, "pedidos">,
+  OrderState[]
+> = {
+  pendientes: ["PENDIENTE", "APROBADO"],
+  procesados: ["FACTURADO", "PREPARANDO", "ENVIADO"],
+  pendientes_retiro: ["LISTO_PARA_RETIRO"],
+  finalizados: ["ENTREGADO"],
+};
+
 export const EMAIL_TRIGGER_STATES: OrderState[] = [
   "FACTURADO",
   "LISTO_PARA_RETIRO",
   "ENVIADO",
 ];
 
+type NormalizeOrderFiltersInput = {
+  estado?: string | null;
+  estado_pago?: string | null;
+  tipo_pedido?: string | null;
+  vista?: string | null;
+  q?: string | null;
+  fecha_desde?: string | null;
+  fecha_hasta?: string | null;
+  limit?: number | string | null;
+};
+
 export class OrderNotFoundError extends Error {
   constructor(orderId: number | string) {
-    super(`No se encontró el pedido ${orderId}.`);
+    super(`No se encontro el pedido ${orderId}.`);
     this.name = "OrderNotFoundError";
   }
 }
@@ -46,6 +72,63 @@ export class OrderValidationError extends Error {
     super(message);
     this.name = "OrderValidationError";
   }
+}
+
+function normalizeString(value: string | null | undefined) {
+  const trimmed = (value || "").trim();
+  return trimmed || null;
+}
+
+function normalizeDateString(value: string | null | undefined) {
+  const trimmed = normalizeString(value);
+  if (!trimmed) {
+    return null;
+  }
+
+  const date = new Date(trimmed);
+  return Number.isNaN(date.getTime()) ? null : trimmed;
+}
+
+function normalizeLimit(value: number | string | null | undefined) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? Math.max(1, Math.min(200, Math.trunc(value))) : null;
+  }
+
+  const parsed = Number(value || "");
+  return Number.isFinite(parsed) ? Math.max(1, Math.min(200, Math.trunc(parsed))) : null;
+}
+
+export function isOrderState(value: string | null | undefined): value is OrderState {
+  return ORDER_STATES.includes((value || "") as OrderState);
+}
+
+export function isOrderPaymentStatus(
+  value: string | null | undefined,
+): value is OrderPaymentStatus {
+  return ORDER_PAYMENT_STATES.includes((value || "") as OrderPaymentStatus);
+}
+
+export function isOrderType(value: string | null | undefined): value is OrderType {
+  return ORDER_TYPES.includes((value || "") as OrderType);
+}
+
+export function isOrderListView(value: string | null | undefined): value is OrderListView {
+  return ORDER_LIST_VIEWS.includes((value || "") as OrderListView);
+}
+
+export function normalizeOrderFilters(
+  input: NormalizeOrderFiltersInput,
+): OrderFilters {
+  return {
+    estado: isOrderState(input.estado) ? input.estado : null,
+    estado_pago: isOrderPaymentStatus(input.estado_pago) ? input.estado_pago : null,
+    tipo_pedido: isOrderType(input.tipo_pedido) ? input.tipo_pedido : null,
+    vista: isOrderListView(input.vista) ? input.vista : null,
+    q: normalizeString(input.q),
+    fecha_desde: normalizeDateString(input.fecha_desde),
+    fecha_hasta: normalizeDateString(input.fecha_hasta),
+    limit: normalizeLimit(input.limit),
+  };
 }
 
 export function isFinalOrderState(state: OrderState) {
@@ -74,6 +157,54 @@ export function deriveNextOrderState(order: Pick<Order, "estado" | "tipo_pedido"
   }
 }
 
+export function getStatesForOrderView(view: OrderListView | null | undefined) {
+  if (!view || view === "pedidos") {
+    return null;
+  }
+
+  return ORDER_VIEW_STATES[view];
+}
+
+export function getOrderViewBucket(state: OrderState) {
+  switch (state) {
+    case "PENDIENTE":
+    case "APROBADO":
+      return "pendientes" as const;
+    case "FACTURADO":
+    case "PREPARANDO":
+    case "ENVIADO":
+      return "procesados" as const;
+    case "LISTO_PARA_RETIRO":
+      return "pendientes_retiro" as const;
+    case "ENTREGADO":
+      return "finalizados" as const;
+    case "CANCELADO":
+      return "cancelados" as const;
+    case "ERROR":
+      return "error" as const;
+    default:
+      return "pedidos" as const;
+  }
+}
+
+export function getNextActionLabel(order: Pick<Order, "estado" | "tipo_pedido">) {
+  switch (order.estado) {
+    case "PENDIENTE":
+      return "Aprobar";
+    case "APROBADO":
+      return "Facturar";
+    case "FACTURADO":
+      return "Preparar";
+    case "PREPARANDO":
+      return order.tipo_pedido === "retiro" ? "Listo para retirar" : "Enviar";
+    case "LISTO_PARA_RETIRO":
+    case "ENVIADO":
+      return "Finalizar";
+    default:
+      return null;
+  }
+}
+
 export function mapMercadoPagoStatusToOrderPaymentStatus(
   paymentStatus: string | null | undefined,
 ): OrderPaymentStatus {
@@ -99,12 +230,22 @@ export function buildOrderNumber() {
   return `WEB-${yyyymmdd}-${suffix}`;
 }
 
-export function buildQrPayload(order: Order) {
+export function buildPickupCode() {
+  const prefix = Date.now().toString(36).toUpperCase();
+  const suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `RET-${prefix}-${suffix}`;
+}
+
+export function buildQrPayload(
+  order: Pick<Order, "id" | "numero_pedido" | "nombre_cliente" | "tipo_pedido">,
+  pickupCode: string | null,
+) {
   return JSON.stringify({
     orderId: order.id,
     numeroPedido: order.numero_pedido,
     cliente: order.nombre_cliente,
     tipoPedido: order.tipo_pedido,
+    pickupCode,
   });
 }
 
@@ -151,4 +292,3 @@ export function formatOrderAsLegacySummary(order: Order, itemCount = 0) {
     itemCount,
   };
 }
-

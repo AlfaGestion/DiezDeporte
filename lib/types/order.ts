@@ -18,13 +18,41 @@ export const ORDER_PAYMENT_STATES = [
 
 export const ORDER_TYPES = ["retiro", "envio"] as const;
 
+export const ORDER_LIST_VIEWS = [
+  "pedidos",
+  "pendientes",
+  "procesados",
+  "pendientes_retiro",
+  "finalizados",
+] as const;
+
+export const ORDER_CHANGE_ORIGINS = [
+  "admin",
+  "webhook",
+  "sistema",
+] as const;
+
 export type OrderState = (typeof ORDER_STATES)[number];
 export type OrderPaymentStatus = (typeof ORDER_PAYMENT_STATES)[number];
 export type OrderType = (typeof ORDER_TYPES)[number];
+export type OrderListView = (typeof ORDER_LIST_VIEWS)[number];
+export type OrderChangeOrigin = (typeof ORDER_CHANGE_ORIGINS)[number];
 
 export type OrderItem = {
   productId: string;
   quantity: number;
+};
+
+export type OrderDocumentItem = {
+  id: number | null;
+  tc: string;
+  idComprobante: string;
+  sequence: number;
+  articleId: string;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  total: number;
 };
 
 export type OrderMetadata = {
@@ -42,6 +70,7 @@ export type OrderMetadata = {
   paymentTypeId?: string | null;
   paymentMethodId?: string | null;
   lastPaymentPayload?: string | null;
+  pickupCode?: string | null;
 };
 
 export type Order = {
@@ -75,6 +104,7 @@ export type OrderStatusLog = {
   estadoAnterior: OrderState | null;
   estadoNuevo: OrderState;
   fecha: string;
+  origen: OrderChangeOrigin;
 };
 
 export type CreateOrderInput = {
@@ -112,3 +142,21 @@ export type UpdateOrderInput = Partial<
   >
 >;
 
+export type OrderFilters = {
+  estado?: OrderState | null;
+  estado_pago?: OrderPaymentStatus | null;
+  tipo_pedido?: OrderType | null;
+  vista?: OrderListView | null;
+  q?: string | null;
+  fecha_desde?: string | null;
+  fecha_hasta?: string | null;
+  limit?: number | null;
+};
+
+export type OrderDetail = {
+  order: StoredOrder;
+  logs: OrderStatusLog[];
+  documentTc: string | null;
+  documentNumber: string;
+  documentItems: OrderDocumentItem[];
+};

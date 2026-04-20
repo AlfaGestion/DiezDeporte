@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
+import { getCurrentAdminSessionUser } from "@/lib/admin-auth";
+import {
+  formatOrderAsLegacySummary,
+  normalizeOrderFilters,
+  OrderValidationError,
+} from "@/lib/models/order";
 import {
   createOrder,
   createOrderFromCheckoutPayload,
   getOrders,
   seedSampleOrders,
 } from "@/lib/services/orderService";
-import { formatOrderAsLegacySummary, OrderValidationError } from "@/lib/models/order";
 import type { CreateOrderInput, CreateOrderPayload } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -21,6 +26,12 @@ function isLegacyCheckoutPayload(payload: unknown): payload is CreateOrderPayloa
 }
 
 export async function GET(request: Request) {
+  const sessionUser = await getCurrentAdminSessionUser();
+
+  if (!sessionUser) {
+    return NextResponse.json({ error: "No autorizado." }, { status: 401 });
+  }
+
   try {
     const { searchParams } = new URL(request.url);
 
@@ -29,8 +40,18 @@ export async function GET(request: Request) {
       return NextResponse.json({ orders });
     }
 
-    const orders = await getOrders();
-    return NextResponse.json({ orders });
+    const filters = normalizeOrderFilters({
+      estado: searchParams.get("estado"),
+      estado_pago: searchParams.get("estado_pago"),
+      tipo_pedido: searchParams.get("tipo_pedido"),
+      vista: searchParams.get("vista"),
+      q: searchParams.get("q"),
+      fecha_desde: searchParams.get("fecha_desde"),
+      fecha_hasta: searchParams.get("fecha_hasta"),
+      limit: searchParams.get("limit"),
+    });
+    const orders = await getOrders(filters);
+    return NextResponse.json({ orders, filters });
   } catch (error) {
     console.error("Orders GET API error", error);
 
@@ -53,7 +74,7 @@ export async function POST(request: Request) {
     payload = (await request.json()) as CreateOrderPayload | CreateOrderInput;
   } catch {
     return NextResponse.json(
-      { error: "El cuerpo del pedido no es un JSON válido." },
+      { error: "El cuerpo del pedido no es un JSON valido." },
       { status: 400 },
     );
   }
@@ -71,7 +92,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const order = await createOrder(payload);
+    const order = await createOrder(payload, { origin: "sistema" });
     return NextResponse.json({ order }, { status: 201 });
   } catch (error) {
     console.error("Order API error", error);

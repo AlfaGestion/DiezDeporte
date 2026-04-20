@@ -1,5 +1,8 @@
 import "server-only";
-import { getMercadoPagoPayment } from "@/lib/mercado-pago";
+import {
+  createMercadoPagoPreference,
+  getMercadoPagoPayment,
+} from "@/lib/mercado-pago";
 import {
   formatOrderAsLegacySummary,
   mapMercadoPagoStatusToOrderPaymentStatus,
@@ -16,11 +19,14 @@ import {
   createOrder,
   markOrderPaymentStatus,
   registerMercadoPagoApproval,
-  updateOrderState,
+  updateOrderStatus,
 } from "@/lib/services/orderService";
-import type { CreateOrderPayload, PaymentPreferenceResponse, PaymentStatusResult } from "@/lib/types";
+import type {
+  CreateOrderPayload,
+  PaymentPreferenceResponse,
+  PaymentStatusResult,
+} from "@/lib/types";
 import type { StoredOrder } from "@/lib/types/order";
-import { createMercadoPagoPreference } from "@/lib/mercado-pago";
 
 async function findOrderByLookup(lookup: {
   pendingOrderId?: number | null;
@@ -48,11 +54,27 @@ async function findOrderByLookup(lookup: {
 }
 
 function toPaymentFlowStatus(order: StoredOrder): PaymentStatusResult["status"] {
-  if (order.estado === "ERROR") return "error";
-  if (order.estado === "CANCELADO") return "cancelled";
-  if (order.estado_pago === "rechazado") return "rejected";
-  if (order.estado === "APROBADO") return "approved";
-  if (["FACTURADO", "PREPARANDO", "LISTO_PARA_RETIRO", "ENVIADO", "ENTREGADO"].includes(order.estado)) {
+  if (order.estado === "ERROR") {
+    return "error";
+  }
+
+  if (order.estado === "CANCELADO") {
+    return "cancelled";
+  }
+
+  if (order.estado_pago === "rechazado") {
+    return "rejected";
+  }
+
+  if (order.estado === "APROBADO") {
+    return "approved";
+  }
+
+  if (
+    ["FACTURADO", "PREPARANDO", "LISTO_PARA_RETIRO", "ENVIADO", "ENTREGADO"].includes(
+      order.estado,
+    )
+  ) {
     return "finalized";
   }
 
@@ -60,8 +82,15 @@ function toPaymentFlowStatus(order: StoredOrder): PaymentStatusResult["status"] 
 }
 
 function toPaymentStatusResult(order: StoredOrder): PaymentStatusResult {
-  const itemCount = order.metadata.items?.reduce((sum, item) => sum + item.quantity, 0) || 0;
-  const hasOperationalOrder = ["FACTURADO", "PREPARANDO", "LISTO_PARA_RETIRO", "ENVIADO", "ENTREGADO"].includes(order.estado);
+  const itemCount =
+    order.metadata.items?.reduce((sum, item) => sum + item.quantity, 0) || 0;
+  const hasOperationalOrder = [
+    "FACTURADO",
+    "PREPARANDO",
+    "LISTO_PARA_RETIRO",
+    "ENVIADO",
+    "ENTREGADO",
+  ].includes(order.estado);
 
   return {
     pendingOrderId: order.id,
@@ -75,7 +104,8 @@ function toPaymentStatusResult(order: StoredOrder): PaymentStatusResult {
     total: order.monto_total,
     itemCount,
     checkoutUrl: null,
-    finalizationError: order.estado === "ERROR" ? "El pedido quedó en estado ERROR." : null,
+    finalizationError:
+      order.estado === "ERROR" ? "El pedido requiere revision manual." : null,
     customerName: order.nombre_cliente,
     customerEmail: order.email_cliente,
     createdAt: order.fecha_creacion,
@@ -84,12 +114,43 @@ function toPaymentStatusResult(order: StoredOrder): PaymentStatusResult {
   };
 }
 
+function buildMetadataPatch(
+  order: StoredOrder,
+  input: {
+    payment:
+      | Awaited<ReturnType<typeof getMercadoPagoPayment>>
+      | null;
+    preferenceId?: string | null;
+    externalReference?: string | null;
+  },
+) {
+  return {
+    ...order.metadata,
+    preferenceId:
+      input.payment?.preference_id?.trim() ||
+      input.preferenceId ||
+      order.metadata.preferenceId ||
+      null,
+    externalReference:
+      input.payment?.external_reference?.trim() ||
+      input.externalReference ||
+      order.metadata.externalReference ||
+      order.numero_pedido,
+    paymentStatusDetail: input.payment?.status_detail?.trim() || null,
+    paymentTypeId: input.payment?.payment_type_id?.trim() || null,
+    paymentMethodId: input.payment?.payment_method_id?.trim() || null,
+    lastPaymentPayload: input.payment
+      ? JSON.stringify(input.payment)
+      : order.metadata.lastPaymentPayload || null,
+  } satisfies StoredOrder["metadata"];
+}
+
 export async function createMercadoPagoOrder(input: {
   payload: CreateOrderPayload;
   requestUrl?: string;
 }): Promise<PaymentPreferenceResponse> {
   const draft = await buildCheckoutOrderDraft(input.payload);
-  const order = await createOrder(draft.input);
+  const order = await createOrder(draft.input, { origin: "sistema" });
   const externalReference = order.numero_pedido;
 
   try {
@@ -121,7 +182,7 @@ export async function createMercadoPagoOrder(input: {
       status: "pending",
     };
   } catch (error) {
-    await updateOrderState(order.id, "ERROR");
+    await updateOrderStatus(order.id, "ERROR", { origin: "sistema" });
     throw error;
   }
 }
@@ -148,20 +209,21 @@ export async function processMercadoPagoWebhook(input: {
   });
 
   if (!order) {
-    throw new OrderNotFoundError(input.pendingOrderId || input.paymentId || "desconocido");
+    throw new OrderNotFoundError(
+      input.pendingOrderId || input.paymentId || "desconocido",
+    );
   }
 
-  const paymentId = String(payment?.id || input.paymentId || order.id_pago || "").trim() || null;
-  const paymentStatus = mapMercadoPagoStatusToOrderPaymentStatus(payment?.status || order.estado_pago);
-  const metadataPatch = {
-    ...order.metadata,
-    preferenceId: payment?.preference_id?.trim() || input.preferenceId || order.metadata.preferenceId || null,
-    externalReference: payment?.external_reference?.trim() || input.externalReference || order.metadata.externalReference || order.numero_pedido,
-    paymentStatusDetail: payment?.status_detail?.trim() || null,
-    paymentTypeId: payment?.payment_type_id?.trim() || null,
-    paymentMethodId: payment?.payment_method_id?.trim() || null,
-    lastPaymentPayload: payment ? JSON.stringify(payment) : order.metadata.lastPaymentPayload || null,
-  };
+  const paymentId =
+    String(payment?.id || input.paymentId || order.id_pago || "").trim() || null;
+  const paymentStatus = mapMercadoPagoStatusToOrderPaymentStatus(
+    payment?.status || order.estado_pago,
+  );
+  const metadataPatch = buildMetadataPatch(order, {
+    payment,
+    preferenceId: input.preferenceId,
+    externalReference: input.externalReference,
+  });
 
   if (paymentStatus === "aprobado" && paymentId) {
     const updated = await registerMercadoPagoApproval({
@@ -173,7 +235,17 @@ export async function processMercadoPagoWebhook(input: {
     return toPaymentStatusResult(updated);
   }
 
-  const updated = await markOrderPaymentStatus(order.id, paymentStatus, paymentId, metadataPatch);
+  if (order.estado_pago === "aprobado") {
+    return toPaymentStatusResult(order);
+  }
+
+  const updated = await markOrderPaymentStatus(
+    order.id,
+    paymentStatus,
+    paymentId,
+    metadataPatch,
+  );
+
   return toPaymentStatusResult(updated);
 }
 
@@ -194,7 +266,8 @@ export async function resolveMercadoPagoPaymentStatus(input: {
       pendingOrderId: order.id,
       paymentId: input.paymentId || order.id_pago,
       preferenceId: input.preferenceId || order.metadata.preferenceId || null,
-      externalReference: input.externalReference || order.metadata.externalReference || null,
+      externalReference:
+        input.externalReference || order.metadata.externalReference || null,
     });
   }
 
