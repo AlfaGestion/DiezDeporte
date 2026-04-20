@@ -169,3 +169,5 @@ export type AdminOrdersSnapshot = {
     total: number;
   };
 };
+
+export * from "@/lib/types/order";

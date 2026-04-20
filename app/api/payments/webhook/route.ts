@@ -50,6 +50,7 @@ async function processWebhook(request: Request) {
       {
         received: true,
         status: status?.status || "pending",
+        orderId: status?.pendingOrderId || null,
       },
       { status: 200 },
     );

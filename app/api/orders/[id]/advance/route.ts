@@ -1,0 +1,42 @@
+import { NextResponse } from "next/server";
+import {
+  InvalidOrderTransitionError,
+  OrderNotFoundError,
+  OrderValidationError,
+} from "@/lib/models/order";
+import { avanzarEstadoPedido } from "@/lib/services/orderService";
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+export async function POST(
+  _request: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  const { id } = await context.params;
+  const orderId = Number(id);
+
+  if (!Number.isFinite(orderId) || orderId <= 0) {
+    return NextResponse.json({ error: "El id del pedido es inválido." }, { status: 400 });
+  }
+
+  try {
+    const order = await avanzarEstadoPedido(orderId);
+    return NextResponse.json({ order });
+  } catch (error) {
+    if (error instanceof OrderNotFoundError) {
+      return NextResponse.json({ error: error.message }, { status: 404 });
+    }
+
+    if (
+      error instanceof InvalidOrderTransitionError ||
+      error instanceof OrderValidationError
+    ) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+
+    console.error("Order advance API error", error);
+    return NextResponse.json({ error: "No se pudo avanzar el estado." }, { status: 500 });
+  }
+}
+

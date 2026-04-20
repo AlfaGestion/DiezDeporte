@@ -6,6 +6,8 @@ Tienda web base hecha con `Next.js + TypeScript + SQL Server` para vender articu
 - `V_MV_CpteInsumos`
 - `V_MV_Stock`
 - `TA_WEB_PEDIDOS_MP`
+- `TA_WEB_ORDERS`
+- `TA_WEB_ORDER_LOGS`
 
 ## Que incluye
 
@@ -14,8 +16,12 @@ Tienda web base hecha con `Next.js + TypeScript + SQL Server` para vender articu
 - checkout simple para cliente final
 - preferencia, webhook y estado de Mercado Pago
 - persistencia de pedidos web pendientes en SQL Server
+- flujo operativo de pedidos con estados controlados
 - grabacion transaccional del pedido cuando el pago queda aprobado
 - panel admin para configuracion y seguimiento de pedidos web
+- webhook de Mercado Pago con actualización idempotente del pedido
+- emails automáticos para facturación, retiro y envío
+- QR automático para retiros
 - stock por deposito
 - configuracion operativa en `TA_CONFIGURACION` con fallback por `.env`
 - opcion de reutilizar imagenes publicas desde Odoo
@@ -29,6 +35,7 @@ Copiar `.env.example` a `.env` y completar:
 - deposito de stock
 - `TC`, sucursal y letra del comprobante
 - `APP_MP_ACCESS_TOKEN` y `APP_PUBLIC_BASE_URL` para Mercado Pago si no los van a cargar desde `/admin`
+- `SMTP_*` si quieren envío real de emails; si no, el sistema registra el intento sin cortar el flujo
 - cuenta cliente por defecto si no usan `CUENTACONSUMIDORFINAL` en `TA_CONFIGURACION`
 - `ODOO_SHOP_URL` si quieren tomar imagenes y logos del shop actual
 
@@ -67,6 +74,10 @@ Despues apuntar el tunel al puerto `3000`.
 - Los usuarios del panel admin se guardan en `dbo.TA_UsuariosWeb`. La tabla se crea sola al primer acceso, migra `TA_UsuarioWeb` si existia y asegura el acceso inicial del panel.
 - `IDPROVINCIA` no se infiere automaticamente desde texto libre del checkout. El dato de provincia se guarda en observaciones.
 - Si `ODOO_SYNC_IMAGES=true`, la app lee las imagenes publicas del shop Odoo y las vincula por codigo de articulo.
+- Los pedidos operativos ahora viven en `TA_WEB_ORDERS` y cada cambio de estado se registra en `TA_WEB_ORDER_LOGS`.
+- `POST /api/orders/:id/advance` resuelve la transición siguiente desde `orderService`.
+- `PATCH /api/orders/:id/estado` permite mover el pedido de forma controlada sin duplicar lógica en la ruta.
+- `GET /api/orders?seed=true` crea datos de prueba básicos si la tabla todavía está vacía.
 
 ## Pendientes recomendados
 
