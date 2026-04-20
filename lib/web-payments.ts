@@ -42,6 +42,8 @@ function mapAdminRecord(
     pendingOrderId: order.id,
     externalReference: order.metadata.externalReference || order.numero_pedido,
     status: mapAdminStatusFilter(order),
+    orderNumber: order.numero_pedido,
+    orderState: order.estado,
     paymentStatus: order.estado_pago,
     paymentStatusDetail: order.metadata.paymentStatusDetail || null,
     paymentId: order.id_pago,
@@ -76,6 +78,8 @@ function mapAdminRecord(
     deliveryMethod: order.metadata.deliveryMethod || order.tipo_pedido,
     notes: order.metadata.customerNotes || "",
     items: order.metadata.items || [],
+    trackingNumber: order.numero_seguimiento,
+    qrCode: order.codigo_qr,
     approvedAt: order.estado_pago === "aprobado" ? order.fecha_actualizacion : "",
     finalizedAt:
       ["FACTURADO", "PREPARANDO", "LISTO_PARA_RETIRO", "ENVIADO", "ENTREGADO"].includes(

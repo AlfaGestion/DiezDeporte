@@ -4,6 +4,11 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import {
+  InvalidOrderTransitionError,
+  OrderNotFoundError,
+  OrderValidationError,
+} from "@/lib/models/order";
+import {
   ADMIN_SESSION_COOKIE,
   createAdminSessionToken,
   getAdminCookieOptions,
@@ -11,6 +16,7 @@ import {
   isAdminConfigured,
   verifyAdminCredentials,
 } from "@/lib/admin-auth";
+import { avanzarEstadoPedido } from "@/lib/services/orderService";
 import {
   createAdminUser,
   deleteAdminUser,
@@ -288,5 +294,46 @@ export async function refreshAdminOrderAction(formData: FormData) {
     statusFilter && statusFilter !== "orders"
       ? `?status=${encodeURIComponent(statusFilter)}&saved=refresh`
       : "?saved=refresh";
+  redirect(`/admin${suffix}`);
+}
+
+export async function advanceAdminOrderAction(formData: FormData) {
+  await requireAdminSession();
+
+  const orderId = Number(formData.get("orderId") || "");
+  const statusFilter =
+    typeof formData.get("statusFilter") === "string"
+      ? String(formData.get("statusFilter"))
+      : "orders";
+
+  try {
+    if (Number.isFinite(orderId) && orderId > 0) {
+      await avanzarEstadoPedido(orderId);
+    }
+  } catch (error) {
+    const suffix =
+      statusFilter && statusFilter !== "orders"
+        ? `?status=${encodeURIComponent(statusFilter)}`
+        : "";
+
+    if (error instanceof OrderNotFoundError) {
+      redirect(`/admin${suffix}${suffix ? "&" : "?"}error=order-not-found`);
+    }
+
+    if (
+      error instanceof InvalidOrderTransitionError ||
+      error instanceof OrderValidationError
+    ) {
+      redirect(`/admin${suffix}${suffix ? "&" : "?"}error=order-advance`);
+    }
+
+    redirect(`/admin${suffix}${suffix ? "&" : "?"}error=order-advance`);
+  }
+
+  revalidatePath("/admin");
+  const suffix =
+    statusFilter && statusFilter !== "orders"
+      ? `?status=${encodeURIComponent(statusFilter)}&saved=advance`
+      : "?saved=advance";
   redirect(`/admin${suffix}`);
 }

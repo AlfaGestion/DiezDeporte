@@ -148,6 +148,8 @@ export type AdminOrderItem = {
 };
 
 export type AdminOrderRecord = PaymentStatusResult & {
+  orderNumber: string;
+  orderState: OrderState;
   customerPhone: string;
   customerAddress: string;
   customerCity: string;
@@ -156,6 +158,8 @@ export type AdminOrderRecord = PaymentStatusResult & {
   deliveryMethod: string;
   notes: string;
   items: AdminOrderItem[];
+  trackingNumber: string | null;
+  qrCode: string | null;
   approvedAt: string;
   finalizedAt: string;
   lastSyncAt: string;

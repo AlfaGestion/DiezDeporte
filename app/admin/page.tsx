@@ -2,6 +2,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import {
+  advanceAdminOrderAction,
   createAdminUserAction,
   deleteAdminUserAction,
   logoutAdminAction,
@@ -29,6 +30,7 @@ import { listAdminPendingOrders } from "@/lib/web-payments";
 import type {
   AdminConfigField,
   AdminOrderStatusFilter,
+  OrderState,
   PaymentFlowStatus,
 } from "@/lib/types";
 
@@ -44,6 +46,7 @@ type AdminPageProps = {
     error?: string;
     create?: string;
     editUser?: string;
+    detailOrder?: string;
   }>;
 };
 
@@ -115,6 +118,75 @@ function getStatusLabel(status: PaymentFlowStatus | "orders") {
   }
 }
 
+function getOrderStateLabel(state: OrderState) {
+  switch (state) {
+    case "PENDIENTE":
+      return "Pendiente";
+    case "APROBADO":
+      return "Aprobado";
+    case "FACTURADO":
+      return "Facturado";
+    case "PREPARANDO":
+      return "Preparando";
+    case "LISTO_PARA_RETIRO":
+      return "Listo para retiro";
+    case "ENVIADO":
+      return "Enviado";
+    case "ENTREGADO":
+      return "Entregado";
+    case "CANCELADO":
+      return "Cancelado";
+    case "ERROR":
+      return "Error";
+    default:
+      return state;
+  }
+}
+
+function getOrderStateTone(state: OrderState) {
+  switch (state) {
+    case "ENTREGADO":
+    case "LISTO_PARA_RETIRO":
+    case "ENVIADO":
+      return "success";
+    case "FACTURADO":
+    case "PREPARANDO":
+    case "APROBADO":
+      return "accent";
+    case "CANCELADO":
+    case "ERROR":
+      return "danger";
+    default:
+      return "warning";
+  }
+}
+
+function isPickupOrder(deliveryMethod: string) {
+  return deliveryMethod.trim().toLowerCase().includes("retiro");
+}
+
+function getNextOrderActionLabel(
+  state: OrderState,
+  deliveryMethod: string,
+) {
+  switch (state) {
+    case "PENDIENTE":
+      return "Marcar aprobado";
+    case "APROBADO":
+      return "Facturar";
+    case "FACTURADO":
+      return "Pasar a preparando";
+    case "PREPARANDO":
+      return isPickupOrder(deliveryMethod) ? "Listo para retiro" : "Marcar enviado";
+    case "LISTO_PARA_RETIRO":
+      return "Marcar entregado";
+    case "ENVIADO":
+      return "Marcar entregado";
+    default:
+      return null;
+  }
+}
+
 function normalizeStatusFilter(
   rawValue: string | undefined,
 ): AdminOrderStatusFilter {
@@ -137,6 +209,7 @@ function buildAdminHref(input: {
   config?: string;
   create?: boolean;
   editUser?: number;
+  detailOrder?: number | null;
 }) {
   const params = new URLSearchParams();
 
@@ -158,6 +231,14 @@ function buildAdminHref(input: {
 
   if (input.editUser && Number.isFinite(input.editUser) && input.editUser > 0) {
     params.set("editUser", String(input.editUser));
+  }
+
+  if (
+    input.detailOrder &&
+    Number.isFinite(input.detailOrder) &&
+    input.detailOrder > 0
+  ) {
+    params.set("detailOrder", String(input.detailOrder));
   }
 
   const query = params.toString();
@@ -347,7 +428,7 @@ function AdminGlyph({ kind }: { kind: AdminGlyphKind }) {
 }
 
 export default async function AdminPage({ searchParams }: AdminPageProps) {
-  const [{ saved, status, view, config, error, create, editUser }, cookieStore] = await Promise.all([
+  const [{ saved, status, view, config, error, create, editUser, detailOrder }, cookieStore] = await Promise.all([
     searchParams,
     cookies(),
   ]);
@@ -404,6 +485,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
   const configTabMeta =
     sections.length === 1 ? "1 bloque" : `${sections.length} bloques`;
   const requestedEditUserId = normalizePositiveInt(editUser);
+  const detailOrderId = normalizePositiveInt(detailOrder);
   const editingUser = requestedEditUserId
     ? adminUsers.find((user) => user.id === requestedEditUserId) || null
     : null;
@@ -531,6 +613,10 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           <div className="message success">Estado del pedido actualizado.</div>
         ) : null}
 
+        {saved === "advance" ? (
+          <div className="message success">Estado del pedido avanzado correctamente.</div>
+        ) : null}
+
         {saved === "user" ? (
           <div className="message success">Usuario admin creado.</div>
         ) : null}
@@ -608,6 +694,16 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           <div className="message error">
             No puedes quitarte permisos de superadmin desde tu propia sesion.
           </div>
+        ) : null}
+
+        {error === "order-advance" ? (
+          <div className="message error">
+            No se pudo avanzar el pedido. Revisa el estado actual y las validaciones del flujo.
+          </div>
+        ) : null}
+
+        {error === "order-not-found" ? (
+          <div className="message error">No se encontro el pedido solicitado.</div>
         ) : null}
 
         <section className="admin-dashboard-layout">
@@ -763,183 +859,164 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                     No hay pedidos para el filtro seleccionado.
                   </div>
                 ) : (
-                  <div className="admin-order-list">
-                    {ordersSnapshot.orders.map((order) => (
-                      <article
-                        key={order.pendingOrderId}
-                        className={`admin-order-card status-${order.status}`}
-                      >
-                        <div className="admin-order-card-top">
-                          <div className="admin-order-main">
-                            <div className="admin-order-meta-row">
-                              <span className="admin-order-chip">
-                                Pedido #{order.pendingOrderId}
-                              </span>
-                              <span
-                                className={`admin-status-badge status-${order.status}`}
-                              >
-                                {getStatusLabel(order.status)}
-                              </span>
-                              <span className="admin-order-muted">
-                                {formatDateTime(order.createdAt)}
-                              </span>
-                            </div>
-
-                            <h3>{order.customerName || "Sin nombre"}</h3>
-                            <p className="admin-order-subtitle">
-                              {order.customerEmail || "Sin correo"}
-                              {order.customerPhone
-                                ? ` | ${order.customerPhone}`
-                                : " | Sin telefono"}
-                            </p>
-                          </div>
-
-                          <div className="admin-order-total">
-                            <strong>{formatCurrency(order.total)}</strong>
-                            <small>{order.itemCount} unidades</small>
-                            <span className="admin-order-muted">
-                              Pago: {order.paymentStatus || "Sin dato"}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="admin-order-summary-grid">
-                          <article className="admin-order-summary-card">
-                            <span>Pago MP</span>
-                            <strong>{order.paymentId || "Sin pago"}</strong>
-                            <small>{order.preferenceId || "Sin preferencia"}</small>
-                          </article>
-
-                          <article className="admin-order-summary-card">
-                            <span>Comprobante</span>
-                            <strong>
-                              {order.order
-                                ? `${order.order.tc} ${order.order.idComprobante}`
-                                : "Sin comprobante"}
-                            </strong>
-                            <small>{order.externalReference}</small>
-                          </article>
-
-                          <article className="admin-order-summary-card">
-                            <span>Entrega</span>
-                            <strong>{order.deliveryMethod || "Sin definir"}</strong>
-                            <small>{order.customerCity || "Sin localidad"}</small>
-                          </article>
-
-                          <article className="admin-order-summary-card">
-                            <span>Sincronizacion</span>
-                            <strong>{formatDateTime(order.updatedAt)}</strong>
-                            <small>
-                              {order.approvedAt
-                                ? `Aprobado ${formatDateTime(order.approvedAt)}`
-                                : "Sin aprobacion"}
-                            </small>
-                          </article>
-                        </div>
-
-                        {order.finalizationError ? (
-                          <div className="message error">
-                            {order.finalizationError}
-                          </div>
-                        ) : null}
-
-                        <div className="admin-order-footer">
-                          <div className="admin-order-footer-meta">
-                            <span className="admin-order-muted">
-                              Ref: {order.externalReference}
-                            </span>
-                            <span className="admin-order-muted">
-                              {order.paymentMethodId || "Metodo no informado"}
-                              {order.paymentTypeId
-                                ? ` · ${order.paymentTypeId}`
-                                : ""}
-                            </span>
-                          </div>
-
-                          <div className="admin-order-actions">
-                            <form action={refreshAdminOrderAction}>
-                              <input
-                                type="hidden"
-                                name="pendingOrderId"
-                                value={order.pendingOrderId}
-                              />
-                              <input
-                                type="hidden"
-                                name="statusFilter"
-                                value={statusFilter}
-                              />
-                              <button type="submit" className="admin-ghost-button">
-                                Actualizar
-                              </button>
-                            </form>
-
-                            {order.checkoutUrl ? (
-                              <a
-                                href={order.checkoutUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="admin-order-link"
-                              >
-                                Abrir pago
-                              </a>
-                            ) : null}
-                          </div>
-                        </div>
-
-                        <details className="admin-inline-details admin-order-details">
-                          <summary>Ver detalle</summary>
-
-                          <div className="admin-detail-grid">
-                            <div>
-                              <span className="admin-order-label">Direccion</span>
-                              <strong>{order.customerAddress || "Sin direccion"}</strong>
-                            </div>
-                            <div>
-                              <span className="admin-order-label">Localidad</span>
-                              <strong>{order.customerCity || "Sin localidad"}</strong>
-                            </div>
-                            <div>
-                              <span className="admin-order-label">Entrega</span>
+                  <div className="admin-table-wrap">
+                    <table className="admin-table">
+                      <thead>
+                        <tr>
+                          <th>Comprobante</th>
+                          <th>Cliente</th>
+                          <th>Entrega</th>
+                          <th>Estado</th>
+                          <th>Ultimo movimiento</th>
+                          <th>Creacion</th>
+                          <th>Pago MP</th>
+                          <th>Total</th>
+                          <th>Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {ordersSnapshot.orders.map((order) => (
+                          <tr key={order.pendingOrderId}>
+                            <td>
+                              <strong>
+                                {order.order
+                                  ? `${order.order.tc} ${order.order.idComprobante}`
+                                  : order.orderNumber}
+                              </strong>
+                              <small>Pedido #{order.pendingOrderId}</small>
+                              <small>Ref: {order.externalReference}</small>
+                            </td>
+                            <td>
+                              <strong>{order.customerName || "Sin nombre"}</strong>
+                              <small>{order.customerEmail || "Sin correo"}</small>
+                              <small>
+                                {order.customerPhone || "Sin telefono"}
+                              </small>
+                            </td>
+                            <td>
                               <strong>{order.deliveryMethod || "Sin definir"}</strong>
-                            </div>
-                            <div>
-                              <span className="admin-order-label">Actualizado</span>
-                              <strong>{formatDateTime(order.updatedAt)}</strong>
-                            </div>
-                            <div>
-                              <span className="admin-order-label">Aprobado</span>
-                              <strong>{formatDateTime(order.approvedAt)}</strong>
-                            </div>
-                            <div>
-                              <span className="admin-order-label">Finalizado</span>
-                              <strong>{formatDateTime(order.finalizedAt)}</strong>
-                            </div>
-                          </div>
+                              <small>{order.customerCity || "Sin localidad"}</small>
+                              <small>
+                                {order.customerAddress || "Sin direccion"}
+                              </small>
+                            </td>
+                            <td>
+                              <span
+                                className={`admin-status-badge status-${getOrderStateTone(
+                                  order.orderState,
+                                )}`}
+                              >
+                                {getOrderStateLabel(order.orderState)}
+                              </span>
+                              <small>{getStatusLabel(order.status)}</small>
+                              {order.finalizationError ? (
+                                <small>{order.finalizationError}</small>
+                              ) : getNextOrderActionLabel(
+                                  order.orderState,
+                                  order.deliveryMethod,
+                                ) ? (
+                                <small>
+                                  Sigue:{" "}
+                                  {getNextOrderActionLabel(
+                                    order.orderState,
+                                    order.deliveryMethod,
+                                  )}
+                                </small>
+                              ) : (
+                                <small>Sin pasos pendientes</small>
+                              )}
+                            </td>
+                            <td>{formatDateTime(order.updatedAt)}</td>
+                            <td>{formatDateTime(order.createdAt)}</td>
+                            <td>
+                              <strong>{order.paymentStatus || "Sin dato"}</strong>
+                              <small>
+                                {order.paymentMethodId || "Metodo no informado"}
+                                {order.paymentTypeId
+                                  ? ` · ${order.paymentTypeId}`
+                                  : ""}
+                              </small>
+                              <small>{order.paymentId || "Sin pago"}</small>
+                            </td>
+                            <td>
+                              <strong>{formatCurrency(order.total)}</strong>
+                              <small>{order.itemCount} unidades</small>
+                            </td>
+                            <td className="admin-actions-cell">
+                              <div className="admin-order-actions admin-order-actions-stack">
+                                {getNextOrderActionLabel(
+                                  order.orderState,
+                                  order.deliveryMethod,
+                                ) ? (
+                                  <form action={advanceAdminOrderAction}>
+                                    <input
+                                      type="hidden"
+                                      name="orderId"
+                                      value={order.pendingOrderId}
+                                    />
+                                    <input
+                                      type="hidden"
+                                      name="statusFilter"
+                                      value={statusFilter}
+                                    />
+                                    <button
+                                      type="submit"
+                                      className="submit-order-button"
+                                    >
+                                      {getNextOrderActionLabel(
+                                        order.orderState,
+                                        order.deliveryMethod,
+                                      )}
+                                    </button>
+                                  </form>
+                                ) : null}
 
-                          <div className="admin-item-list">
-                            <span className="admin-order-label">Articulos</span>
-                            {order.items.length === 0 ? (
-                              <p>Sin detalle de articulos.</p>
-                            ) : (
-                              <ul>
-                                {order.items.map((item) => (
-                                  <li key={`${order.pendingOrderId}-${item.productId}`}>
-                                    {item.productId} x {item.quantity}
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                          </div>
+                                <form action={refreshAdminOrderAction}>
+                                  <input
+                                    type="hidden"
+                                    name="pendingOrderId"
+                                    value={order.pendingOrderId}
+                                  />
+                                  <input
+                                    type="hidden"
+                                    name="statusFilter"
+                                    value={statusFilter}
+                                  />
+                                  <button
+                                    type="submit"
+                                    className="admin-ghost-button"
+                                  >
+                                    Actualizar
+                                  </button>
+                                </form>
 
-                          {order.notes ? (
-                            <div className="admin-item-list">
-                              <span className="admin-order-label">Notas</span>
-                              <p>{order.notes}</p>
-                            </div>
-                          ) : null}
-                        </details>
-                      </article>
-                    ))}
+                                {order.checkoutUrl ? (
+                                  <a
+                                    href={order.checkoutUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="admin-order-link"
+                                  >
+                                    Abrir pago
+                                  </a>
+                                ) : null}
+
+                                <Link
+                                  href={buildAdminHref({
+                                    view: "orders",
+                                    status: statusFilter,
+                                    detailOrder: order.pendingOrderId,
+                                  })}
+                                  className="admin-ghost-button"
+                                >
+                                  Ver detalle
+                                </Link>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 )}
               </section>
@@ -1412,6 +1489,33 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             )}
           </div>
         </section>
+
+        {activeView === "orders" && detailOrderId ? (
+          <section className="admin-detail-frame-overlay" aria-label="Detalle del pedido">
+            <div className="admin-detail-frame-shell">
+              <div className="admin-detail-frame-topbar">
+                <div>
+                  <span className="admin-pane-kicker">Detalle</span>
+                  <h3>Pedido #{detailOrderId}</h3>
+                </div>
+                <Link
+                  href={buildAdminHref({
+                    view: "orders",
+                    status: statusFilter,
+                  })}
+                  className="admin-ghost-button"
+                >
+                  Cerrar
+                </Link>
+              </div>
+              <iframe
+                title={`Detalle del pedido ${detailOrderId}`}
+                src={`/admin/orders/${detailOrderId}`}
+                className="admin-detail-frame"
+              />
+            </div>
+          </section>
+        ) : null}
       </section>
     </main>
   );
