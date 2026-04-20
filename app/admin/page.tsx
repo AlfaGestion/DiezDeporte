@@ -10,8 +10,13 @@ import {
   saveAdminSettingsAction,
   updateAdminUserAction,
 } from "@/app/admin/actions";
-import { AdminOrderDetailFrameTrigger } from "@/components/admin-order-detail-frame-trigger";
+import { AdminPageHeader } from "@/components/admin/admin-page-header";
 import { AdminThemeToggle } from "@/components/admin-theme-toggle";
+import { cn } from "@/components/admin/admin-ui";
+import { EmptyState } from "@/components/admin/empty-state";
+import { OrderFiltersBar } from "@/components/admin/order-filters-bar";
+import { OrdersTable } from "@/components/admin/orders-table";
+import { OrderTabs } from "@/components/admin/order-tabs";
 import {
   ADMIN_SESSION_COOKIE,
   getAdminSessionUser,
@@ -25,16 +30,10 @@ import {
   ADMIN_PASSWORD_POLICY_HINT,
   listAdminUsers,
 } from "@/lib/admin-users";
-import { formatCurrency } from "@/lib/commerce";
 import {
   ADMIN_ORDER_VIEWS,
   buildAdminOrdersSnapshot,
   getAdminOrderViewLabel,
-  getPaymentStatusTone,
-  getOrderStateLabel,
-  getOrderStateTone,
-  getOrderTypeLabel,
-  getPaymentStatusLabel,
   normalizeAdminOrderView,
 } from "@/lib/order-admin";
 import { normalizeOrderFilters } from "@/lib/models/order";
@@ -234,143 +233,116 @@ function FlashMessages({
   saved?: string;
   error?: string;
 }) {
+  const renderBanner = (tone: "success" | "error", message: string) => (
+    <div
+      className={cn(
+        "rounded-[18px] border px-4 py-3 text-sm",
+        tone === "success"
+          ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-400/20 dark:bg-emerald-400/10 dark:text-emerald-200"
+          : "border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-400/20 dark:bg-rose-400/10 dark:text-rose-200",
+      )}
+    >
+      {message}
+    </div>
+  );
+
   if (saved === "config") {
-    return (
-      <div className="message success">
-        Configuracion guardada y aplicada al runtime actual.
-      </div>
-    );
+    return renderBanner("success", "Configuracion guardada y aplicada al runtime actual.");
   }
 
   if (saved === "refresh") {
-    return <div className="message success">Estado del pedido actualizado.</div>;
+    return renderBanner("success", "Estado del pedido actualizado.");
   }
 
   if (saved === "advance") {
-    return (
-      <div className="message success">
-        Estado del pedido avanzado correctamente.
-      </div>
-    );
+    return renderBanner("success", "Estado del pedido avanzado correctamente.");
   }
 
   if (saved === "state-updated") {
-    return <div className="message success">Estado del pedido actualizado.</div>;
+    return renderBanner("success", "Estado del pedido actualizado.");
   }
 
   if (saved === "user") {
-    return <div className="message success">Usuario admin creado.</div>;
+    return renderBanner("success", "Usuario admin creado.");
   }
 
   if (saved === "user-updated") {
-    return <div className="message success">Usuario admin actualizado.</div>;
+    return renderBanner("success", "Usuario admin actualizado.");
   }
 
   if (saved === "user-deleted") {
-    return <div className="message success">Usuario admin eliminado.</div>;
+    return renderBanner("success", "Usuario admin eliminado.");
   }
 
   if (error === "order-not-found") {
-    return <div className="message error">No se encontro el pedido solicitado.</div>;
+    return renderBanner("error", "No se encontro el pedido solicitado.");
   }
 
   if (error === "order-advance") {
-    return (
-      <div className="message error">
-        No se pudo avanzar el pedido. Revisa el flujo y el estado actual.
-      </div>
+    return renderBanner(
+      "error",
+      "No se pudo avanzar el pedido. Revisa el flujo y el estado actual.",
     );
   }
 
   if (error === "order-update") {
-    return (
-      <div className="message error">
-        No se pudo actualizar el pedido. Revisa la transicion solicitada.
-      </div>
+    return renderBanner(
+      "error",
+      "No se pudo actualizar el pedido. Revisa la transicion solicitada.",
     );
   }
 
   if (error === "user-create") {
-    return (
-      <div className="message error">
-        No se pudo crear el usuario admin. Revisa si ya existe o si faltan datos.
-      </div>
+    return renderBanner(
+      "error",
+      "No se pudo crear el usuario admin. Revisa si ya existe o si faltan datos.",
     );
   }
 
   if (error === "password-match") {
-    return <div className="message error">Las claves no coinciden.</div>;
+    return renderBanner("error", "Las claves no coinciden.");
   }
 
   if (error === "user-password-policy") {
-    return <div className="message error">{ADMIN_PASSWORD_POLICY_HINT}</div>;
+    return renderBanner("error", ADMIN_PASSWORD_POLICY_HINT);
   }
 
   if (error === "user-username") {
-    return (
-      <div className="message error">
-        El usuario admin debe tener al menos 3 caracteres.
-      </div>
-    );
+    return renderBanner("error", "El usuario admin debe tener al menos 3 caracteres.");
   }
 
   if (error === "user-exists") {
-    return (
-      <div className="message error">
-        Ya existe un usuario admin con ese nombre.
-      </div>
-    );
+    return renderBanner("error", "Ya existe un usuario admin con ese nombre.");
   }
 
   if (error === "user-reserved") {
-    return (
-      <div className="message error">
-        Ese usuario esta reservado por el sistema.
-      </div>
-    );
+    return renderBanner("error", "Ese usuario esta reservado por el sistema.");
   }
 
   if (error === "user-forbidden") {
-    return (
-      <div className="message error">
-        Solo un superadmin puede administrar usuarios.
-      </div>
-    );
+    return renderBanner("error", "Solo un superadmin puede administrar usuarios.");
   }
 
   if (error === "user-not-found") {
-    return <div className="message error">No se encontro el usuario admin.</div>;
+    return renderBanner("error", "No se encontro el usuario admin.");
   }
 
   if (error === "user-last-superadmin") {
-    return (
-      <div className="message error">
-        Debe quedar al menos un superadmin habilitado.
-      </div>
-    );
+    return renderBanner("error", "Debe quedar al menos un superadmin habilitado.");
   }
 
   if (error === "user-self-delete") {
-    return (
-      <div className="message error">
-        No puedes borrar tu propio usuario activo.
-      </div>
-    );
+    return renderBanner("error", "No puedes borrar tu propio usuario activo.");
   }
 
   if (error === "user-self-disable") {
-    return (
-      <div className="message error">
-        No puedes deshabilitar tu propio usuario activo.
-      </div>
-    );
+    return renderBanner("error", "No puedes deshabilitar tu propio usuario activo.");
   }
 
   if (error === "user-self-demote") {
-    return (
-      <div className="message error">
-        No puedes quitarte permisos de superadmin desde tu propia sesion.
-      </div>
+    return renderBanner(
+      "error",
+      "No puedes quitarte permisos de superadmin desde tu propia sesion.",
     );
   }
 
@@ -386,35 +358,22 @@ function OrdersPane(props: {
   const { ordersSnapshot, activeOrderView, baseOrderFilters, currentOrdersHref } = props;
 
   return (
-    <section className="admin-pane">
-      <div className="admin-pane-header">
-        <div>
-          <span className="admin-pane-kicker">Operacion</span>
-          <h2>Pedidos web</h2>
-          <p>
-            Listado central para revisar pagos, avanzar estados y abrir el detalle
-            completo de cada pedido.
-          </p>
-        </div>
+    <section className="space-y-4">
+      <form action="/admin" className="space-y-4">
+        <AdminPageHeader
+          title="Pedidos"
+          subtitle="Bandeja operativa para revisar pagos, avanzar estados y abrir el detalle solo cuando hace falta."
+          searchDefaultValue={baseOrderFilters.q}
+          resultCount={ordersSnapshot.orders.length}
+        />
 
-        <div className="admin-pane-actions">
-          <span className="admin-inline-badge">
-            Total: {ordersSnapshot.summary.total}
-          </span>
-          <span className="admin-inline-badge">
-            Cancelados: {ordersSnapshot.summary.cancelados}
-          </span>
-          <span className="admin-inline-badge">
-            Error: {ordersSnapshot.summary.error}
-          </span>
-        </div>
-      </div>
-
-      <nav className="admin-order-tabs-row" aria-label="Vistas de pedidos">
-        {ADMIN_ORDER_VIEWS.map((orderView) => (
-          <Link
-            key={orderView}
-            href={buildAdminHref({
+        <OrderTabs
+          activeValue={activeOrderView}
+          tabs={ADMIN_ORDER_VIEWS.map((orderView) => ({
+            value: orderView,
+            label: getAdminOrderViewLabel(orderView),
+            count: getSummaryCount(ordersSnapshot.summary, orderView),
+            href: buildAdminHref({
               view: "orders",
               vista: orderView,
               q: baseOrderFilters.q,
@@ -423,208 +382,37 @@ function OrdersPane(props: {
               tipo_pedido: baseOrderFilters.tipo_pedido,
               fecha_desde: baseOrderFilters.fecha_desde,
               fecha_hasta: baseOrderFilters.fecha_hasta,
-            })}
-            className={
-              orderView === activeOrderView
-                ? "admin-order-tab active"
-                : "admin-order-tab"
-            }
-          >
-            <span>{getAdminOrderViewLabel(orderView)}</span>
-            <strong>{getSummaryCount(ordersSnapshot.summary, orderView)}</strong>
-          </Link>
-        ))}
-      </nav>
+            }),
+          }))}
+        />
 
-      <form action="/admin" className="admin-orders-filter-bar">
-        <input type="hidden" name="view" value="orders" />
-        {activeOrderView !== "pedidos" ? (
-          <input type="hidden" name="vista" value={activeOrderView} />
-        ) : null}
-
-        <label className="admin-filter-field admin-filter-field-wide">
-          <span>Buscar</span>
-          <input
-            type="search"
-            name="q"
-            defaultValue={baseOrderFilters.q || ""}
-            placeholder="Numero, cliente o email"
-          />
-        </label>
-
-        <label className="admin-filter-field">
-          <span>Estado</span>
-          <select name="estado" defaultValue={baseOrderFilters.estado || ""}>
-            <option value="">Todos</option>
-            <option value="PENDIENTE">Pendiente</option>
-            <option value="APROBADO">Aprobado</option>
-            <option value="FACTURADO">Facturado</option>
-            <option value="PREPARANDO">Preparando</option>
-            <option value="LISTO_PARA_RETIRO">Listo para retirar</option>
-            <option value="ENVIADO">Enviado</option>
-            <option value="ENTREGADO">Entregado</option>
-            <option value="CANCELADO">Cancelado</option>
-            <option value="ERROR">Error</option>
-          </select>
-        </label>
-
-        <label className="admin-filter-field">
-          <span>Pago</span>
-          <select name="estado_pago" defaultValue={baseOrderFilters.estado_pago || ""}>
-            <option value="">Todos</option>
-            <option value="pendiente">Pendiente</option>
-            <option value="aprobado">Aprobado</option>
-            <option value="rechazado">Rechazado</option>
-          </select>
-        </label>
-
-        <label className="admin-filter-field">
-          <span>Tipo</span>
-          <select name="tipo_pedido" defaultValue={baseOrderFilters.tipo_pedido || ""}>
-            <option value="">Todos</option>
-            <option value="retiro">Retiro</option>
-            <option value="envio">Envio</option>
-          </select>
-        </label>
-
-        <label className="admin-filter-field">
-          <span>Desde</span>
-          <input
-            type="date"
-            name="fecha_desde"
-            defaultValue={baseOrderFilters.fecha_desde || ""}
-          />
-        </label>
-
-        <label className="admin-filter-field">
-          <span>Hasta</span>
-          <input
-            type="date"
-            name="fecha_hasta"
-            defaultValue={baseOrderFilters.fecha_hasta || ""}
-          />
-        </label>
-
-        <div className="admin-filter-actions">
-          <button type="submit" className="submit-order-button">
-            Aplicar
-          </button>
-          <Link
-            href={buildAdminHref({
-              view: "orders",
-              vista: activeOrderView,
-            })}
-            className="admin-ghost-button"
-          >
-            Limpiar
-          </Link>
-        </div>
+        <OrderFiltersBar
+          activeOrderView={activeOrderView}
+          filters={baseOrderFilters}
+          clearHref={buildAdminHref({
+            view: "orders",
+            vista: activeOrderView,
+          })}
+        />
       </form>
 
       {ordersSnapshot.orders.length === 0 ? (
-        <div className="empty-state compact">
-          No hay pedidos para el filtro seleccionado.
-        </div>
+        <EmptyState
+          title="Sin pedidos para mostrar"
+          message={
+            baseOrderFilters.q ||
+            baseOrderFilters.estado ||
+            baseOrderFilters.estado_pago ||
+            baseOrderFilters.tipo_pedido ||
+            baseOrderFilters.fecha_desde ||
+            baseOrderFilters.fecha_hasta
+              ? "No hubo resultados para los filtros actuales. Ajusta la busqueda o limpia los filtros."
+              : "Todavia no hay pedidos cargados en esta vista."
+          }
+          compact
+        />
       ) : (
-        <div className="admin-table-wrap">
-          <table className="admin-table">
-            <thead>
-              <tr>
-                <th>Numero pedido</th>
-                <th>Fecha</th>
-                <th>Cliente</th>
-                <th>Total</th>
-                <th>Tipo pedido</th>
-                <th>Estado</th>
-                <th>Estado pago</th>
-                <th>Accion</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ordersSnapshot.orders.map((order) => (
-                <tr key={order.id}>
-                  <td>
-                    <strong>{order.orderNumber}</strong>
-                    <small>Ref: {order.externalReference}</small>
-                  </td>
-                  <td>
-                    <strong>{formatDateTime(order.createdAt)}</strong>
-                    <small>Act. {formatDateTime(order.updatedAt)}</small>
-                  </td>
-                  <td>
-                    <strong>{order.customerName || "Sin nombre"}</strong>
-                    <small>{order.customerEmail || "Sin correo"}</small>
-                    <small>{order.customerPhone || "Sin telefono"}</small>
-                  </td>
-                  <td>
-                    <strong>{formatCurrency(order.total)}</strong>
-                    <small>{order.itemCount} unidades</small>
-                  </td>
-                  <td>
-                    <strong>{getOrderTypeLabel(order.orderType)}</strong>
-                    <small>{order.customerCity || "Sin localidad"}</small>
-                    <small>{order.customerAddress || "Sin direccion"}</small>
-                  </td>
-                  <td>
-                    <span
-                      className={`admin-status-badge status-${getOrderStateTone(
-                        order.orderState,
-                      )}`}
-                    >
-                      {getOrderStateLabel(order.orderState)}
-                    </span>
-                    <small>
-                      {order.nextActionLabel
-                        ? `Sigue: ${order.nextActionLabel}`
-                        : "Sin pasos pendientes"}
-                    </small>
-                  </td>
-                  <td>
-                    <span
-                      className={`admin-status-badge status-${getPaymentStatusTone(
-                        order.paymentStatus,
-                      )}`}
-                    >
-                      {getPaymentStatusLabel(order.paymentStatus)}
-                    </span>
-                    <small>
-                      {order.paymentMethodId || "Metodo no informado"}
-                      {order.paymentTypeId ? ` | ${order.paymentTypeId}` : ""}
-                    </small>
-                    <small>{order.paymentId || "Sin pago"}</small>
-                  </td>
-                  <td className="admin-actions-cell">
-                    <div className="admin-order-actions admin-order-actions-stack">
-                      {order.nextActionLabel ? (
-                        <form action={advanceAdminOrderAction}>
-                          <input type="hidden" name="orderId" value={order.id} />
-                          <input type="hidden" name="returnTo" value={currentOrdersHref} />
-                          <button type="submit" className="submit-order-button">
-                            {order.nextActionLabel}
-                          </button>
-                        </form>
-                      ) : null}
-
-                      <form action={refreshAdminOrderAction}>
-                        <input type="hidden" name="pendingOrderId" value={order.id} />
-                        <input type="hidden" name="returnTo" value={currentOrdersHref} />
-                        <button type="submit" className="admin-ghost-button">
-                          Actualizar
-                        </button>
-                      </form>
-
-                      <AdminOrderDetailFrameTrigger
-                        orderId={order.id}
-                        returnTo={currentOrdersHref}
-                        className="admin-ghost-button"
-                      />
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <OrdersTable orders={ordersSnapshot.orders} returnTo={currentOrdersHref} />
       )}
     </section>
   );
@@ -1173,21 +961,31 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
 
   return (
     <main className="admin-page">
-      <section className="admin-shell admin-shell-simple">
-        <header className="admin-toolbar">
-          <div>
-            <span className="admin-eyebrow">Panel interno</span>
-            <h1>{settings.storeName}</h1>
-            <p>{viewMeta.description}</p>
+      <section className="mx-auto flex max-w-[1480px] flex-col gap-4 px-4 py-4 lg:px-6">
+        <header className="flex flex-col gap-4 rounded-[22px] border border-[color:var(--admin-pane-line)] bg-[color:var(--admin-pane-bg)] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="space-y-1">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--admin-text)]">
+              Admin
+            </div>
+            <div className="text-lg font-semibold text-[color:var(--admin-title)]">
+              {settings.storeName}
+            </div>
+            <p className="text-sm text-[color:var(--admin-text)]">{viewMeta.description}</p>
           </div>
 
-          <div className="admin-toolbar-actions">
+          <div className="flex flex-wrap items-center gap-2">
             <AdminThemeToggle />
-            <Link href="/" className="admin-ghost-button">
+            <Link
+              href="/"
+              className="inline-flex h-10 items-center justify-center rounded-[14px] border border-[color:var(--admin-pane-line)] px-4 text-sm font-medium text-[color:var(--admin-title)] transition hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+            >
               Ver tienda
             </Link>
             <form action={logoutAdminAction}>
-              <button type="submit" className="submit-order-button">
+              <button
+                type="submit"
+                className="inline-flex h-10 items-center justify-center rounded-[14px] bg-[color:var(--admin-accent)] px-4 text-sm font-semibold text-white transition hover:bg-[color:var(--admin-accent-strong)]"
+              >
                 Cerrar sesion
               </button>
             </form>
@@ -1196,27 +994,51 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
 
         <FlashMessages saved={saved} error={error} />
 
-        <nav className="admin-section-tabs" aria-label="Secciones del panel">
+        <nav
+          className="flex gap-2 overflow-x-auto rounded-[18px] border border-[color:var(--admin-pane-line)] bg-[color:var(--admin-pane-bg)] p-2"
+          aria-label="Secciones del panel"
+        >
           <Link
             href={currentOrdersHref}
-            className={activeView === "orders" ? "admin-section-tab active" : "admin-section-tab"}
+            className={cn(
+              "inline-flex min-w-[140px] items-center justify-between rounded-[14px] px-4 py-2.5 text-sm transition",
+              activeView === "orders"
+                ? "bg-[color:var(--admin-accent)] text-white"
+                : "text-[color:var(--admin-title)] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]",
+            )}
           >
             <span>Pedidos</span>
-            <small>{ordersSnapshot.summary.total}</small>
+            <small className={activeView === "orders" ? "text-white/80" : "text-[color:var(--admin-text)]"}>
+              {ordersSnapshot.summary.total}
+            </small>
           </Link>
           <Link
             href={buildAdminHref({ view: "users" })}
-            className={activeView === "users" ? "admin-section-tab active" : "admin-section-tab"}
+            className={cn(
+              "inline-flex min-w-[140px] items-center justify-between rounded-[14px] px-4 py-2.5 text-sm transition",
+              activeView === "users"
+                ? "bg-[color:var(--admin-accent)] text-white"
+                : "text-[color:var(--admin-title)] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]",
+            )}
           >
             <span>Usuarios</span>
-            <small>{adminUsers.length}</small>
+            <small className={activeView === "users" ? "text-white/80" : "text-[color:var(--admin-text)]"}>
+              {adminUsers.length}
+            </small>
           </Link>
           <Link
             href={buildAdminHref({ view: "config", config: activeConfigSlug })}
-            className={activeView === "config" ? "admin-section-tab active" : "admin-section-tab"}
+            className={cn(
+              "inline-flex min-w-[140px] items-center justify-between rounded-[14px] px-4 py-2.5 text-sm transition",
+              activeView === "config"
+                ? "bg-[color:var(--admin-accent)] text-white"
+                : "text-[color:var(--admin-title)] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]",
+            )}
           >
             <span>Configuracion</span>
-            <small>{sections.length}</small>
+            <small className={activeView === "config" ? "text-white/80" : "text-[color:var(--admin-text)]"}>
+              {sections.length}
+            </small>
           </Link>
         </nav>
 

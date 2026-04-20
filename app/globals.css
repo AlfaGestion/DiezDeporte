@@ -1,3 +1,6 @@
+@tailwind components;
+@tailwind utilities;
+
 :root {
   --page-bg: #edf2f7;
   --page-bg-accent: rgba(76, 131, 255, 0.08);
