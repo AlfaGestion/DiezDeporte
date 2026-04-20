@@ -5,9 +5,7 @@ Tienda web base hecha con `Next.js + TypeScript + SQL Server` para vender articu
 - `V_MV_Cpte`
 - `V_MV_CpteInsumos`
 - `V_MV_Stock`
-- `TA_WEB_PEDIDOS_MP`
-- `TA_WEB_ORDERS`
-- `TA_WEB_ORDER_LOGS`
+- `WEB_V_MV_PEDIDOS`
 
 ## Que incluye
 
@@ -74,7 +72,7 @@ Despues apuntar el tunel al puerto `3000`.
 - Los usuarios del panel admin se guardan en `dbo.TA_UsuariosWeb`. La tabla se crea sola al primer acceso, migra `TA_UsuarioWeb` si existia y asegura el acceso inicial del panel.
 - `IDPROVINCIA` no se infiere automaticamente desde texto libre del checkout. El dato de provincia se guarda en observaciones.
 - Si `ODOO_SYNC_IMAGES=true`, la app lee las imagenes publicas del shop Odoo y las vincula por codigo de articulo.
-- Los pedidos operativos ahora viven en `TA_WEB_ORDERS` y cada cambio de estado se registra en `TA_WEB_ORDER_LOGS`.
+- Los pedidos web ahora viven en `dbo.WEB_V_MV_PEDIDOS`. Si existen tablas anteriores, la app migra los registros al nuevo esquema compartido.
 - `POST /api/orders/:id/advance` resuelve la transición siguiente desde `orderService`.
 - `PATCH /api/orders/:id/estado` permite mover el pedido de forma controlada sin duplicar lógica en la ruta.
 - `GET /api/orders?seed=true` crea datos de prueba básicos si la tabla todavía está vacía.
