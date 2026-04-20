@@ -1,8 +1,6 @@
-import {
-  advanceAdminOrderAction,
-  refreshAdminOrderAction,
-  updateAdminOrderStateAction,
-} from "@/app/admin/actions";
+"use client";
+
+import { AdminOrderActionButton } from "@/components/admin/admin-order-action-button";
 import {
   adminCardClass,
   adminDangerButtonClass,
@@ -25,6 +23,12 @@ export function OrderActionsPanel({
   canMarkCancelled: boolean;
   canMarkError: boolean;
 }) {
+  const needsApprovedPayment =
+    nextActionLabel === "Facturar" && order.estado_pago !== "aprobado";
+  const canResendPickupEmail =
+    order.tipo_pedido === "retiro" &&
+    (order.estado === "LISTO_PARA_RETIRO" || order.estado === "ENTREGADO");
+
   return (
     <section className={cn(adminCardClass, "space-y-4 p-5")}>
       <div>
@@ -35,48 +39,72 @@ export function OrderActionsPanel({
       </div>
 
       <div className="space-y-2">
-        {nextActionLabel ? (
-          <form action={advanceAdminOrderAction}>
-            <input type="hidden" name="orderId" value={order.id} />
-            <input type="hidden" name="returnTo" value={returnTo} />
-            <button type="submit" className={cn(adminPrimaryButtonClass, "w-full")}>
-              {nextActionLabel}
-            </button>
-          </form>
+        {needsApprovedPayment ? (
+          <AdminOrderActionButton
+            action="approve-payment"
+            orderId={order.id}
+            returnTo={returnTo}
+            label="Aprobar pago"
+            pendingLabel="Aprobando..."
+            className={cn(adminPrimaryButtonClass, "w-full")}
+          />
+        ) : nextActionLabel ? (
+          <AdminOrderActionButton
+            action="advance"
+            orderId={order.id}
+            returnTo={returnTo}
+            label={nextActionLabel}
+            pendingLabel="Actualizando..."
+            className={cn(adminPrimaryButtonClass, "w-full")}
+          />
         ) : (
           <div className="rounded-[14px] border border-dashed border-[color:var(--admin-pane-line)] px-4 py-3 text-sm text-[color:var(--admin-text)]">
             No hay un siguiente paso disponible para este pedido.
           </div>
         )}
 
-        <form action={refreshAdminOrderAction}>
-          <input type="hidden" name="pendingOrderId" value={order.id} />
-          <input type="hidden" name="returnTo" value={returnTo} />
-          <button type="submit" className={cn(adminSecondaryButtonClass, "w-full")}>
-            Actualizar pago
-          </button>
-        </form>
+        <AdminOrderActionButton
+          action="refresh"
+          orderId={order.id}
+          returnTo={returnTo}
+          label="Actualizar pago"
+          pendingLabel="Actualizando..."
+          className={cn(adminSecondaryButtonClass, "w-full")}
+        />
+
+        {canResendPickupEmail ? (
+          <AdminOrderActionButton
+            action="resend-pickup-email"
+            orderId={order.id}
+            returnTo={returnTo}
+            label="Reenviar email de retiro"
+            pendingLabel="Enviando..."
+            className={cn(adminSecondaryButtonClass, "w-full")}
+          />
+        ) : null}
 
         {canMarkCancelled ? (
-          <form action={updateAdminOrderStateAction}>
-            <input type="hidden" name="orderId" value={order.id} />
-            <input type="hidden" name="nextState" value="CANCELADO" />
-            <input type="hidden" name="returnTo" value={returnTo} />
-            <button type="submit" className={cn(adminDangerButtonClass, "w-full")}>
-              Cancelar pedido
-            </button>
-          </form>
+          <AdminOrderActionButton
+            action="update-state"
+            orderId={order.id}
+            nextState="CANCELADO"
+            returnTo={returnTo}
+            label="Cancelar pedido"
+            pendingLabel="Cancelando..."
+            className={cn(adminDangerButtonClass, "w-full")}
+          />
         ) : null}
 
         {canMarkError ? (
-          <form action={updateAdminOrderStateAction}>
-            <input type="hidden" name="orderId" value={order.id} />
-            <input type="hidden" name="nextState" value="ERROR" />
-            <input type="hidden" name="returnTo" value={returnTo} />
-            <button type="submit" className={cn(adminSecondaryButtonClass, "w-full")}>
-              Marcar error
-            </button>
-          </form>
+          <AdminOrderActionButton
+            action="update-state"
+            orderId={order.id}
+            nextState="ERROR"
+            returnTo={returnTo}
+            label="Marcar error"
+            pendingLabel="Actualizando..."
+            className={cn(adminSecondaryButtonClass, "w-full")}
+          />
         ) : null}
       </div>
 

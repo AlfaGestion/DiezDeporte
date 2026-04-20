@@ -10,6 +10,30 @@ import { formatCurrency } from "@/lib/commerce";
 import { getOrderTypeLabel } from "@/lib/order-admin";
 import type { AdminOrderRecord } from "@/lib/types";
 
+function sortOrdersForDisplay(orders: AdminOrderRecord[]) {
+  return [...orders].sort((left, right) => {
+    const getPriority = (order: AdminOrderRecord) => {
+      if (order.orderState === "CANCELADO") {
+        return 2;
+      }
+
+      if (order.orderState === "ENTREGADO") {
+        return 1;
+      }
+
+      return 0;
+    };
+    const leftPriority = getPriority(left);
+    const rightPriority = getPriority(right);
+
+    if (leftPriority !== rightPriority) {
+      return leftPriority - rightPriority;
+    }
+
+    return 0;
+  });
+}
+
 export function OrdersTable({
   orders,
   returnTo,
@@ -17,6 +41,8 @@ export function OrdersTable({
   orders: AdminOrderRecord[];
   returnTo: string;
 }) {
+  const displayOrders = sortOrdersForDisplay(orders);
+
   return (
     <div className={cn(adminPanelClass, "overflow-hidden")}>
       <div className="overflow-x-auto">
@@ -34,82 +60,97 @@ export function OrdersTable({
             </tr>
           </thead>
           <tbody>
-            {orders.map((order) => (
-              <tr
-                key={order.id}
-                className="border-t border-[color:var(--admin-table-row-line)] align-top transition hover:bg-black/[0.02] dark:hover:bg-white/[0.03]"
-              >
-                <td className="px-5 py-4">
-                  <div className="space-y-1">
-                    <div className="font-semibold text-[color:var(--admin-title)]">{order.orderNumber}</div>
-                    <div className="text-xs text-[color:var(--admin-text)]">
-                      Ref. {order.externalReference}
+            {displayOrders.map((order) => {
+              const isDelivered = order.orderState === "ENTREGADO";
+              const isPendingPickup = order.orderState === "LISTO_PARA_RETIRO";
+              const isCancelled = order.orderState === "CANCELADO";
+
+              return (
+                <tr
+                  key={order.id}
+                  className={cn(
+                    "border-t border-[color:var(--admin-table-row-line)] align-top transition",
+                    isCancelled
+                      ? "bg-rose-50/80 hover:bg-rose-100/80 dark:bg-rose-500/10 dark:hover:bg-rose-500/15"
+                      : isDelivered
+                      ? "bg-emerald-50/70 hover:bg-emerald-100/70 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/15"
+                      : isPendingPickup
+                        ? "bg-amber-50/80 hover:bg-amber-100/80 dark:bg-amber-500/10 dark:hover:bg-amber-500/15"
+                      : "hover:bg-black/[0.02] dark:hover:bg-white/[0.03]",
+                  )}
+                >
+                  <td className="px-5 py-4">
+                    <div className="space-y-1">
+                      <div className="font-semibold text-[color:var(--admin-title)]">{order.orderNumber}</div>
+                      <div className="text-xs text-[color:var(--admin-text)]">
+                        Ref. {order.externalReference}
+                      </div>
                     </div>
-                  </div>
-                </td>
-                <td className="px-5 py-4">
-                  <div className="space-y-1">
-                    <div className="font-medium text-[color:var(--admin-title)]">
-                      {formatAdminDateTime(order.createdAt)}
+                  </td>
+                  <td className="px-5 py-4">
+                    <div className="space-y-1">
+                      <div className="font-medium text-[color:var(--admin-title)]">
+                        {formatAdminDateTime(order.createdAt)}
+                      </div>
+                      <div className="text-xs text-[color:var(--admin-text)]">
+                        Act. {formatAdminDateTime(order.updatedAt)}
+                      </div>
                     </div>
-                    <div className="text-xs text-[color:var(--admin-text)]">
-                      Act. {formatAdminDateTime(order.updatedAt)}
+                  </td>
+                  <td className="px-5 py-4">
+                    <div className="space-y-1">
+                      <div className="font-medium text-[color:var(--admin-title)]">
+                        {order.customerName || "Sin nombre"}
+                      </div>
+                      <div className="text-xs text-[color:var(--admin-text)]">{order.customerEmail || "Sin correo"}</div>
+                      <div className="text-xs text-[color:var(--admin-text)]">{order.customerPhone || "Sin telefono"}</div>
                     </div>
-                  </div>
-                </td>
-                <td className="px-5 py-4">
-                  <div className="space-y-1">
-                    <div className="font-medium text-[color:var(--admin-title)]">
-                      {order.customerName || "Sin nombre"}
+                  </td>
+                  <td className="px-5 py-4 text-right">
+                    <div className="space-y-1">
+                      <div className="font-semibold tabular-nums text-[color:var(--admin-title)]">
+                        {formatCurrency(order.total)}
+                      </div>
+                      <div className="text-xs text-[color:var(--admin-text)]">
+                        {order.itemCount} {order.itemCount === 1 ? "unidad" : "unidades"}
+                      </div>
                     </div>
-                    <div className="text-xs text-[color:var(--admin-text)]">{order.customerEmail || "Sin correo"}</div>
-                    <div className="text-xs text-[color:var(--admin-text)]">{order.customerPhone || "Sin telefono"}</div>
-                  </div>
-                </td>
-                <td className="px-5 py-4 text-right">
-                  <div className="space-y-1">
-                    <div className="font-semibold tabular-nums text-[color:var(--admin-title)]">
-                      {formatCurrency(order.total)}
+                  </td>
+                  <td className="px-5 py-4">
+                    <div className="space-y-1">
+                      <div className="font-medium text-[color:var(--admin-title)]">
+                        {getOrderTypeLabel(order.orderType)}
+                      </div>
+                      <div className="text-xs text-[color:var(--admin-text)]">{order.customerCity || "Sin localidad"}</div>
+                      <div className="text-xs text-[color:var(--admin-text)]">{order.customerAddress || "Sin direccion"}</div>
                     </div>
-                    <div className="text-xs text-[color:var(--admin-text)]">
-                      {order.itemCount} {order.itemCount === 1 ? "unidad" : "unidades"}
+                  </td>
+                  <td className="px-5 py-4">
+                    <div className="space-y-2">
+                      <OrderStatusBadge state={order.orderState} />
+                      <div className="text-xs text-[color:var(--admin-text)]">
+                        {order.nextActionLabel ? `Siguiente: ${order.nextActionLabel}` : "Cerrado"}
+                      </div>
                     </div>
-                  </div>
-                </td>
-                <td className="px-5 py-4">
-                  <div className="space-y-1">
-                    <div className="font-medium text-[color:var(--admin-title)]">
-                      {getOrderTypeLabel(order.orderType)}
+                  </td>
+                  <td className="px-5 py-4">
+                    <div className="space-y-2">
+                      <PaymentStatusBadge status={order.paymentStatus} />
+                      <div className="text-xs text-[color:var(--admin-text)]">
+                        {order.paymentMethodId || "Metodo no informado"}
+                        {order.paymentTypeId ? ` | ${order.paymentTypeId}` : ""}
+                      </div>
+                      <div className="text-xs text-[color:var(--admin-text)]">
+                        {order.paymentId || "Sin pago registrado"}
+                      </div>
                     </div>
-                    <div className="text-xs text-[color:var(--admin-text)]">{order.customerCity || "Sin localidad"}</div>
-                    <div className="text-xs text-[color:var(--admin-text)]">{order.customerAddress || "Sin direccion"}</div>
-                  </div>
-                </td>
-                <td className="px-5 py-4">
-                  <div className="space-y-2">
-                    <OrderStatusBadge state={order.orderState} />
-                    <div className="text-xs text-[color:var(--admin-text)]">
-                      {order.nextActionLabel ? `Siguiente: ${order.nextActionLabel}` : "Cerrado"}
-                    </div>
-                  </div>
-                </td>
-                <td className="px-5 py-4">
-                  <div className="space-y-2">
-                    <PaymentStatusBadge status={order.paymentStatus} />
-                    <div className="text-xs text-[color:var(--admin-text)]">
-                      {order.paymentMethodId || "Metodo no informado"}
-                      {order.paymentTypeId ? ` | ${order.paymentTypeId}` : ""}
-                    </div>
-                    <div className="text-xs text-[color:var(--admin-text)]">
-                      {order.paymentId || "Sin pago registrado"}
-                    </div>
-                  </div>
-                </td>
-                <td className="px-5 py-4">
-                  <OrderRowActions order={order} returnTo={returnTo} />
-                </td>
-              </tr>
-            ))}
+                  </td>
+                  <td className="px-5 py-4">
+                    <OrderRowActions order={order} returnTo={returnTo} />
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

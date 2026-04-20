@@ -103,6 +103,11 @@ export type PaymentStatusResult = {
   createdAt: string;
   updatedAt: string;
   order: OrderSummary | null;
+  orderState: OrderState | null;
+  orderType: OrderType | null;
+  pickupCode: string | null;
+  qrCode: string | null;
+  pickupReadyUrl: string | null;
 };
 
 export type PublicStoreSettings = {

@@ -59,6 +59,7 @@ export type OrderMetadata = {
   items?: OrderItem[];
   preferenceId?: string | null;
   externalReference?: string | null;
+  customerDocumentNumber?: string | null;
   customerAddress?: string | null;
   customerCity?: string | null;
   customerProvince?: string | null;
@@ -71,6 +72,11 @@ export type OrderMetadata = {
   paymentMethodId?: string | null;
   lastPaymentPayload?: string | null;
   pickupCode?: string | null;
+  documentInternalId?: number | null;
+  documentTc?: string | null;
+  documentNumber?: string | null;
+  documentCustomerAccount?: string | null;
+  documentError?: string | null;
 };
 
 export type Order = {
@@ -87,6 +93,9 @@ export type Order = {
   codigo_qr: string | null;
   numero_seguimiento: string | null;
   direccion: string | null;
+  retirado: "SI" | "NO";
+  fecha_hora_retiro: string | null;
+  nombre_apellido_retiro: string | null;
   fecha_creacion: string;
   fecha_actualizacion: string;
 };
@@ -124,6 +133,7 @@ export type CreateOrderInput = {
 export type UpdateOrderInput = Partial<
   Pick<
     StoredOrder,
+    | "numero_pedido"
     | "nombre_cliente"
     | "email_cliente"
     | "telefono_cliente"
@@ -135,6 +145,9 @@ export type UpdateOrderInput = Partial<
     | "codigo_qr"
     | "numero_seguimiento"
     | "direccion"
+    | "retirado"
+    | "fecha_hora_retiro"
+    | "nombre_apellido_retiro"
     | "metadata"
     | "email_facturado_enviado_at"
     | "email_listo_enviado_at"

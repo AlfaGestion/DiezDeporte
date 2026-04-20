@@ -85,6 +85,20 @@ type GroupCartSummary = {
   total: number;
 };
 
+async function readJsonResponse<T>(response: Response): Promise<T | null> {
+  const raw = await response.text();
+
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    throw new Error("El servidor devolvio una respuesta invalida. Reintenta en unos segundos.");
+  }
+}
+
 function buildEmptyCustomer(settings: PublicStoreSettings): CheckoutCustomer {
   return {
     fullName: "",
@@ -765,13 +779,13 @@ export function Storefront({
           body: JSON.stringify(payload),
         });
 
-        const result = (await response.json()) as {
+        const result = (await readJsonResponse<{
           error?: string;
           preference?: PaymentPreferenceResponse;
-        };
+        }>(response)) || null;
 
         if (!response.ok || !result.preference) {
-          throw new Error(result.error || "No se pudo iniciar el pago.");
+          throw new Error(result?.error || "No se pudo iniciar el pago.");
         }
 
         window.location.assign(result.preference.checkoutUrl);
@@ -786,13 +800,13 @@ export function Storefront({
         body: JSON.stringify(payload),
       });
 
-      const result = (await response.json()) as {
+      const result = (await readJsonResponse<{
         error?: string;
         order?: OrderSummary;
-      };
+      }>(response)) || null;
 
       if (!response.ok || !result.order) {
-        throw new Error(result.error || "No se pudo registrar el pedido.");
+        throw new Error(result?.error || "No se pudo registrar el pedido.");
       }
 
       setCart([]);

@@ -36,6 +36,7 @@ export type ServerSettings = {
   ivaCondition: string;
   paymentCondition: string;
   orderUser: string;
+  pendingOrderTtlMinutes: number;
   mercadoPagoAccessToken: string;
   mercadoPagoPublicBaseUrl: string;
   mercadoPagoOrderTc: string;
@@ -105,6 +106,10 @@ export async function getServerSettings(): Promise<ServerSettings> {
     ivaCondition: readSetting(storedValues, "APP_IVA_CONDITION", "1"),
     paymentCondition: readSetting(storedValues, "APP_PAYMENT_CONDITION", "1"),
     orderUser: readSetting(storedValues, "APP_ORDER_USER", "web-shop"),
+    pendingOrderTtlMinutes: Math.max(
+      1,
+      Number(readSetting(storedValues, "APP_PENDING_ORDER_TTL_MINUTES", "120") || "120"),
+    ),
     mercadoPagoAccessToken: readSetting(storedValues, "APP_MP_ACCESS_TOKEN"),
     mercadoPagoPublicBaseUrl: readSetting(storedValues, "APP_PUBLIC_BASE_URL"),
     mercadoPagoOrderTc: readSetting(storedValues, "APP_MP_ORDER_TC"),

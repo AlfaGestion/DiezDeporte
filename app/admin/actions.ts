@@ -18,6 +18,7 @@ import {
 } from "@/lib/admin-auth";
 import {
   avanzarEstadoPedido,
+  markOrderPaymentStatus,
   updateOrderStatus,
 } from "@/lib/services/orderService";
 import type { OrderState } from "@/lib/types/order";
@@ -105,6 +106,105 @@ function resolveAdminReturnTo(formData: FormData, fallback = "/admin") {
   }
 
   return fallback;
+}
+
+export async function refreshAdminOrderMutation(input: {
+  pendingOrderId: number;
+}) {
+  await requireAdminSession();
+
+  try {
+    if (Number.isFinite(input.pendingOrderId) && input.pendingOrderId > 0) {
+      await resolvePendingPaymentStatus({ pendingOrderId: input.pendingOrderId });
+    }
+  } catch {
+    return { ok: false as const, error: "order-refresh" as const };
+  }
+
+  revalidatePath("/admin");
+
+  return { ok: true as const, saved: "refresh" as const };
+}
+
+export async function advanceAdminOrderMutation(input: { orderId: number }) {
+  await requireAdminSession();
+
+  try {
+    if (Number.isFinite(input.orderId) && input.orderId > 0) {
+      await avanzarEstadoPedido(input.orderId, { origin: "admin" });
+    }
+  } catch (error) {
+    if (error instanceof OrderNotFoundError) {
+      return { ok: false as const, error: "order-not-found" as const };
+    }
+
+    if (
+      error instanceof InvalidOrderTransitionError ||
+      error instanceof OrderValidationError
+    ) {
+      return { ok: false as const, error: "order-advance" as const };
+    }
+
+    return { ok: false as const, error: "order-advance" as const };
+  }
+
+  revalidatePath("/admin");
+
+  return { ok: true as const, saved: "advance" as const };
+}
+
+export async function updateAdminOrderStateMutation(input: {
+  orderId: number;
+  nextState: OrderState | null;
+}) {
+  await requireAdminSession();
+
+  if (!input.nextState) {
+    return { ok: false as const, error: "order-update" as const };
+  }
+
+  try {
+    if (Number.isFinite(input.orderId) && input.orderId > 0) {
+      await updateOrderStatus(input.orderId, input.nextState, { origin: "admin" });
+    }
+  } catch (error) {
+    if (error instanceof OrderNotFoundError) {
+      return { ok: false as const, error: "order-not-found" as const };
+    }
+
+    if (
+      error instanceof InvalidOrderTransitionError ||
+      error instanceof OrderValidationError
+    ) {
+      return { ok: false as const, error: "order-update" as const };
+    }
+
+    return { ok: false as const, error: "order-update" as const };
+  }
+
+  revalidatePath("/admin");
+
+  return { ok: true as const, saved: "state-updated" as const };
+}
+
+export async function approveAdminOrderPaymentMutation(input: { orderId: number }) {
+  await requireAdminSession();
+
+  try {
+    if (Number.isFinite(input.orderId) && input.orderId > 0) {
+      await markOrderPaymentStatus(input.orderId, "aprobado", null);
+    }
+  } catch (error) {
+    if (error instanceof OrderNotFoundError) {
+      return { ok: false as const, error: "order-not-found" as const };
+    }
+
+    return { ok: false as const, error: "order-payment-update" as const };
+  }
+
+  revalidatePath("/admin");
+
+  return { ok: true as const, saved: "payment-updated" as const };
 }
 
 export async function loginAdminAction(formData: FormData) {

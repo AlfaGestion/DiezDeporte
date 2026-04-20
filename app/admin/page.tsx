@@ -2,11 +2,9 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import {
-  advanceAdminOrderAction,
   createAdminUserAction,
   deleteAdminUserAction,
   logoutAdminAction,
-  refreshAdminOrderAction,
   saveAdminSettingsAction,
   updateAdminUserAction,
 } from "@/app/admin/actions";
@@ -15,6 +13,7 @@ import { AdminThemeToggle } from "@/components/admin-theme-toggle";
 import { cn } from "@/components/admin/admin-ui";
 import { EmptyState } from "@/components/admin/empty-state";
 import { OrderFiltersBar } from "@/components/admin/order-filters-bar";
+import { PickupDeskPane } from "@/components/admin/pickup-desk-pane";
 import { OrdersTable } from "@/components/admin/orders-table";
 import { OrderTabs } from "@/components/admin/order-tabs";
 import {
@@ -68,7 +67,7 @@ type AdminPageProps = {
   }>;
 };
 
-type AdminView = "orders" | "users" | "config";
+type AdminView = "orders" | "pickups" | "users" | "config";
 
 type AdminHrefInput = {
   view?: AdminView;
@@ -96,6 +95,10 @@ function slugify(value: string) {
 function normalizeView(rawValue: string | undefined): AdminView {
   if (rawValue === "users") {
     return "users";
+  }
+
+  if (rawValue === "pickups" || rawValue === "retiros") {
+    return "pickups";
   }
 
   if (rawValue === "config" || rawValue === "general") {
@@ -134,7 +137,7 @@ function buildAdminHref(input: AdminHrefInput) {
     params.set("view", input.view);
   }
 
-  if (input.view !== "users" && input.view !== "config") {
+  if (input.view !== "users" && input.view !== "config" && input.view !== "pickups") {
     if (input.vista && input.vista !== "pedidos") {
       params.set("vista", input.vista);
     }
@@ -206,6 +209,11 @@ function getViewMeta(view: AdminView) {
         label: "Usuarios",
         description: "Control de accesos internos del panel.",
       };
+    case "pickups":
+      return {
+        label: "Retiros",
+        description: "Mostrador para validar codigos de retiro y registrar la entrega.",
+      };
     case "config":
       return {
         label: "Configuracion",
@@ -262,6 +270,14 @@ function FlashMessages({
     return renderBanner("success", "Estado del pedido actualizado.");
   }
 
+  if (saved === "payment-updated") {
+    return renderBanner("success", "Pago del pedido actualizado.");
+  }
+
+  if (saved === "pickup-email-resent") {
+    return renderBanner("success", "Email de retiro reenviado.");
+  }
+
   if (saved === "user") {
     return renderBanner("success", "Usuario admin creado.");
   }
@@ -285,10 +301,31 @@ function FlashMessages({
     );
   }
 
+  if (error === "order-refresh") {
+    return renderBanner(
+      "error",
+      "No se pudo actualizar el estado del pago. Reintenta en unos segundos.",
+    );
+  }
+
   if (error === "order-update") {
     return renderBanner(
       "error",
       "No se pudo actualizar el pedido. Revisa la transicion solicitada.",
+    );
+  }
+
+  if (error === "order-payment-update") {
+    return renderBanner(
+      "error",
+      "No se pudo actualizar el estado del pago del pedido.",
+    );
+  }
+
+  if (error === "pickup-email-resend") {
+    return renderBanner(
+      "error",
+      "No se pudo reenviar el email de retiro.",
     );
   }
 
@@ -1013,6 +1050,20 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             </small>
           </Link>
           <Link
+            href={buildAdminHref({ view: "pickups" })}
+            className={cn(
+              "inline-flex min-w-[140px] items-center justify-between rounded-[14px] px-4 py-2.5 text-sm transition",
+              activeView === "pickups"
+                ? "bg-[color:var(--admin-accent)] text-white"
+                : "text-[color:var(--admin-title)] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]",
+            )}
+          >
+            <span>Retiros</span>
+            <small className={activeView === "pickups" ? "text-white/80" : "text-[color:var(--admin-text)]"}>
+              {ordersSnapshot.summary.pendientes_retiro}
+            </small>
+          </Link>
+          <Link
             href={buildAdminHref({ view: "users" })}
             className={cn(
               "inline-flex min-w-[140px] items-center justify-between rounded-[14px] px-4 py-2.5 text-sm transition",
@@ -1049,6 +1100,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             baseOrderFilters={baseOrderFilters}
             currentOrdersHref={currentOrdersHref}
           />
+        ) : activeView === "pickups" ? (
+          <PickupDeskPane />
         ) : activeView === "users" ? (
           <UsersPane
             sessionUser={sessionUser}

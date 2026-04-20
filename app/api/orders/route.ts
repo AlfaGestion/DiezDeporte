@@ -11,6 +11,7 @@ import {
   getOrders,
   seedSampleOrders,
 } from "@/lib/services/orderService";
+import { getServerSettings } from "@/lib/store-config";
 import type { CreateOrderInput, CreateOrderPayload } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -81,11 +82,16 @@ export async function POST(request: Request) {
 
   try {
     if (isLegacyCheckoutPayload(payload)) {
+      const settings = await getServerSettings();
       const order = await createOrderFromCheckoutPayload(payload);
       const itemCount = payload.items.reduce((sum, item) => sum + item.quantity, 0);
       return NextResponse.json(
         {
-          order: formatOrderAsLegacySummary(order, itemCount),
+          order: formatOrderAsLegacySummary(order, itemCount, {
+            tc: order.metadata.documentTc || settings.mercadoPagoOrderTc || settings.orderTc || "WEB",
+            branch: settings.orderBranch,
+            documentNumber: order.metadata.documentNumber || null,
+          }),
           data: order,
         },
         { status: 201 },

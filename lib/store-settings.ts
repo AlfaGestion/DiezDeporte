@@ -121,6 +121,15 @@ export const STORE_SETTING_DEFINITIONS: StoreSettingDefinition[] = [
     placeholder: "web-shop",
   },
   {
+    key: "APP_PENDING_ORDER_TTL_MINUTES",
+    configKey: "MinutosVencimientoPedido",
+    label: "Vencimiento impago",
+    description: "Minutos maximos para mantener un pedido pendiente sin pago confirmado.",
+    section: "Pedido",
+    type: "text",
+    placeholder: "120",
+  },
+  {
     key: "APP_ALLOW_BACKORDERS",
     configKey: "PermitirSinStock",
     label: "Permitir sin stock",

@@ -3,6 +3,7 @@ import {
   createMercadoPagoPreference,
   getMercadoPagoPayment,
 } from "@/lib/mercado-pago";
+import { getServerSettings } from "@/lib/store-config";
 import {
   formatOrderAsLegacySummary,
   mapMercadoPagoStatusToOrderPaymentStatus,
@@ -16,6 +17,7 @@ import {
 } from "@/lib/repositories/orderRepository";
 import {
   buildCheckoutOrderDraft,
+  cancelExpiredPendingOrders,
   createOrder,
   markOrderPaymentStatus,
   registerMercadoPagoApproval,
@@ -81,7 +83,23 @@ function toPaymentFlowStatus(order: StoredOrder): PaymentStatusResult["status"] 
   return "pending";
 }
 
-function toPaymentStatusResult(order: StoredOrder): PaymentStatusResult {
+function trimTrailingSlash(value: string) {
+  return value.replace(/\/+$/, "");
+}
+
+async function buildPickupReadyUrl(order: StoredOrder) {
+  const baseUrl = trimTrailingSlash((await getServerSettings()).mercadoPagoPublicBaseUrl || "");
+
+  if (!baseUrl) {
+    return null;
+  }
+
+  const externalReference = order.metadata.externalReference || order.numero_pedido;
+  return `${baseUrl}/pedido?externalReference=${encodeURIComponent(externalReference)}`;
+}
+
+async function toPaymentStatusResult(order: StoredOrder): Promise<PaymentStatusResult> {
+  const settings = await getServerSettings();
   const itemCount =
     order.metadata.items?.reduce((sum, item) => sum + item.quantity, 0) || 0;
   const hasOperationalOrder = [
@@ -91,6 +109,8 @@ function toPaymentStatusResult(order: StoredOrder): PaymentStatusResult {
     "ENVIADO",
     "ENTREGADO",
   ].includes(order.estado);
+  const pickupReadyUrl =
+    order.tipo_pedido === "retiro" ? await buildPickupReadyUrl(order) : null;
 
   return {
     pendingOrderId: order.id,
@@ -110,7 +130,18 @@ function toPaymentStatusResult(order: StoredOrder): PaymentStatusResult {
     customerEmail: order.email_cliente,
     createdAt: order.fecha_creacion,
     updatedAt: order.fecha_actualizacion,
-    order: hasOperationalOrder ? formatOrderAsLegacySummary(order, itemCount) : null,
+    order: hasOperationalOrder
+      ? formatOrderAsLegacySummary(order, itemCount, {
+          tc: order.metadata.documentTc || settings.mercadoPagoOrderTc || settings.orderTc || "WEB",
+          branch: settings.orderBranch,
+          documentNumber: order.metadata.documentNumber || null,
+        })
+      : null,
+    orderState: order.estado,
+    orderType: order.tipo_pedido,
+    pickupCode: order.metadata.pickupCode || null,
+    qrCode: order.codigo_qr,
+    pickupReadyUrl,
   };
 }
 
@@ -255,6 +286,7 @@ export async function resolveMercadoPagoPaymentStatus(input: {
   preferenceId?: string | null;
   externalReference?: string | null;
 }) {
+  await cancelExpiredPendingOrders();
   const order = await findOrderByLookup(input);
 
   if (!order) {

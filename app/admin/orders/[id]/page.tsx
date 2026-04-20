@@ -9,11 +9,9 @@ import { OrderDeliveryCard } from "@/components/admin/order-delivery-card";
 import { OrderDetailHeader } from "@/components/admin/order-detail-header";
 import { OrderProductsCard } from "@/components/admin/order-products-card";
 import { OrderTimeline } from "@/components/admin/order-timeline";
+import { PickupRedeemPanel } from "@/components/admin/pickup-redeem-panel";
 import { ErrorState } from "@/components/admin/error-state";
-import {
-  ADMIN_SESSION_COOKIE,
-  getAdminSessionUser,
-} from "@/lib/admin-auth";
+import { ADMIN_SESSION_COOKIE, getAdminSessionUser } from "@/lib/admin-auth";
 import { getNextActionLabel, OrderNotFoundError } from "@/lib/models/order";
 import { getOrderDetailById } from "@/lib/services/orderService";
 
@@ -32,33 +30,6 @@ type AdminOrderDetailPageProps = {
 
 function isSafeReturnTo(value: string | undefined) {
   return Boolean(value && value.startsWith("/admin"));
-}
-
-function AdminThemeBootScript() {
-  const script = `
-    (() => {
-      try {
-        const storageKey = "diezdeportes-theme";
-        const savedTheme = window.localStorage.getItem(storageKey);
-        const theme =
-          savedTheme === "dark" || savedTheme === "light"
-            ? savedTheme
-            : window.matchMedia("(prefers-color-scheme: dark)").matches
-              ? "dark"
-              : "light";
-
-        document.documentElement.dataset.theme = theme;
-        document.documentElement.style.colorScheme = theme;
-
-        if (document.body) {
-          document.body.dataset.theme = theme;
-          document.body.style.colorScheme = theme;
-        }
-      } catch (_error) {}
-    })();
-  `;
-
-  return <script dangerouslySetInnerHTML={{ __html: script }} />;
 }
 
 export default async function AdminOrderDetailPage({
@@ -88,7 +59,6 @@ export default async function AdminOrderDetailPage({
   if (!Number.isFinite(orderId) || orderId <= 0) {
     return (
       <main className="admin-order-document">
-        <AdminThemeBootScript />
         <section className="mx-auto max-w-6xl">
           <ErrorState title="Pedido invalido" message="El identificador del pedido no es valido." />
         </section>
@@ -111,7 +81,6 @@ export default async function AdminOrderDetailPage({
             : "admin-order-document"
         }
       >
-        <AdminThemeBootScript />
         <section className="mx-auto flex max-w-7xl flex-col gap-5">
           <OrderDetailHeader
             order={order}
@@ -135,6 +104,7 @@ export default async function AdminOrderDetailPage({
                 canMarkCancelled={canMarkCancelled}
                 canMarkError={canMarkError}
               />
+              {order.tipo_pedido === "retiro" ? <PickupRedeemPanel order={order} /> : null}
               <OrderCustomerCard order={order} />
               <OrderDeliveryCard
                 order={order}
@@ -150,7 +120,6 @@ export default async function AdminOrderDetailPage({
     if (error instanceof OrderNotFoundError) {
       return (
         <main className="admin-order-document">
-          <AdminThemeBootScript />
           <section className="mx-auto max-w-6xl">
             <ErrorState
               title="Pedido no encontrado"
@@ -168,7 +137,6 @@ export default async function AdminOrderDetailPage({
 
     return (
       <main className="admin-order-document">
-        <AdminThemeBootScript />
         <section className="mx-auto max-w-6xl">
           <ErrorState
             title="No se pudo cargar el pedido"

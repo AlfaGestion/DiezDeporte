@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { ThemeBootScript } from "@/components/theme-boot-script";
 import "./globals.css";
 
 const storeName = process.env.NEXT_PUBLIC_STORE_NAME?.trim() || "Diez Deportes";
@@ -18,8 +19,11 @@ export default function RootLayout({
   children: ReactNode;
 }>) {
   return (
-    <html lang="es">
-      <body>{children}</body>
+    <html lang="es" suppressHydrationWarning>
+      <head>
+        <ThemeBootScript />
+      </head>
+      <body suppressHydrationWarning>{children}</body>
     </html>
   );
 }

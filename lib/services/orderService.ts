@@ -1,6 +1,7 @@
 import "server-only";
 import { getProductsByIds } from "@/lib/catalog";
 import {
+  buildOrderDocumentNumber,
   buildPickupCode,
   buildQrPayload,
   canTransitionOrder,
@@ -13,10 +14,11 @@ import {
   shouldSendEmailForState,
 } from "@/lib/models/order";
 import * as orderRepository from "@/lib/repositories/orderRepository";
+import { createCommercialDocument } from "@/lib/repositories/commercialDocumentRepository";
 import { sendOrderStatusEmail } from "@/lib/services/emailService";
 import { getServerSettings } from "@/lib/store-config";
 import type { CreateOrderPayload } from "@/lib/types";
-import { normalizeBranch, normalizeNumber } from "@/lib/commerce";
+import { normalizeNumber } from "@/lib/commerce";
 import type {
   CreateOrderInput,
   Order,
@@ -84,8 +86,18 @@ async function ensurePickupAssets(order: StoredOrder) {
     return order;
   }
 
-  const pickupCode = order.metadata.pickupCode || buildPickupCode();
-  const needsNewPickupCode = !order.metadata.pickupCode;
+  const documentNumber =
+    order.metadata.documentNumber ||
+    buildOrderDocumentNumber(order.id);
+  const expectedPrefix = `WEB-${String(documentNumber).replace(/\D/g, "").slice(-4).padStart(4, "0")}-`;
+  const currentPickupCode = (order.metadata.pickupCode || "").trim();
+  const hasValidPickupCode =
+    /^WEB-\d{4}-[A-Z0-9]{4}$/.test(currentPickupCode) &&
+    currentPickupCode.startsWith(expectedPrefix);
+  const pickupCode = hasValidPickupCode
+    ? currentPickupCode
+    : buildPickupCode(documentNumber);
+  const needsNewPickupCode = !hasValidPickupCode;
   const qrCode =
     order.codigo_qr && !needsNewPickupCode
       ? order.codigo_qr
@@ -132,8 +144,84 @@ async function runTransitionSideEffects(order: StoredOrder, nextState: OrderStat
   return patchedOrder;
 }
 
+async function ensureCommercialDocument(order: StoredOrder) {
+  if (order.metadata.documentInternalId && order.metadata.documentNumber && order.metadata.documentTc) {
+    return order;
+  }
+
+  const itemInputs = order.metadata.items || [];
+
+  if (itemInputs.length === 0) {
+    throw new OrderValidationError("El pedido no tiene articulos para grabar el comprobante.");
+  }
+
+  const products = await getProductsByIds(itemInputs.map((item) => item.productId));
+  const productMap = new Map(products.map((product) => [product.id.trim(), product]));
+  const missingProduct = itemInputs.find((item) => !productMap.has(item.productId.trim()));
+
+  if (missingProduct) {
+    throw new OrderValidationError(
+      `No se encontro el articulo ${missingProduct.productId} para grabar el comprobante.`,
+    );
+  }
+
+  const settings = await getServerSettings();
+  const document = await createCommercialDocument({
+    order,
+    settings,
+    lines: itemInputs.map((item) => {
+      const product = productMap.get(item.productId.trim());
+
+      if (!product) {
+        throw new OrderValidationError(
+          `No se encontro el articulo ${item.productId} para grabar el comprobante.`,
+        );
+      }
+
+      return {
+        articleId: product.id,
+        quantity: item.quantity,
+        unitPrice: product.price,
+      };
+    }),
+  });
+
+  const updated = await orderRepository.update(order.id, {
+    numero_pedido: document.idComprobante,
+    metadata: {
+      ...order.metadata,
+      documentInternalId: document.id,
+      documentTc: document.tc,
+      documentNumber: document.idComprobante,
+      documentCustomerAccount: document.customerAccount,
+      documentError: null,
+    },
+  });
+
+  return updated || order;
+}
+
 function resolveOrigin(input: OrderTransitionOptions | undefined) {
   return input?.origin || "sistema";
+}
+
+function resolvePickupCodeFromInput(rawValue: string) {
+  const trimmed = rawValue.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    try {
+      const parsed = JSON.parse(trimmed) as { pickupCode?: string | null };
+      return parsed.pickupCode?.trim() || null;
+    } catch {
+      return trimmed;
+    }
+  }
+
+  return trimmed;
 }
 
 function mergeMetadata(
@@ -152,6 +240,7 @@ function hasSameMetadata(
 
 function buildFallbackDocumentItem(
   order: StoredOrder,
+  documentNumber: string,
   item: NonNullable<StoredOrder["metadata"]["items"]>[number],
   index: number,
 ): OrderDocumentItem {
@@ -161,7 +250,7 @@ function buildFallbackDocumentItem(
   return {
     id: null,
     tc: "",
-    idComprobante: order.numero_pedido,
+    idComprobante: documentNumber,
     sequence: index + 1,
     articleId: item.productId,
     description: item.productId,
@@ -173,15 +262,19 @@ function buildFallbackDocumentItem(
 
 async function resolveOrderDocument(order: StoredOrder) {
   const settings = await getServerSettings();
-  const documentNumber = order.numero_pedido?.trim() || "";
-  const fallbackDocumentNumber = `${normalizeBranch(settings.orderBranch || "0")}${normalizeNumber(
-    order.id,
-  )}${(settings.orderLetter || "X").trim().slice(0, 1) || "X"}`;
+  const persistedDocumentNumber = (order.metadata.documentNumber || "").trim();
+  const persistedDocumentTc = (order.metadata.documentTc || "").trim() || null;
+  const fallbackDocumentNumber = buildOrderDocumentNumber(order.id, settings.orderBranch);
   const possibleDocumentNumbers = Array.from(
-    new Set([documentNumber, fallbackDocumentNumber].filter(Boolean)),
+    new Set([
+      persistedDocumentNumber,
+      fallbackDocumentNumber,
+      normalizeNumber(order.id),
+    ].filter(Boolean)),
   );
   const possibleTcs = Array.from(
     new Set([
+      persistedDocumentTc,
       settings.mercadoPagoOrderTc,
       settings.orderTc,
       "NP",
@@ -218,12 +311,12 @@ async function resolveOrderDocument(order: StoredOrder) {
   }
 
   const fallbackItems = (order.metadata.items || []).map((item, index) =>
-    buildFallbackDocumentItem(order, item, index),
+    buildFallbackDocumentItem(order, fallbackDocumentNumber, item, index),
   );
 
   return {
-    documentTc: possibleTcs[0] || null,
-    documentNumber: documentNumber || fallbackDocumentNumber,
+    documentTc: persistedDocumentTc || possibleTcs[0] || null,
+    documentNumber: persistedDocumentNumber || fallbackDocumentNumber,
     documentItems: fallbackItems,
   };
 }
@@ -277,6 +370,7 @@ export async function buildCheckoutOrderDraft(
       direccion: payload.customer.address || null,
       metadata: {
         items: payload.items,
+        customerDocumentNumber: payload.customer.documentNumber || null,
         customerAddress: payload.customer.address || null,
         customerCity: payload.customer.city || null,
         customerProvince: payload.customer.province || null,
@@ -301,6 +395,38 @@ export async function getOrderById(orderId: number) {
   return order;
 }
 
+function isPendingOrderExpired(order: StoredOrder, ttlMinutes: number) {
+  if (order.estado !== "PENDIENTE" || order.estado_pago !== "pendiente") {
+    return false;
+  }
+
+  const createdAt = new Date(order.fecha_creacion);
+
+  if (Number.isNaN(createdAt.getTime())) {
+    return false;
+  }
+
+  return Date.now() - createdAt.getTime() >= ttlMinutes * 60_000;
+}
+
+export async function cancelExpiredPendingOrders() {
+  const settings = await getServerSettings();
+  const pendingOrders = await orderRepository.getFiltered({
+    estado: "PENDIENTE",
+    estado_pago: "pendiente",
+    limit: 200,
+  });
+  const expiredOrders = pendingOrders.filter((order) =>
+    isPendingOrderExpired(order, settings.pendingOrderTtlMinutes),
+  );
+
+  for (const order of expiredOrders) {
+    await updateOrderStatus(order.id, "CANCELADO", { origin: "sistema" });
+  }
+
+  return expiredOrders.length;
+}
+
 export async function getOrderLogs(orderId: number) {
   await getOrderById(orderId);
   return orderRepository.getLogsByOrderId(orderId);
@@ -323,6 +449,7 @@ export async function getOrderDetailById(orderId: number) {
 }
 
 export async function getOrders(filters: OrderFilters = {}) {
+  await cancelExpiredPendingOrders();
   return orderRepository.getFiltered(filters);
 }
 
@@ -336,6 +463,16 @@ export async function createOrder(
     estado: input.estado || "PENDIENTE",
     estado_pago: input.estado_pago || "pendiente",
   });
+  const orderWithDocument = await ensureCommercialDocument(order).catch(async (error) => {
+    const message = error instanceof Error ? error.message : "No se pudo generar el comprobante.";
+    await orderRepository.update(order.id, {
+      metadata: {
+        ...order.metadata,
+        documentError: message,
+      },
+    });
+    throw error;
+  });
 
   await orderRepository.logStatusChange(
     order.id,
@@ -343,7 +480,7 @@ export async function createOrder(
     order.estado,
     resolveOrigin(options),
   );
-  return order;
+  return orderWithDocument;
 }
 
 export async function createOrderFromCheckoutPayload(payload: CreateOrderPayload) {
@@ -475,6 +612,101 @@ export async function registerMercadoPagoApproval(input: {
   }
 
   return order;
+}
+
+export async function resendPickupReadyEmail(orderId: number) {
+  const order = await getOrderById(orderId);
+
+  if (order.tipo_pedido !== "retiro") {
+    throw new OrderValidationError("Solo se puede reenviar este email para pedidos de retiro.");
+  }
+
+  const patchedOrder = await ensurePickupAssets(order);
+  await sendOrderStatusEmail(patchedOrder, "LISTO_PARA_RETIRO");
+
+  const updated = await orderRepository.update(order.id, {
+    email_listo_enviado_at: new Date().toISOString(),
+  });
+
+  return updated || patchedOrder;
+}
+
+export async function findPickupOrderByCode(rawPickupValue: string) {
+  const pickupCode = resolvePickupCodeFromInput(rawPickupValue);
+
+  if (!pickupCode) {
+    throw new OrderValidationError("Escanea el QR o ingresa el codigo de retiro.");
+  }
+
+  const order = await orderRepository.getByPickupCode(pickupCode);
+
+  if (!order) {
+    throw new OrderNotFoundError(pickupCode);
+  }
+
+  return {
+    order,
+    pickupCode,
+  };
+}
+
+export async function registrarRetiroPedido(
+  orderId: number,
+  rawPickupValue: string,
+  nombreApellido: string,
+  options?: OrderTransitionOptions,
+) {
+  const order = await getOrderById(orderId);
+
+  if (order.tipo_pedido !== "retiro") {
+    throw new OrderValidationError("Solo se puede registrar retiro para pedidos de retiro.");
+  }
+
+  const pickupCode = resolvePickupCodeFromInput(rawPickupValue);
+
+  if (!pickupCode) {
+    throw new OrderValidationError("Escanea el QR o ingresa el codigo de retiro.");
+  }
+
+  if (!nombreApellido.trim()) {
+    throw new OrderValidationError("Ingresa NombreApellido para registrar el retiro.");
+  }
+
+  if (!order.metadata.pickupCode || order.metadata.pickupCode.trim() !== pickupCode) {
+    throw new OrderValidationError("El QR o codigo no corresponde a este pedido.");
+  }
+
+  if (order.retirado === "SI") {
+    throw new OrderValidationError("Este pedido ya fue retirado y no puede volver a usarse.");
+  }
+
+  const redeemed = await orderRepository.markPickupAsRedeemed(order.id, nombreApellido);
+
+  if (!redeemed) {
+    throw new OrderValidationError("Este pedido ya fue retirado y no puede volver a usarse.");
+  }
+
+  if (redeemed.estadoAnterior !== redeemed.order.estado) {
+    await orderRepository.logStatusChange(
+      order.id,
+      redeemed.estadoAnterior,
+      redeemed.order.estado,
+      resolveOrigin(options),
+    );
+  }
+
+  await sendOrderStatusEmail(redeemed.order, "ENTREGADO");
+
+  return redeemed.order;
+}
+
+export async function registrarRetiroPedidoPorCodigo(
+  rawPickupValue: string,
+  nombreApellido: string,
+  options?: OrderTransitionOptions,
+) {
+  const { order, pickupCode } = await findPickupOrderByCode(rawPickupValue);
+  return registrarRetiroPedido(order.id, pickupCode, nombreApellido, options);
 }
 
 function buildSampleMetadata(input: {

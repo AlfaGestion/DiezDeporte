@@ -1,4 +1,4 @@
-import { adminCardClass, cn } from "@/components/admin/admin-ui";
+import { adminCardClass, cn, formatAdminDateTime } from "@/components/admin/admin-ui";
 import { getOrderTypeLabel } from "@/lib/order-admin";
 import type { StoredOrder } from "@/lib/types";
 
@@ -53,6 +53,30 @@ export function OrderDeliveryCard({
           </dt>
           <dd className="mt-1 text-[color:var(--admin-title)]">
             {order.numero_seguimiento || "Sin seguimiento"}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium uppercase tracking-[0.14em] text-[color:var(--admin-text)]">
+            Retirado
+          </dt>
+          <dd className="mt-1 text-[color:var(--admin-title)]">
+            {order.retirado}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium uppercase tracking-[0.14em] text-[color:var(--admin-text)]">
+            FechaHoraRetiro
+          </dt>
+          <dd className="mt-1 text-[color:var(--admin-title)]">
+            {formatAdminDateTime(order.fecha_hora_retiro)}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium uppercase tracking-[0.14em] text-[color:var(--admin-text)]">
+            NombreApellido
+          </dt>
+          <dd className="mt-1 text-[color:var(--admin-title)]">
+            {order.nombre_apellido_retiro || "-"}
           </dd>
         </div>
         <div>

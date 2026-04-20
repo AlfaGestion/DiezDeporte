@@ -4,6 +4,7 @@ import {
   ORDER_STATES,
   ORDER_TYPES,
 } from "@/lib/types/order";
+import { normalizeBranch, normalizeNumber } from "@/lib/commerce";
 import type {
   Order,
   OrderFilters,
@@ -198,6 +199,7 @@ export function getNextActionLabel(order: Pick<Order, "estado" | "tipo_pedido">)
     case "PREPARANDO":
       return order.tipo_pedido === "retiro" ? "Listo para retirar" : "Enviar";
     case "LISTO_PARA_RETIRO":
+      return null;
     case "ENVIADO":
       return "Finalizar";
     default:
@@ -230,28 +232,30 @@ export function buildOrderNumber() {
   return `WEB-${yyyymmdd}-${suffix}`;
 }
 
-export function buildPickupCode() {
-  const prefix = Date.now().toString(36).toUpperCase();
-  const suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
-  return `RET-${prefix}-${suffix}`;
+export function buildOrderDocumentNumber(orderId: number, branch?: string | null) {
+  return `${normalizeBranch(branch || "0")}${normalizeNumber(orderId)}`;
+}
+
+function buildRandomPickupSuffix() {
+  return Math.random().toString(36).replace(/[^a-z0-9]/gi, "").slice(2, 6).toUpperCase();
+}
+
+export function buildPickupCode(documentNumber?: string | null) {
+  const digits = String(documentNumber || "").replace(/\D/g, "");
+  const comprobanteTail = digits ? digits.slice(-4).padStart(4, "0") : "0000";
+  return `WEB-${comprobanteTail}-${buildRandomPickupSuffix()}`;
 }
 
 export function buildQrPayload(
-  order: Pick<Order, "id" | "numero_pedido" | "nombre_cliente" | "tipo_pedido">,
+  _order: Pick<Order, "id" | "numero_pedido" | "nombre_cliente" | "tipo_pedido">,
   pickupCode: string | null,
 ) {
-  return JSON.stringify({
-    orderId: order.id,
-    numeroPedido: order.numero_pedido,
-    cliente: order.nombre_cliente,
-    tipoPedido: order.tipo_pedido,
-    pickupCode,
-  });
+  return (pickupCode || "").trim();
 }
 
 export function shouldSendEmailForState(order: StoredOrder, state: OrderState) {
   if (state === "FACTURADO") {
-    return !order.email_facturado_enviado_at;
+    return order.tipo_pedido !== "retiro" && !order.email_facturado_enviado_at;
   }
 
   if (state === "LISTO_PARA_RETIRO") {
@@ -282,11 +286,21 @@ export function normalizeOrderType(value: string | null | undefined): OrderType 
   return (value || "").trim().toLowerCase() === "envio" ? "envio" : "retiro";
 }
 
-export function formatOrderAsLegacySummary(order: Order, itemCount = 0) {
+export function formatOrderAsLegacySummary(
+  order: Order,
+  itemCount = 0,
+  options?: {
+    tc?: string | null;
+    branch?: string | null;
+    documentNumber?: string | null;
+  },
+) {
   return {
     ...order,
-    tc: "WEB",
-    idComprobante: order.numero_pedido,
+    tc: (options?.tc || "WEB").trim() || "WEB",
+    idComprobante:
+      (options?.documentNumber || "").trim() ||
+      buildOrderDocumentNumber(order.id, options?.branch),
     internalId: order.id,
     total: order.monto_total,
     itemCount,

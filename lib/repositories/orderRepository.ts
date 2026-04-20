@@ -13,6 +13,10 @@ import type {
 const ORDERS_TABLE = "dbo.WEB_V_MV_PEDIDOS";
 const ORDER_LOGS_TABLE = "dbo.WEB_V_MV_PEDIDOS_LOGS";
 
+declare global {
+  var __diezDeportesOrderSchemaReady: Promise<void> | undefined;
+}
+
 type OrderRow = {
   ID: number;
   NUMERO_PEDIDO: string;
@@ -27,12 +31,19 @@ type OrderRow = {
   CODIGO_QR: string | null;
   NUMERO_SEGUIMIENTO: string | null;
   DIRECCION: string | null;
+  RETIRADO: string | null;
+  FECHA_HORA_RETIRO: Date | null;
+  NOMBRE_APELLIDO: string | null;
   DETALLE_JSON: string | null;
   EMAIL_FACTURADO_ENVIADO_AT: Date | null;
   EMAIL_LISTO_ENVIADO_AT: Date | null;
   EMAIL_ENVIADO_ENVIADO_AT: Date | null;
   FECHA_CREACION: Date;
   FECHA_ACTUALIZACION: Date;
+};
+
+type RedeemOrderRow = OrderRow & {
+  ESTADO_ANTERIOR: string | null;
 };
 
 type OrderLogRow = {
@@ -87,6 +98,9 @@ function mapOrderRow(row: OrderRow): StoredOrder {
     codigo_qr: row.CODIGO_QR,
     numero_seguimiento: row.NUMERO_SEGUIMIENTO,
     direccion: row.DIRECCION,
+    retirado: row.RETIRADO === "SI" ? "SI" : "NO",
+    fecha_hora_retiro: toIsoString(row.FECHA_HORA_RETIRO),
+    nombre_apellido_retiro: row.NOMBRE_APELLIDO?.trim() || null,
     fecha_creacion: new Date(row.FECHA_CREACION).toISOString(),
     fecha_actualizacion: new Date(row.FECHA_ACTUALIZACION).toISOString(),
     metadata: parseMetadata(row.DETALLE_JSON),
@@ -143,115 +157,144 @@ function buildDateEndExclusive(value: string) {
 }
 
 async function ensureSchema() {
+  if (global.__diezDeportesOrderSchemaReady) {
+    return global.__diezDeportesOrderSchemaReady;
+  }
+
+  global.__diezDeportesOrderSchemaReady = (async () => {
   const pool = await getConnection();
 
-  await pool.request().query(`
-    IF OBJECT_ID('${ORDERS_TABLE}', 'U') IS NULL
-    BEGIN
-      CREATE TABLE ${ORDERS_TABLE} (
-        ID bigint IDENTITY(1, 1) NOT NULL PRIMARY KEY,
-        NUMERO_PEDIDO nvarchar(32) NOT NULL,
-        NOMBRE_CLIENTE nvarchar(160) NOT NULL,
-        EMAIL_CLIENTE nvarchar(160) NOT NULL,
-        TELEFONO_CLIENTE nvarchar(40) NOT NULL,
-        MONTO_TOTAL decimal(18, 2) NOT NULL,
-        ESTADO_PAGO nvarchar(20) NOT NULL,
-        ID_PAGO nvarchar(64) NULL,
-        TIPO_PEDIDO nvarchar(20) NOT NULL,
-        ESTADO nvarchar(30) NOT NULL,
-        CODIGO_QR nvarchar(max) NULL,
-        NUMERO_SEGUIMIENTO nvarchar(120) NULL,
-        DIRECCION nvarchar(250) NULL,
-        DETALLE_JSON nvarchar(max) NULL,
-        EMAIL_FACTURADO_ENVIADO_AT datetime2 NULL,
-        EMAIL_LISTO_ENVIADO_AT datetime2 NULL,
-        EMAIL_ENVIADO_ENVIADO_AT datetime2 NULL,
-        FECHA_CREACION datetime2 NOT NULL CONSTRAINT DF_WEB_V_MV_PEDIDOS_FECHA_CREACION DEFAULT SYSDATETIME(),
-        FECHA_ACTUALIZACION datetime2 NOT NULL CONSTRAINT DF_WEB_V_MV_PEDIDOS_FECHA_ACTUALIZACION DEFAULT SYSDATETIME()
-      );
-    END;
+    await pool.request().query(`
+      IF OBJECT_ID('${ORDERS_TABLE}', 'U') IS NULL
+      BEGIN
+        CREATE TABLE ${ORDERS_TABLE} (
+          ID bigint IDENTITY(1, 1) NOT NULL PRIMARY KEY,
+          NUMERO_PEDIDO nvarchar(32) NOT NULL,
+          NOMBRE_CLIENTE nvarchar(160) NOT NULL,
+          EMAIL_CLIENTE nvarchar(160) NOT NULL,
+          TELEFONO_CLIENTE nvarchar(40) NOT NULL,
+          MONTO_TOTAL decimal(18, 2) NOT NULL,
+          ESTADO_PAGO nvarchar(20) NOT NULL,
+          ID_PAGO nvarchar(64) NULL,
+          TIPO_PEDIDO nvarchar(20) NOT NULL,
+          ESTADO nvarchar(30) NOT NULL,
+          CODIGO_QR nvarchar(max) NULL,
+          NUMERO_SEGUIMIENTO nvarchar(120) NULL,
+          DIRECCION nvarchar(250) NULL,
+          RETIRADO nvarchar(2) NOT NULL CONSTRAINT DF_WEB_V_MV_PEDIDOS_RETIRADO DEFAULT 'NO',
+          FECHA_HORA_RETIRO datetime2 NULL,
+          NOMBRE_APELLIDO nvarchar(160) NULL,
+          DETALLE_JSON nvarchar(max) NULL,
+          EMAIL_FACTURADO_ENVIADO_AT datetime2 NULL,
+          EMAIL_LISTO_ENVIADO_AT datetime2 NULL,
+          EMAIL_ENVIADO_ENVIADO_AT datetime2 NULL,
+          FECHA_CREACION datetime2 NOT NULL CONSTRAINT DF_WEB_V_MV_PEDIDOS_FECHA_CREACION DEFAULT SYSDATETIME(),
+          FECHA_ACTUALIZACION datetime2 NOT NULL CONSTRAINT DF_WEB_V_MV_PEDIDOS_FECHA_ACTUALIZACION DEFAULT SYSDATETIME()
+        );
+      END;
 
-    IF OBJECT_ID('${ORDER_LOGS_TABLE}', 'U') IS NULL
-    BEGIN
-      CREATE TABLE ${ORDER_LOGS_TABLE} (
-        ID bigint IDENTITY(1, 1) NOT NULL PRIMARY KEY,
-        ORDER_ID bigint NOT NULL,
-        ESTADO_ANTERIOR nvarchar(30) NULL,
-        ESTADO_NUEVO nvarchar(30) NOT NULL,
-        ORIGEN_CAMBIO nvarchar(20) NOT NULL,
-        FECHA datetime2 NOT NULL CONSTRAINT DF_WEB_V_MV_PEDIDOS_LOGS_FECHA DEFAULT SYSDATETIME()
-      );
-    END;
+      IF OBJECT_ID('${ORDER_LOGS_TABLE}', 'U') IS NULL
+      BEGIN
+        CREATE TABLE ${ORDER_LOGS_TABLE} (
+          ID bigint IDENTITY(1, 1) NOT NULL PRIMARY KEY,
+          ORDER_ID bigint NOT NULL,
+          ESTADO_ANTERIOR nvarchar(30) NULL,
+          ESTADO_NUEVO nvarchar(30) NOT NULL,
+          ORIGEN_CAMBIO nvarchar(20) NOT NULL,
+          FECHA datetime2 NOT NULL CONSTRAINT DF_WEB_V_MV_PEDIDOS_LOGS_FECHA DEFAULT SYSDATETIME()
+        );
+      END;
 
-    IF COL_LENGTH('${ORDERS_TABLE}', 'DETALLE_JSON') IS NULL
-    BEGIN
-      ALTER TABLE ${ORDERS_TABLE} ADD DETALLE_JSON nvarchar(max) NULL;
-    END;
+      IF COL_LENGTH('${ORDERS_TABLE}', 'DETALLE_JSON') IS NULL
+      BEGIN
+        ALTER TABLE ${ORDERS_TABLE} ADD DETALLE_JSON nvarchar(max) NULL;
+      END;
 
-    IF COL_LENGTH('${ORDERS_TABLE}', 'EMAIL_FACTURADO_ENVIADO_AT') IS NULL
-    BEGIN
-      ALTER TABLE ${ORDERS_TABLE} ADD EMAIL_FACTURADO_ENVIADO_AT datetime2 NULL;
-    END;
+      IF COL_LENGTH('${ORDERS_TABLE}', 'RETIRADO') IS NULL
+      BEGIN
+        ALTER TABLE ${ORDERS_TABLE} ADD RETIRADO nvarchar(2) NOT NULL CONSTRAINT DF_WEB_V_MV_PEDIDOS_RETIRADO DEFAULT 'NO';
+      END;
 
-    IF COL_LENGTH('${ORDERS_TABLE}', 'EMAIL_LISTO_ENVIADO_AT') IS NULL
-    BEGIN
-      ALTER TABLE ${ORDERS_TABLE} ADD EMAIL_LISTO_ENVIADO_AT datetime2 NULL;
-    END;
+      IF COL_LENGTH('${ORDERS_TABLE}', 'FECHA_HORA_RETIRO') IS NULL
+      BEGIN
+        ALTER TABLE ${ORDERS_TABLE} ADD FECHA_HORA_RETIRO datetime2 NULL;
+      END;
 
-    IF COL_LENGTH('${ORDERS_TABLE}', 'EMAIL_ENVIADO_ENVIADO_AT') IS NULL
-    BEGIN
-      ALTER TABLE ${ORDERS_TABLE} ADD EMAIL_ENVIADO_ENVIADO_AT datetime2 NULL;
-    END;
+      IF COL_LENGTH('${ORDERS_TABLE}', 'NOMBRE_APELLIDO') IS NULL
+      BEGIN
+        ALTER TABLE ${ORDERS_TABLE} ADD NOMBRE_APELLIDO nvarchar(160) NULL;
+      END;
 
-    IF COL_LENGTH('${ORDER_LOGS_TABLE}', 'ORIGEN_CAMBIO') IS NULL
-    BEGIN
-      ALTER TABLE ${ORDER_LOGS_TABLE} ADD ORIGEN_CAMBIO nvarchar(20) NOT NULL CONSTRAINT DF_WEB_V_MV_PEDIDOS_LOGS_ORIGEN DEFAULT 'sistema';
-    END;
+      IF COL_LENGTH('${ORDERS_TABLE}', 'EMAIL_FACTURADO_ENVIADO_AT') IS NULL
+      BEGIN
+        ALTER TABLE ${ORDERS_TABLE} ADD EMAIL_FACTURADO_ENVIADO_AT datetime2 NULL;
+      END;
 
-    IF NOT EXISTS (
-      SELECT 1
-      FROM sys.indexes
-      WHERE name = 'IX_WEB_V_MV_PEDIDOS_NUMERO_PEDIDO'
-        AND object_id = OBJECT_ID('${ORDERS_TABLE}')
-    )
-    BEGIN
-      CREATE UNIQUE INDEX IX_WEB_V_MV_PEDIDOS_NUMERO_PEDIDO
-      ON ${ORDERS_TABLE} (NUMERO_PEDIDO);
-    END;
+      IF COL_LENGTH('${ORDERS_TABLE}', 'EMAIL_LISTO_ENVIADO_AT') IS NULL
+      BEGIN
+        ALTER TABLE ${ORDERS_TABLE} ADD EMAIL_LISTO_ENVIADO_AT datetime2 NULL;
+      END;
 
-    IF NOT EXISTS (
-      SELECT 1
-      FROM sys.indexes
-      WHERE name = 'IX_WEB_V_MV_PEDIDOS_ID_PAGO'
-        AND object_id = OBJECT_ID('${ORDERS_TABLE}')
-    )
-    BEGIN
-      CREATE INDEX IX_WEB_V_MV_PEDIDOS_ID_PAGO
-      ON ${ORDERS_TABLE} (ID_PAGO);
-    END;
+      IF COL_LENGTH('${ORDERS_TABLE}', 'EMAIL_ENVIADO_ENVIADO_AT') IS NULL
+      BEGIN
+        ALTER TABLE ${ORDERS_TABLE} ADD EMAIL_ENVIADO_ENVIADO_AT datetime2 NULL;
+      END;
 
-    IF NOT EXISTS (
-      SELECT 1
-      FROM sys.indexes
-      WHERE name = 'IX_WEB_V_MV_PEDIDOS_ESTADO'
-        AND object_id = OBJECT_ID('${ORDERS_TABLE}')
-    )
-    BEGIN
-      CREATE INDEX IX_WEB_V_MV_PEDIDOS_ESTADO
-      ON ${ORDERS_TABLE} (ESTADO, ESTADO_PAGO, FECHA_CREACION DESC);
-    END;
+      IF COL_LENGTH('${ORDER_LOGS_TABLE}', 'ORIGEN_CAMBIO') IS NULL
+      BEGIN
+        ALTER TABLE ${ORDER_LOGS_TABLE} ADD ORIGEN_CAMBIO nvarchar(20) NOT NULL CONSTRAINT DF_WEB_V_MV_PEDIDOS_LOGS_ORIGEN DEFAULT 'sistema';
+      END;
 
-    IF NOT EXISTS (
-      SELECT 1
-      FROM sys.indexes
-      WHERE name = 'IX_WEB_V_MV_PEDIDOS_LOGS_ORDER_ID'
-        AND object_id = OBJECT_ID('${ORDER_LOGS_TABLE}')
-    )
-    BEGIN
-      CREATE INDEX IX_WEB_V_MV_PEDIDOS_LOGS_ORDER_ID
-      ON ${ORDER_LOGS_TABLE} (ORDER_ID, FECHA DESC, ID DESC);
-    END;
-  `);
+      IF NOT EXISTS (
+        SELECT 1
+        FROM sys.indexes
+        WHERE name = 'IX_WEB_V_MV_PEDIDOS_NUMERO_PEDIDO'
+          AND object_id = OBJECT_ID('${ORDERS_TABLE}')
+      )
+      BEGIN
+        CREATE UNIQUE INDEX IX_WEB_V_MV_PEDIDOS_NUMERO_PEDIDO
+        ON ${ORDERS_TABLE} (NUMERO_PEDIDO);
+      END;
+
+      IF NOT EXISTS (
+        SELECT 1
+        FROM sys.indexes
+        WHERE name = 'IX_WEB_V_MV_PEDIDOS_ID_PAGO'
+          AND object_id = OBJECT_ID('${ORDERS_TABLE}')
+      )
+      BEGIN
+        CREATE INDEX IX_WEB_V_MV_PEDIDOS_ID_PAGO
+        ON ${ORDERS_TABLE} (ID_PAGO);
+      END;
+
+      IF NOT EXISTS (
+        SELECT 1
+        FROM sys.indexes
+        WHERE name = 'IX_WEB_V_MV_PEDIDOS_ESTADO'
+          AND object_id = OBJECT_ID('${ORDERS_TABLE}')
+      )
+      BEGIN
+        CREATE INDEX IX_WEB_V_MV_PEDIDOS_ESTADO
+        ON ${ORDERS_TABLE} (ESTADO, ESTADO_PAGO, FECHA_CREACION DESC);
+      END;
+
+      IF NOT EXISTS (
+        SELECT 1
+        FROM sys.indexes
+        WHERE name = 'IX_WEB_V_MV_PEDIDOS_LOGS_ORDER_ID'
+          AND object_id = OBJECT_ID('${ORDER_LOGS_TABLE}')
+      )
+      BEGIN
+        CREATE INDEX IX_WEB_V_MV_PEDIDOS_LOGS_ORDER_ID
+        ON ${ORDER_LOGS_TABLE} (ORDER_ID, FECHA DESC, ID DESC);
+      END;
+    `);
+  })().catch((error) => {
+    global.__diezDeportesOrderSchemaReady = undefined;
+    throw error;
+  });
+
+  return global.__diezDeportesOrderSchemaReady;
 }
 
 export async function getById(id: number) {
@@ -377,6 +420,15 @@ export async function getByExternalReference(externalReference: string) {
   );
 }
 
+export async function getByPickupCode(pickupCode: string) {
+  return getSingleByWhere(
+    "TIPO_PEDIDO = 'retiro' AND JSON_VALUE(DETALLE_JSON, '$.pickupCode') = @pickupCode",
+    {
+      pickupCode: pickupCode.trim(),
+    },
+  );
+}
+
 export async function create(input: CreateOrderInput) {
   await ensureSchema();
   const pool = await getConnection();
@@ -442,6 +494,9 @@ export async function update(id: number, input: UpdateOrderInput) {
   if (input.nombre_cliente !== undefined) {
     entries.push(["NOMBRE_CLIENTE", input.nombre_cliente.trim()]);
   }
+  if (input.numero_pedido !== undefined) {
+    entries.push(["NUMERO_PEDIDO", input.numero_pedido.trim()]);
+  }
   if (input.email_cliente !== undefined) {
     entries.push(["EMAIL_CLIENTE", input.email_cliente.trim()]);
   }
@@ -471,6 +526,18 @@ export async function update(id: number, input: UpdateOrderInput) {
   }
   if (input.direccion !== undefined) {
     entries.push(["DIRECCION", input.direccion]);
+  }
+  if (input.retirado !== undefined) {
+    entries.push(["RETIRADO", input.retirado]);
+  }
+  if (input.fecha_hora_retiro !== undefined) {
+    entries.push([
+      "FECHA_HORA_RETIRO",
+      input.fecha_hora_retiro ? new Date(input.fecha_hora_retiro) : null,
+    ]);
+  }
+  if (input.nombre_apellido_retiro !== undefined) {
+    entries.push(["NOMBRE_APELLIDO", input.nombre_apellido_retiro?.trim() || null]);
   }
   if (input.metadata !== undefined) {
     entries.push(["DETALLE_JSON", JSON.stringify(input.metadata || {})]);
@@ -660,4 +727,34 @@ export async function getDocumentItemsByNumber(idComprobante: string) {
   `);
 
   return result.recordset.map(mapOrderDocumentItemRow);
+}
+
+export async function markPickupAsRedeemed(orderId: number, nombreApellido: string) {
+  await ensureSchema();
+  const pool = await getConnection();
+  const request = pool.request();
+  request.input("id", orderId);
+  request.input("nombreApellido", nombreApellido.trim());
+  const result = await request.query<RedeemOrderRow>(`
+    UPDATE ${ORDERS_TABLE}
+    SET
+      RETIRADO = 'SI',
+      FECHA_HORA_RETIRO = SYSDATETIME(),
+      NOMBRE_APELLIDO = @nombreApellido,
+      ESTADO = 'ENTREGADO',
+      FECHA_ACTUALIZACION = SYSDATETIME()
+    OUTPUT DELETED.ESTADO AS ESTADO_ANTERIOR, INSERTED.*
+    WHERE ID = @id
+      AND TIPO_PEDIDO = 'retiro'
+      AND ISNULL(RETIRADO, 'NO') <> 'SI';
+  `);
+
+  if (!result.recordset[0]) {
+    return null;
+  }
+
+  return {
+    order: mapOrderRow(result.recordset[0]),
+    estadoAnterior: (result.recordset[0].ESTADO_ANTERIOR || null) as StoredOrder["estado"] | null,
+  };
 }
