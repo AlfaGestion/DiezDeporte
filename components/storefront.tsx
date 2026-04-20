@@ -15,6 +15,7 @@ import type {
   CheckoutCustomer,
   CreateOrderPayload,
   OrderSummary,
+  PaymentPreferenceResponse,
   Product,
   PromoTile,
   PublicStoreSettings,
@@ -27,23 +28,28 @@ const ODOO_FACEBOOK_URL =
   "https://diezdeportes.odoo.com/website/social/facebook";
 const ODOO_INSTAGRAM_URL =
   "https://diezdeportes.odoo.com/website/social/instagram";
-
-const emptyCustomer: CheckoutCustomer = {
-  fullName: "",
-  email: "",
-  phone: "",
-  address: "",
-  city: "",
-  province: "",
-  postalCode: "",
-  documentNumber: "",
-  notes: "",
-  deliveryMethod: "Retiro en local",
-  paymentMethod: "Coordinar pago",
-};
+const VARIANT_LABEL_COLLATOR = new Intl.Collator("es", {
+  numeric: true,
+  sensitivity: "base",
+});
+const AUDIENCE_DISPLAY_ORDER: AudienceFilter[] = [
+  "mujeres",
+  "hombres",
+  "ninez",
+];
+const APPAREL_SIZE_ORDER = [
+  "xxxs",
+  "xxs",
+  "xs",
+  "s",
+  "m",
+  "l",
+  "xl",
+  "xxl",
+  "xxxl",
+];
 
 type SortOption = "featured" | "name-asc" | "price-asc" | "price-desc";
-type StockOption = "all" | "available" | "low" | "empty";
 type ThemeMode = "light" | "dark";
 type AudienceFilter = "all" | "ninez" | "mujeres" | "hombres";
 type CheckoutStep = "cart" | "details";
@@ -61,9 +67,41 @@ type StorefrontProps = {
 type WebImageOverride = {
   imageUrl: string;
   imageMode: "illustrative";
-  imageNote: string;
+  imageNote: string | null;
   imageSourceUrl: string | null;
 };
+
+type ProductGroup = {
+  parentCode: string;
+  parentProduct: Product | null;
+  catalogProduct: Product;
+  children: Product[];
+  members: Product[];
+  groupStock: number;
+};
+
+type GroupCartSummary = {
+  quantity: number;
+  total: number;
+};
+
+function buildEmptyCustomer(settings: PublicStoreSettings): CheckoutCustomer {
+  return {
+    fullName: "",
+    email: "",
+    phone: "",
+    address: "",
+    city: "",
+    province: "",
+    postalCode: "",
+    documentNumber: "",
+    notes: "",
+    deliveryMethod: "Retiro en local",
+    paymentMethod: settings.mercadoPagoEnabled
+      ? "Mercado Pago"
+      : "Pedido directo",
+  };
+}
 
 export function Storefront({
   initialProducts,
@@ -76,20 +114,31 @@ export function Storefront({
 }: StorefrontProps) {
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("featured");
-  const [stockFilter, setStockFilter] = useState<StockOption>("all");
   const [selectedFamily, setSelectedFamily] = useState("all");
   const [selectedAudience, setSelectedAudience] =
     useState<AudienceFilter>("all");
   const [selectedBrand, setSelectedBrand] = useState("all");
+  const [familiesOpen, setFamiliesOpen] = useState(true);
+  const [audienceOpen, setAudienceOpen] = useState(false);
+  const [brandsOpen, setBrandsOpen] = useState(false);
+  const [priceOpen, setPriceOpen] = useState(true);
+  const [selectedMinPrice, setSelectedMinPrice] = useState<number | null>(null);
+  const [selectedMaxPrice, setSelectedMaxPrice] = useState<number | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [customer, setCustomer] = useState<CheckoutCustomer>(emptyCustomer);
+  const [customer, setCustomer] = useState<CheckoutCustomer>(() =>
+    buildEmptyCustomer(settings),
+  );
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [order, setOrder] = useState<OrderSummary | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [mobileCartOpen, setMobileCartOpen] = useState(false);
   const [checkoutStep, setCheckoutStep] = useState<CheckoutStep>("cart");
   const [theme, setTheme] = useState<ThemeMode>("light");
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [selectedVariantId, setSelectedVariantId] = useState<string | null>(
+    null,
+  );
+  const [detailQuantity, setDetailQuantity] = useState(1);
   const [webImageOverrides, setWebImageOverrides] = useState<
     Record<string, WebImageOverride | null>
   >({});
@@ -147,14 +196,16 @@ export function Storefront({
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.style.colorScheme = theme;
+    document.body.dataset.theme = theme;
+    document.body.style.colorScheme = theme;
     window.localStorage.setItem(LOCAL_STORAGE_THEME_KEY, theme);
   }, [theme]);
 
   useEffect(() => {
-    if (cart.length === 0 && !order) {
+    if (cart.length === 0) {
       setCheckoutStep("cart");
     }
-  }, [cart.length, order]);
+  }, [cart.length]);
 
   useEffect(() => {
     const shouldLockUi = mobileCartOpen || Boolean(selectedProduct);
@@ -184,15 +235,35 @@ export function Storefront({
     };
   }, [mobileCartOpen, selectedProduct]);
 
+  const resolvedInitialProducts = initialProducts.map(resolveProductImage);
+  const productGroups = buildProductGroups(resolvedInitialProducts);
   const families = Array.from(
     new Set(
-      initialProducts.map((product) => product.familyId.trim()).filter(Boolean),
+      productGroups
+        .map((group) => group.catalogProduct.familyId.trim())
+        .filter(Boolean),
     ),
   ).sort((left, right) => left.localeCompare(right));
 
-  const prices = initialProducts.map((product) => product.price);
+  const prices = productGroups.map((group) => group.catalogProduct.price);
   const minPrice = prices.length > 0 ? Math.min(...prices) : 0;
   const maxPrice = prices.length > 0 ? Math.max(...prices) : 0;
+  const effectiveMinPrice = selectedMinPrice ?? minPrice;
+  const effectiveMaxPrice = selectedMaxPrice ?? maxPrice;
+  const priceRangeIsFlat = maxPrice <= minPrice;
+  const priceRangeSpan = priceRangeIsFlat ? 1 : maxPrice - minPrice;
+  const minPricePercent = priceRangeIsFlat
+    ? 0
+    : ((effectiveMinPrice - minPrice) / priceRangeSpan) * 100;
+  const maxPricePercent = priceRangeIsFlat
+    ? 100
+    : ((effectiveMaxPrice - minPrice) / priceRangeSpan) * 100;
+
+  useEffect(() => {
+    setSelectedMinPrice(minPrice);
+    setSelectedMaxPrice(maxPrice);
+  }, [minPrice, maxPrice]);
+
   const normalizedBrandImages = brandImages.slice(0, 6).map((brand, index) => {
     const label =
       brand.label ||
@@ -211,44 +282,52 @@ export function Storefront({
     selectedBrand === "all"
       ? null
       : brandOptions.find((brand) => brand.label === selectedBrand) || null;
-
-  const filteredProducts = initialProducts
-    .filter((product) => {
-      const normalizedDescription = normalizeFilterValue(product.description);
-      const normalizedCode = normalizeFilterValue(product.code);
-      const normalizedSearch = search.trim().toLowerCase();
+  const normalizedSearch = normalizeFilterValue(search);
+  const filteredProductGroups = productGroups
+    .filter((group) => {
       const matchesSearch =
         normalizedSearch === "" ||
-        normalizedDescription.includes(
-          normalizeFilterValue(normalizedSearch),
-        ) ||
-        normalizedCode.includes(normalizeFilterValue(normalizedSearch));
+        group.members.some((product) => {
+          const normalizedDescription = normalizeFilterValue(
+            product.description,
+          );
+          const normalizedCode = normalizeFilterValue(product.code);
+
+          return (
+            normalizedDescription.includes(normalizedSearch) ||
+            normalizedCode.includes(normalizedSearch)
+          );
+        });
 
       const matchesFamily =
-        selectedFamily === "all" || product.familyId.trim() === selectedFamily;
+        selectedFamily === "all" ||
+        group.members.some(
+          (product) => product.familyId.trim() === selectedFamily,
+        );
 
-      const matchesAudience = matchesAudienceFilter(
-        normalizedDescription,
-        selectedAudience,
+      const matchesAudience = group.members.some((product) =>
+        matchesAudienceFilter(
+          normalizeFilterValue(product.description),
+          selectedAudience,
+        ),
       );
-      const matchesBrand = matchesBrandFilter(
-        normalizedDescription,
-        normalizedCode,
-        activeBrand?.aliases || [],
+      const matchesBrand = group.members.some((product) =>
+        matchesBrandFilter(
+          normalizeFilterValue(product.description),
+          normalizeFilterValue(product.code),
+          activeBrand?.aliases || [],
+        ),
       );
-
-      const matchesStock =
-        stockFilter === "all" ||
-        (stockFilter === "available" && product.stock > 0) ||
-        (stockFilter === "low" && product.stock > 0 && product.stock <= 3) ||
-        (stockFilter === "empty" && product.stock <= 0);
+      const matchesPrice =
+        group.catalogProduct.price >= effectiveMinPrice &&
+        group.catalogProduct.price <= effectiveMaxPrice;
 
       if (
         !matchesSearch ||
         !matchesFamily ||
         !matchesAudience ||
         !matchesBrand ||
-        !matchesStock
+        !matchesPrice
       ) {
         return false;
       }
@@ -257,24 +336,27 @@ export function Storefront({
         return true;
       }
 
-      return product.stock > 0;
+      return group.groupStock > 0;
     })
     .sort((left, right) => {
+      const leftProduct = left.catalogProduct;
+      const rightProduct = right.catalogProduct;
+
       if (sortBy === "name-asc") {
-        return left.description.localeCompare(right.description);
+        return leftProduct.description.localeCompare(rightProduct.description);
       }
 
       if (sortBy === "price-asc") {
-        return left.price - right.price;
+        return leftProduct.price - rightProduct.price;
       }
 
       if (sortBy === "price-desc") {
-        return right.price - left.price;
+        return rightProduct.price - leftProduct.price;
       }
 
       return (
-        right.stock - left.stock ||
-        left.description.localeCompare(right.description)
+        right.groupStock - left.groupStock ||
+        leftProduct.description.localeCompare(rightProduct.description)
       );
     });
 
@@ -312,49 +394,80 @@ export function Storefront({
             filterValue: promoDefinition.filterValue,
           };
         })
+          .sort(
+            (left, right) =>
+              getAudienceDisplayOrder(left.filterValue as AudienceFilter) -
+              getAudienceDisplayOrder(right.filterValue as AudienceFilter),
+          )
       : [];
 
   const featuredTiles =
     normalizedPromoTiles.length > 0
       ? normalizedPromoTiles
-      : initialProducts
+      : productGroups
+          .map((group) => group.catalogProduct)
           .filter((product) => Boolean(product.imageUrl))
           .slice(0, 3)
           .map((product, index) => ({
             src: product.imageUrl || "",
             href: "#catalogo",
             alt: product.description,
-            label: ["Kids", "Mujeres", "Hombres"][index] || "Destacado",
-            filterValue: (["ninez", "mujeres", "hombres"][index] ||
+            label: ["Mujeres", "Hombres", "Kids"][index] || "Destacado",
+            filterValue: (["mujeres", "hombres", "ninez"][index] ||
               "all") as AudienceFilter,
           }));
   const audienceOptions: Array<{ value: AudienceFilter; label: string }> = [
     { value: "all", label: "Todo" },
-    { value: "ninez", label: "Kids" },
     { value: "mujeres", label: "Mujeres" },
     { value: "hombres", label: "Hombres" },
+    { value: "ninez", label: "Kids" },
   ];
   const activeAudienceLabel =
     audienceOptions.find((option) => option.value === selectedAudience)
       ?.label || "Todo";
-  const resolvedFilteredProducts = filteredProducts.map(resolveProductImage);
-  const resolvedSelectedProduct = selectedProduct
-    ? resolveProductImage(selectedProduct)
+  const selectedProductGroup = selectedProduct
+    ? productGroups.find(
+        (group) =>
+          group.parentCode === getParentProductCode(selectedProduct.code),
+      ) || null
     : null;
-  const selectedProductCartItem = resolvedSelectedProduct
-    ? cart.find((item) => item.id === resolvedSelectedProduct.id) || null
+  const selectedDetailProduct = selectedProductGroup
+    ? selectedProductGroup.members.find(
+        (product) => product.id === selectedVariantId,
+      ) || getDefaultSelectableProduct(selectedProductGroup)
     : null;
+  const selectedProductCartItem = selectedDetailProduct
+    ? cart.find((item) => item.id === selectedDetailProduct.id) || null
+    : null;
+  const cartSummaryByParentCode = cart.reduce<
+    Record<string, GroupCartSummary>
+  >((summary, item) => {
+    const parentCode = getParentProductCode(item.code);
+    const current = summary[parentCode] || { quantity: 0, total: 0 };
+
+    current.quantity += item.quantity;
+    current.total += item.price * item.quantity;
+    summary[parentCode] = current;
+
+    return summary;
+  }, {});
 
   useEffect(() => {
-    const candidates = resolvedFilteredProducts
+    const candidates = filteredProductGroups
+      .map((group) => group.catalogProduct)
       .filter(shouldAttemptWebImageSearch)
       .slice(0, 12);
 
-    if (
-      resolvedSelectedProduct &&
-      shouldAttemptWebImageSearch(resolvedSelectedProduct)
-    ) {
-      candidates.unshift(resolvedSelectedProduct);
+    if (selectedDetailProduct && shouldAttemptWebImageSearch(selectedDetailProduct)) {
+      candidates.unshift(selectedDetailProduct);
+    }
+
+    if (selectedProductGroup) {
+      candidates.push(
+        ...selectedProductGroup.children
+          .filter(shouldAttemptWebImageSearch)
+          .slice(0, 8),
+      );
     }
 
     const uniqueCandidates = Array.from(
@@ -364,7 +477,29 @@ export function Storefront({
     uniqueCandidates.forEach((product) => {
       void fetchWebImageForProduct(product);
     });
-  }, [resolvedFilteredProducts, resolvedSelectedProduct]);
+  }, [filteredProductGroups, selectedDetailProduct, selectedProductGroup]);
+
+  useEffect(() => {
+    if (!selectedProductGroup) {
+      setSelectedVariantId(null);
+      return;
+    }
+
+    setSelectedVariantId((current) => {
+      if (
+        current &&
+        selectedProductGroup.members.some((product) => product.id === current)
+      ) {
+        return current;
+      }
+
+      return getDefaultSelectableProduct(selectedProductGroup)?.id ?? null;
+    });
+  }, [selectedProductGroup]);
+
+  useEffect(() => {
+    setDetailQuantity(1);
+  }, [selectedDetailProduct?.id]);
 
   function resolveProductImage(product: Product): Product {
     const override = webImageOverrides[product.id];
@@ -442,23 +577,40 @@ export function Storefront({
     scrollToCatalog();
   }
 
-  function addToCart(product: Product) {
+  function addToCart(product: Product, quantity = 1) {
     setErrorMessage(null);
-    setOrder(null);
+    setSuccessMessage(null);
 
     setCart((currentCart) => {
       const existing = currentCart.find((item) => item.id === product.id);
+      const requestedQuantity = Math.max(1, Math.floor(quantity));
+      const stockLimit = Math.max(0, Math.floor(product.stock));
+      const maxQuantity = settings.allowBackorders
+        ? requestedQuantity
+        : Math.max(1, stockLimit);
+
       if (!existing) {
-        return [...currentCart, toCartItem(product)];
+        return [
+          ...currentCart,
+          {
+            ...toCartItem(product),
+            quantity: settings.allowBackorders
+              ? requestedQuantity
+              : Math.min(requestedQuantity, maxQuantity),
+          },
+        ];
       }
 
       return currentCart.map((item) => {
         if (item.id !== product.id) return item;
 
-        const maxQuantity = settings.allowBackorders
-          ? item.quantity + 1
+        const maxAllowedQuantity = settings.allowBackorders
+          ? item.quantity + requestedQuantity
           : Math.max(1, Math.floor(product.stock));
-        const nextQuantity = Math.min(item.quantity + 1, maxQuantity);
+        const nextQuantity = Math.min(
+          item.quantity + requestedQuantity,
+          maxAllowedQuantity,
+        );
 
         return { ...item, quantity: nextQuantity };
       });
@@ -467,10 +619,12 @@ export function Storefront({
 
   function openProductDetail(product: Product) {
     setSelectedProduct(product);
+    setSelectedVariantId(null);
   }
 
   function closeProductDetail() {
     setSelectedProduct(null);
+    setSelectedVariantId(null);
   }
 
   function handleProductCardKeyDown(
@@ -492,7 +646,25 @@ export function Storefront({
     });
   }
 
+  function updateDetailQuantity(nextQuantity: number) {
+    if (!selectedDetailProduct) return;
+
+    const maxQuantity = settings.allowBackorders
+      ? Math.max(1, nextQuantity)
+      : Math.max(1, Math.floor(selectedDetailProduct.stock));
+
+    setDetailQuantity(Math.max(1, Math.min(nextQuantity, maxQuantity)));
+  }
+
+  function handleDetailAddToCart() {
+    if (!selectedDetailProduct) return;
+
+    addToCart(selectedDetailProduct, detailQuantity);
+    setDetailQuantity(1);
+  }
+
   function removeFromCart(productId: string) {
+    setSuccessMessage(null);
     setCart((currentCart) =>
       currentCart.filter((item) => item.id !== productId),
     );
@@ -504,6 +676,7 @@ export function Storefront({
       return;
     }
 
+    setSuccessMessage(null);
     setCart((currentCart) =>
       currentCart.map((item) => {
         if (item.id !== productId) return item;
@@ -521,12 +694,22 @@ export function Storefront({
   }
 
   function updateCustomerField(field: keyof CheckoutCustomer, value: string) {
+    setSuccessMessage(null);
     setCustomer((current) => ({ ...current, [field]: value }));
   }
 
   function openCartPanel(step: CheckoutStep = "cart") {
     setCheckoutStep(step);
     setMobileCartOpen(true);
+  }
+
+  function openCheckoutFromSummary() {
+    if (cart.length === 0) {
+      openCartPanel("cart");
+      return;
+    }
+
+    openCartPanel("details");
   }
 
   function scrollToCatalog() {
@@ -541,7 +724,7 @@ export function Storefront({
   async function handleCheckoutSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setErrorMessage(null);
-    setOrder(null);
+    setSuccessMessage(null);
 
     if (cart.length === 0) {
       setErrorMessage("Agrega al menos un producto antes de enviar el pedido.");
@@ -555,7 +738,9 @@ export function Storefront({
       !customer.city
     ) {
       setErrorMessage(
-        "Completa nombre, telefono, direccion y localidad para grabar el pedido.",
+        settings.mercadoPagoEnabled
+          ? "Completa nombre, telefono, direccion y localidad para iniciar el pago."
+          : "Completa nombre, telefono, direccion y localidad para registrar el pedido.",
       );
       return;
     }
@@ -571,6 +756,28 @@ export function Storefront({
     setSubmitting(true);
 
     try {
+      if (settings.mercadoPagoEnabled) {
+        const response = await fetch("/api/payments/preference", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+
+        const result = (await response.json()) as {
+          error?: string;
+          preference?: PaymentPreferenceResponse;
+        };
+
+        if (!response.ok || !result.preference) {
+          throw new Error(result.error || "No se pudo iniciar el pago.");
+        }
+
+        window.location.assign(result.preference.checkoutUrl);
+        return;
+      }
+
       const response = await fetch("/api/orders", {
         method: "POST",
         headers: {
@@ -585,18 +792,23 @@ export function Storefront({
       };
 
       if (!response.ok || !result.order) {
-        throw new Error(result.error || "No se pudo grabar el pedido.");
+        throw new Error(result.error || "No se pudo registrar el pedido.");
       }
 
-      setOrder(result.order);
       setCart([]);
-      setCustomer(emptyCustomer);
+      setCustomer(buildEmptyCustomer(settings));
+      setCheckoutStep("cart");
+      setSuccessMessage(
+        `Pedido ${result.order.tc} ${result.order.idComprobante} grabado correctamente.`,
+      );
       window.localStorage.removeItem(LOCAL_STORAGE_CART_KEY);
-      setCheckoutStep("details");
-      setMobileCartOpen(true);
     } catch (error) {
       setErrorMessage(
-        error instanceof Error ? error.message : "No se pudo grabar el pedido.",
+        error instanceof Error
+          ? error.message
+          : settings.mercadoPagoEnabled
+            ? "No se pudo iniciar el pago."
+            : "No se pudo registrar el pedido.",
       );
     } finally {
       setSubmitting(false);
@@ -700,20 +912,6 @@ export function Storefront({
               ) : null}
             </div>
 
-            <div className="hero-metrics">
-              <div className="hero-stat-inline">
-                <strong>{initialProducts.length}</strong>
-                <span>productos</span>
-              </div>
-              <div className="hero-stat-inline">
-                <strong>{itemCount}</strong>
-                <span>en tu pedido</span>
-              </div>
-              <div className="hero-stat-inline">
-                <strong>{formatCurrency(total)}</strong>
-                <span>estimado</span>
-              </div>
-            </div>
           </div>
         </section>
 
@@ -777,6 +975,26 @@ export function Storefront({
 
         <div className="shop-layout" id="catalogo">
           <aside className="filters-panel">
+            <div className="catalog-summary" aria-label="Resumen del pedido">
+              <div className="catalog-summary-title">En tu pedido</div>
+              <div className="catalog-summary-item">
+                <span>Cantidad</span>
+                <strong>{itemCount}</strong>
+              </div>
+              <div className="catalog-summary-item">
+                <span>Total</span>
+                <strong>{formatCurrency(total)}</strong>
+              </div>
+              <button
+                type="button"
+                className="submit-order-button catalog-summary-button"
+                onClick={openCheckoutFromSummary}
+                disabled={cart.length === 0}
+              >
+                Continuar compra
+              </button>
+            </div>
+
             <div className="panel-block">
               <h2>Buscar</h2>
               <input
@@ -789,109 +1007,163 @@ export function Storefront({
             </div>
 
             <div className="panel-block">
-              <h3>Categorias</h3>
-              <div className="filter-list">
-                <button
-                  type="button"
-                  className={`filter-chip ${selectedFamily === "all" ? "active" : ""}`}
-                  onClick={() => setSelectedFamily("all")}
-                >
-                  Todos los productos
-                </button>
-                {families.map((family) => (
-                  <button
-                    key={family}
-                    type="button"
-                    className={`filter-chip ${selectedFamily === family ? "active" : ""}`}
-                    onClick={() => setSelectedFamily(family)}
-                  >
-                    Familia {family}
-                  </button>
-                ))}
-              </div>
+              <button
+                type="button"
+                className="filter-section-toggle"
+                onClick={() => setFamiliesOpen((current) => !current)}
+                aria-expanded={familiesOpen}
+              >
+                <span>Categorias</span>
+                <span className="filter-section-chevron" aria-hidden="true" />
+              </button>
+              {familiesOpen ? (
+                <div className="filter-section-content">
+                  <div className="filter-list">
+                    <button
+                      type="button"
+                      className={`filter-chip ${selectedFamily === "all" ? "active" : ""}`}
+                      onClick={() => setSelectedFamily("all")}
+                    >
+                      Todos los productos
+                    </button>
+                    {families.map((family) => (
+                      <button
+                        key={family}
+                        type="button"
+                        className={`filter-chip ${selectedFamily === family ? "active" : ""}`}
+                        onClick={() => setSelectedFamily(family)}
+                      >
+                        Familia {family}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             <div className="panel-block">
-              <h3>Stock</h3>
-              <div className="filter-list">
-                <button
-                  type="button"
-                  className={`filter-chip ${stockFilter === "all" ? "active" : ""}`}
-                  onClick={() => setStockFilter("all")}
-                >
-                  Todo
-                </button>
-                <button
-                  type="button"
-                  className={`filter-chip ${stockFilter === "available" ? "active" : ""}`}
-                  onClick={() => setStockFilter("available")}
-                >
-                  Disponible
-                </button>
-                <button
-                  type="button"
-                  className={`filter-chip ${stockFilter === "low" ? "active" : ""}`}
-                  onClick={() => setStockFilter("low")}
-                >
-                  Bajo
-                </button>
-                <button
-                  type="button"
-                  className={`filter-chip ${stockFilter === "empty" ? "active" : ""}`}
-                  onClick={() => setStockFilter("empty")}
-                >
-                  Sin stock
-                </button>
-              </div>
-            </div>
-
-            <div className="panel-block">
-              <h3>Publico</h3>
-              <div className="filter-list">
-                {audienceOptions.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    className={`filter-chip ${selectedAudience === option.value ? "active" : ""}`}
-                    onClick={() => setSelectedAudience(option.value)}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
+              <button
+                type="button"
+                className="filter-section-toggle"
+                onClick={() => setAudienceOpen((current) => !current)}
+                aria-expanded={audienceOpen}
+              >
+                <span>Publico</span>
+                <span className="filter-section-chevron" aria-hidden="true" />
+              </button>
+              {audienceOpen ? (
+                <div className="filter-section-content">
+                  <div className="filter-list">
+                    {audienceOptions.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={`filter-chip ${selectedAudience === option.value ? "active" : ""}`}
+                        onClick={() => setSelectedAudience(option.value)}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             {brandOptions.length > 0 ? (
               <div className="panel-block">
-                <h3>Marcas</h3>
-                <div className="filter-list">
-                  <button
-                    type="button"
-                    className={`filter-chip ${selectedBrand === "all" ? "active" : ""}`}
-                    onClick={() => setSelectedBrand("all")}
-                  >
-                    Todas
-                  </button>
-                  {brandOptions.map((brand) => (
-                    <button
-                      key={brand.label}
-                      type="button"
-                      className={`filter-chip ${selectedBrand === brand.label ? "active" : ""}`}
-                      onClick={() => setSelectedBrand(brand.label)}
-                    >
-                      {brand.label}
-                    </button>
-                  ))}
-                </div>
+                <button
+                  type="button"
+                  className="filter-section-toggle"
+                  onClick={() => setBrandsOpen((current) => !current)}
+                  aria-expanded={brandsOpen}
+                >
+                  <span>Marcas</span>
+                  <span className="filter-section-chevron" aria-hidden="true" />
+                </button>
+                {brandsOpen ? (
+                  <div className="filter-section-content">
+                    <div className="filter-list">
+                      <button
+                        type="button"
+                        className={`filter-chip ${selectedBrand === "all" ? "active" : ""}`}
+                        onClick={() => setSelectedBrand("all")}
+                      >
+                        Todas
+                      </button>
+                      {brandOptions.map((brand) => (
+                        <button
+                          key={brand.label}
+                          type="button"
+                          className={`filter-chip ${selectedBrand === brand.label ? "active" : ""}`}
+                          onClick={() => setSelectedBrand(brand.label)}
+                        >
+                          {brand.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ) : null}
 
             <div className="panel-block">
-              <h3>Rango de precio</h3>
-              <p className="panel-note">
-                Desde {formatCurrency(minPrice)} hasta{" "}
-                {formatCurrency(maxPrice)}
-              </p>
+              <button
+                type="button"
+                className="filter-section-toggle"
+                onClick={() => setPriceOpen((current) => !current)}
+                aria-expanded={priceOpen}
+              >
+                <span>Rango de precio</span>
+                <span className="filter-section-chevron" aria-hidden="true" />
+              </button>
+              {priceOpen ? (
+                <div className="filter-section-content">
+                  <div className="price-range-values" aria-label="Valores de precio">
+                    <strong>{formatCurrency(effectiveMinPrice)}</strong>
+                    <strong>{formatCurrency(effectiveMaxPrice)}</strong>
+                  </div>
+                  <div className="price-range-slider">
+                    <div className="price-range-track" />
+                    <div
+                      className="price-range-track-active"
+                      style={{
+                        left: `${minPricePercent}%`,
+                        width: `${Math.max(maxPricePercent - minPricePercent, 0)}%`,
+                      }}
+                    />
+                    <input
+                      type="range"
+                      min={minPrice}
+                      max={maxPrice}
+                      step="any"
+                      value={effectiveMinPrice}
+                      className="price-range-input min"
+                      onChange={(event) =>
+                        setSelectedMinPrice(
+                          Math.min(Number(event.target.value), effectiveMaxPrice),
+                        )
+                      }
+                      disabled={priceRangeIsFlat}
+                      aria-label="Precio minimo"
+                    />
+                    <input
+                      type="range"
+                      min={minPrice}
+                      max={maxPrice}
+                      step="any"
+                      value={effectiveMaxPrice}
+                      className="price-range-input max"
+                      onChange={(event) =>
+                        setSelectedMaxPrice(
+                          Math.max(Number(event.target.value), effectiveMinPrice),
+                        )
+                      }
+                      disabled={priceRangeIsFlat}
+                      aria-label="Precio maximo"
+                    />
+                  </div>
+                </div>
+              ) : null}
             </div>
           </aside>
 
@@ -906,7 +1178,7 @@ export function Storefront({
                       : "Todos los productos"}
                 </h2>
                 <p>
-                  {resolvedFilteredProducts.length} resultados
+                  {filteredProductGroups.length} resultados
                   {selectedBrand !== "all" ? ` · Marca ${selectedBrand}` : ""}
                   {selectedAudience !== "all"
                     ? ` · ${activeAudienceLabel}`
@@ -940,22 +1212,30 @@ export function Storefront({
               </div>
             ) : null}
 
-            {!loadError && resolvedFilteredProducts.length === 0 ? (
+            {!loadError && filteredProductGroups.length === 0 ? (
               <div className="empty-state">
                 No hay productos para mostrar con los filtros actuales.
               </div>
             ) : null}
 
             <div className="catalog-grid">
-              {resolvedFilteredProducts.map((product) => {
-                const outOfStock = product.stock <= 0;
+              {filteredProductGroups.map((group) => {
+                const product = group.catalogProduct;
+                const hasVariants = group.children.length > 0;
+                const variantPreview = group.children.slice(0, 4);
+                const hiddenVariantCount = Math.max(
+                  0,
+                  group.children.length - variantPreview.length,
+                );
+                const outOfStock = group.groupStock <= 0;
                 const disableAddButton =
-                  outOfStock && !settings.allowBackorders;
+                  !hasVariants && outOfStock && !settings.allowBackorders;
+                const cartSummary = cartSummaryByParentCode[group.parentCode];
 
                 return (
                   <article
                     className="catalog-card"
-                    key={product.id}
+                    key={group.parentCode}
                     onClick={() => openProductDetail(product)}
                     onKeyDown={(event) =>
                       handleProductCardKeyDown(event, product)
@@ -968,7 +1248,9 @@ export function Storefront({
                       {product.imageUrl ? (
                         <img
                           src={
-                            buildImageProxyUrl(product.imageUrl) ||
+                            buildImageProxyUrl(product.imageUrl, {
+                              transparentBackground: true,
+                            }) ||
                             product.imageUrl
                           }
                           alt={product.description}
@@ -985,13 +1267,18 @@ export function Storefront({
                       <div className="catalog-card-tags">
                         <span className="catalog-tag">Cod. {product.code}</span>
                         <span
-                          className={`catalog-tag ${getStockBadgeClass(product.stock)}`}
+                          className={`catalog-tag ${getStockBadgeClass(group.groupStock)}`}
                         >
-                          Stock {product.stock.toFixed(0)}
+                          Stock {group.groupStock.toFixed(0)}
                         </span>
                         {product.imageMode === "illustrative" ? (
                           <span className="catalog-tag image-illustrative">
                             Imagen ilustrativa
+                          </span>
+                        ) : null}
+                        {hasVariants ? (
+                          <span className="catalog-tag">
+                            {group.children.length} variantes
                           </span>
                         ) : null}
                       </div>
@@ -999,34 +1286,70 @@ export function Storefront({
                       <h3>{product.description}</h3>
 
                       <p className="catalog-card-subtitle">
-                        {product.presentation || product.unitId || "Unidad"}
+                        {hasVariants
+                          ? "Selecciona variante en el detalle"
+                          : product.defaultSize ||
+                            product.presentation ||
+                            product.unitId ||
+                            "Unidad"}
                       </p>
 
-                      {product.imageMode === "illustrative" &&
-                      product.imageNote ? (
-                        <p className="catalog-card-image-note">
-                          {product.imageNote}
-                        </p>
+                      {hasVariants ? (
+                        <div className="catalog-card-variant-preview">
+                          {variantPreview.map((variant) => (
+                            <span
+                              className="catalog-variant-chip"
+                              key={variant.id}
+                            >
+                              {getVariantLabel(variant)}
+                            </span>
+                          ))}
+                          {hiddenVariantCount > 0 ? (
+                            <span className="catalog-variant-chip more">
+                              +{hiddenVariantCount}
+                            </span>
+                          ) : null}
+                        </div>
                       ) : null}
 
                       <div className="catalog-card-price">
                         {formatCurrency(product.price)}
                       </div>
                       <p className="catalog-card-tax">Precio s/Imp. Nac.</p>
+                      {cartSummary ? (
+                        <div className="catalog-card-cart-status">
+                          <span>
+                            Ya tienes {cartSummary.quantity} unidad
+                            {cartSummary.quantity === 1 ? "" : "es"}
+                          </span>
+                          <strong>
+                            Total {formatCurrency(cartSummary.total)}
+                          </strong>
+                        </div>
+                      ) : null}
 
                       <button
                         type="button"
                         className="catalog-card-button"
                         onClick={(event) => {
                           event.stopPropagation();
+                          if (hasVariants) {
+                            openProductDetail(product);
+                            return;
+                          }
+
                           addToCart(product);
                         }}
                         disabled={disableAddButton}
                       >
-                        {disableAddButton ? "Sin stock" : "Anadir al carrito"}
+                        {hasVariants
+                          ? "Ver talles"
+                          : disableAddButton
+                            ? "Sin stock"
+                            : "Anadir al carrito"}
                       </button>
                       <span className="catalog-card-detail-link">
-                        Ver detalle
+                        {hasVariants ? "Elegir talle" : "Ver detalle"}
                       </span>
                     </div>
                   </article>
@@ -1131,7 +1454,7 @@ export function Storefront({
         </section>
       </main>
 
-      {resolvedSelectedProduct ? (
+      {selectedDetailProduct ? (
         <>
           <div
             className="mobile-backdrop product-detail-backdrop"
@@ -1149,145 +1472,215 @@ export function Storefront({
               onClick={closeProductDetail}
               aria-label="Cerrar detalle del producto"
             >
-              Cerrar
+              X
             </button>
 
-            <div className="product-detail-grid">
-              <div className="product-detail-media">
-                {resolvedSelectedProduct.imageUrl ? (
-                  <img
-                    src={
-                      buildImageProxyUrl(resolvedSelectedProduct.imageUrl) ||
-                      resolvedSelectedProduct.imageUrl
-                    }
-                    alt={resolvedSelectedProduct.description}
-                    loading="eager"
-                  />
-                ) : (
-                  <div className="catalog-card-placeholder product-detail-placeholder">
-                    {resolvedSelectedProduct.code.slice(0, 3)}
-                  </div>
-                )}
-              </div>
-
-              <div className="product-detail-copy">
-                <div className="product-detail-heading">
-                  <span className="section-kicker">Detalle del producto</span>
-                  <h2 id="product-detail-title">
-                    {resolvedSelectedProduct.description}
-                  </h2>
-                  <p className="product-detail-subtitle">
-                    {resolvedSelectedProduct.presentation ||
-                      resolvedSelectedProduct.unitId ||
-                      "Unidad"}
-                  </p>
+            <div className="product-detail-layout">
+              <div className="product-detail-top">
+                <div
+                  className="product-detail-media"
+                  key={selectedDetailProduct.id}
+                >
+                  {selectedDetailProduct.imageUrl ? (
+                    <img
+                      src={
+                        buildImageProxyUrl(selectedDetailProduct.imageUrl, {
+                          transparentBackground: true,
+                        }) ||
+                        selectedDetailProduct.imageUrl
+                      }
+                      alt={selectedDetailProduct.description}
+                      loading="eager"
+                    />
+                  ) : (
+                    <div className="catalog-card-placeholder product-detail-placeholder">
+                      {selectedDetailProduct.code.slice(0, 3)}
+                    </div>
+                  )}
                 </div>
 
-                <div className="product-detail-tags">
-                  <span className="catalog-tag">
-                    Cod. {resolvedSelectedProduct.code}
-                  </span>
-                  <span
-                    className={`catalog-tag ${getStockBadgeClass(resolvedSelectedProduct.stock)}`}
-                  >
-                    Stock {resolvedSelectedProduct.stock.toFixed(0)}
-                  </span>
-                  {resolvedSelectedProduct.imageMode === "illustrative" ? (
-                    <span className="catalog-tag image-illustrative">
-                      Imagen ilustrativa
-                    </span>
-                  ) : null}
-                  {resolvedSelectedProduct.barcode ? (
-                    <span className="catalog-tag">
-                      EAN {resolvedSelectedProduct.barcode}
-                    </span>
-                  ) : null}
-                </div>
+                <div className="product-detail-summary">
+                  <div className="product-detail-copy">
+                    <div className="product-detail-heading">
+                      <span className="section-kicker">Detalle del producto</span>
+                      <h2 id="product-detail-title">
+                        {selectedProductGroup?.catalogProduct.description ||
+                          selectedDetailProduct.description}
+                      </h2>
+                      <p className="product-detail-subtitle">
+                        {selectedProductGroup &&
+                        selectedProductGroup.children.length > 0
+                          ? `Talle ${getVariantLabel(selectedDetailProduct)}`
+                          : selectedDetailProduct.defaultSize ||
+                            selectedDetailProduct.presentation ||
+                            selectedDetailProduct.unitId ||
+                            "Unidad"}
+                      </p>
+                    </div>
 
-                <div className="product-detail-price">
-                  {formatCurrency(resolvedSelectedProduct.price)}
-                </div>
-                <p className="catalog-card-tax">Precio s/Imp. Nac.</p>
-
-                <div className="product-detail-specs">
-                  <div className="product-detail-spec">
-                    <span>Unidad</span>
-                    <strong>
-                      {resolvedSelectedProduct.unitId || "Unidad"}
-                    </strong>
-                  </div>
-                  <div className="product-detail-spec">
-                    <span>Presentacion</span>
-                    <strong>
-                      {resolvedSelectedProduct.presentation || "Estandar"}
-                    </strong>
-                  </div>
-                  <div className="product-detail-spec">
-                    <span>Moneda</span>
-                    <strong>{resolvedSelectedProduct.currency}</strong>
-                  </div>
-                  <div className="product-detail-spec">
-                    <span>IVA</span>
-                    <strong>
-                      {resolvedSelectedProduct.taxRate.toFixed(0)}%
-                    </strong>
-                  </div>
-                </div>
-
-                <p className="product-detail-note">
-                  Si necesitas talle, color o mas informacion sobre este
-                  articulo, escribinos por WhatsApp y te ayudamos con la
-                  variante correcta.
-                </p>
-
-                {resolvedSelectedProduct.imageMode === "illustrative" &&
-                resolvedSelectedProduct.imageNote ? (
-                  <div className="product-detail-illustrative">
-                    <p>{resolvedSelectedProduct.imageNote}</p>
-                    {resolvedSelectedProduct.imageSourceUrl ? (
-                      <a
-                        href={resolvedSelectedProduct.imageSourceUrl}
-                        target="_blank"
-                        rel="noreferrer"
+                    <div className="product-detail-tags">
+                      <span
+                        className={`catalog-tag ${getStockBadgeClass(selectedDetailProduct.stock)}`}
                       >
-                        Ver articulo similar online
-                      </a>
+                        Stock {selectedDetailProduct.stock.toFixed(0)}
+                      </span>
+                      {selectedDetailProduct.imageMode === "illustrative" ? (
+                        <span className="catalog-tag image-illustrative">
+                          Imagen ilustrativa
+                        </span>
+                      ) : null}
+                      {selectedDetailProduct.barcode ? (
+                        <span className="catalog-tag">
+                          EAN {selectedDetailProduct.barcode}
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <div className="product-detail-price-block">
+                      <div className="product-detail-price">
+                        {formatCurrency(selectedDetailProduct.price)}
+                      </div>
+                      <p className="catalog-card-tax">Precio s/Imp. Nac.</p>
+                    </div>
+
+                    <p className="product-detail-note">
+                      {selectedProductGroup &&
+                      selectedProductGroup.children.length > 0
+                        ? "Selecciona el talle correcto antes de agregar el articulo al pedido."
+                        : "Si necesitas talle, color o mas informacion sobre este articulo, escribinos por WhatsApp y te ayudamos con la variante correcta."}
+                    </p>
+
+                    {selectedProductCartItem ? (
+                      <div className="message success product-detail-message">
+                        Ya tienes {selectedProductCartItem.quantity} unidad
+                        {selectedProductCartItem.quantity === 1 ? "" : "es"} en
+                        tu pedido.
+                      </div>
                     ) : null}
-                  </div>
-                ) : null}
 
-                {selectedProductCartItem ? (
-                  <div className="message success product-detail-message">
-                    Ya tienes {selectedProductCartItem.quantity} unidad
-                    {selectedProductCartItem.quantity === 1 ? "" : "es"} en tu
-                    pedido.
+                    <div className="product-detail-actions">
+                      <div
+                        className="product-detail-quantity"
+                        aria-label={`Cantidad de ${selectedDetailProduct.description}`}
+                      >
+                        <span className="product-detail-quantity-label">
+                          {selectedDetailProduct.description}
+                        </span>
+                        <div className="product-detail-quantity-controls">
+                          <button
+                            type="button"
+                            className="qty-button"
+                            onClick={() =>
+                              updateDetailQuantity(detailQuantity - 1)
+                            }
+                            disabled={detailQuantity <= 1}
+                            aria-label="Quitar una unidad"
+                          >
+                            -
+                          </button>
+                          <strong>{detailQuantity}</strong>
+                          <button
+                            type="button"
+                            className="qty-button"
+                            onClick={() =>
+                              updateDetailQuantity(detailQuantity + 1)
+                            }
+                            disabled={
+                              !settings.allowBackorders &&
+                              detailQuantity >=
+                                Math.max(
+                                  1,
+                                  Math.floor(selectedDetailProduct.stock),
+                                )
+                            }
+                            aria-label="Agregar una unidad"
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
+                      <div className="product-detail-pricing">
+                        <span>
+                          Unitario{" "}
+                          <strong>
+                            {formatCurrency(selectedDetailProduct.price)}
+                          </strong>
+                        </span>
+                        <span>
+                          Total{" "}
+                          <strong>
+                            {formatCurrency(
+                              selectedDetailProduct.price * detailQuantity,
+                            )}
+                          </strong>
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className="catalog-card-button"
+                        onClick={handleDetailAddToCart}
+                        disabled={
+                          selectedDetailProduct.stock <= 0 &&
+                          !settings.allowBackorders
+                        }
+                      >
+                        {selectedDetailProduct.stock <= 0 &&
+                        !settings.allowBackorders
+                          ? "Sin stock"
+                          : "Anadir al carrito"}
+                      </button>
+                      <button
+                        type="button"
+                        className="product-detail-secondary"
+                        onClick={closeProductDetail}
+                      >
+                        Seguir comprando
+                      </button>
+                      <button
+                        type="button"
+                        className="product-detail-secondary"
+                        onClick={openCartFromDetail}
+                      >
+                        Ver pedido
+                      </button>
+                    </div>
                   </div>
-                ) : null}
-
-                <div className="product-detail-actions">
-                  <button
-                    type="button"
-                    className="catalog-card-button"
-                    onClick={() => addToCart(resolvedSelectedProduct)}
-                    disabled={
-                      resolvedSelectedProduct.stock <= 0 &&
-                      !settings.allowBackorders
-                    }
-                  >
-                    {resolvedSelectedProduct.stock <= 0 &&
-                    !settings.allowBackorders
-                      ? "Sin stock"
-                      : "Anadir al carrito"}
-                  </button>
-                  <button
-                    type="button"
-                    className="product-detail-secondary"
-                    onClick={openCartFromDetail}
-                  >
-                    Ver pedido
-                  </button>
                 </div>
               </div>
+
+              {selectedProductGroup &&
+              selectedProductGroup.children.length > 0 ? (
+                <div className="product-variant-section">
+                  <div className="product-variant-header">
+                    <span>Talles disponibles</span>
+                    <strong>{selectedProductGroup.children.length}</strong>
+                  </div>
+                  <div className="product-variant-grid">
+                    {selectedProductGroup.children.map((variant) => {
+                      const isActive = selectedDetailProduct.id === variant.id;
+                      const variantOutOfStock =
+                        variant.stock <= 0 && !settings.allowBackorders;
+
+                      return (
+                        <button
+                          type="button"
+                          key={variant.id}
+                          className={`product-variant-option ${isActive ? "active" : ""}`}
+                          onClick={() => setSelectedVariantId(variant.id)}
+                        >
+                          <strong>{getVariantLabel(variant)}</strong>
+                          <small>
+                            {variantOutOfStock
+                              ? "Sin stock"
+                              : `Stock ${variant.stock.toFixed(0)}`}
+                          </small>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
             </div>
           </section>
         </>
@@ -1315,14 +1708,15 @@ export function Storefront({
           checkoutStep={checkoutStep}
           errorMessage={errorMessage}
           itemCount={itemCount}
+          mercadoPagoEnabled={settings.mercadoPagoEnabled}
           onCheckoutStepChange={setCheckoutStep}
           onCheckoutSubmit={handleCheckoutSubmit}
           onClose={() => setMobileCartOpen(false)}
           onCustomerChange={updateCustomerField}
           onItemQuantityChange={updateItemQuantity}
           onItemRemove={removeFromCart}
-          order={order}
           submitting={submitting}
+          successMessage={successMessage}
           subtotal={subtotal}
           taxTotal={taxTotal}
           total={total}
@@ -1338,14 +1732,15 @@ type CartContentProps = {
   checkoutStep: CheckoutStep;
   errorMessage: string | null;
   itemCount: number;
+  mercadoPagoEnabled: boolean;
   onCheckoutStepChange: (step: CheckoutStep) => void;
   onCheckoutSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   onClose: () => void;
   onCustomerChange: (field: keyof CheckoutCustomer, value: string) => void;
   onItemQuantityChange: (productId: string, quantity: number) => void;
   onItemRemove: (productId: string) => void;
-  order: OrderSummary | null;
   submitting: boolean;
+  successMessage: string | null;
   subtotal: number;
   taxTotal: number;
   total: number;
@@ -1357,35 +1752,28 @@ function CartContent({
   checkoutStep,
   errorMessage,
   itemCount,
+  mercadoPagoEnabled,
   onCheckoutStepChange,
   onCheckoutSubmit,
   onClose,
   onCustomerChange,
   onItemQuantityChange,
   onItemRemove,
-  order,
   submitting,
+  successMessage,
   subtotal,
   taxTotal,
   total,
 }: CartContentProps) {
-  const orderCompleted = Boolean(order) && cart.length === 0;
-  const cartStepActive = checkoutStep === "cart" && !orderCompleted;
-  const stepLabel = orderCompleted
-    ? "Pedido confirmado"
-    : cartStepActive
-      ? "Paso 1 de 2"
-      : "Paso 2 de 2";
-  const heading = orderCompleted
-    ? "Tu pedido"
-    : cartStepActive
-      ? "Carrito"
-      : "Tu pedido";
-  const subtitle = orderCompleted
-    ? "Recibimos tu compra y la dejamos registrada."
-    : cartStepActive
-      ? `${itemCount} unidades`
-      : "Completa tus datos para confirmar la compra.";
+  const cartStepActive = checkoutStep === "cart";
+  const stepLabel = cartStepActive ? "Paso 1 de 2" : "Paso 2 de 2";
+  const heading = cartStepActive ? "Carrito" : "Tu pedido";
+  const subtitle = cartStepActive
+    ? `${itemCount} unidades`
+    : mercadoPagoEnabled
+      ? "Completa tus datos para ir a pagar con Mercado Pago."
+      : "Completa tus datos para grabar el pedido directo.";
+  const orderProductCount = cart.length;
 
   return (
     <>
@@ -1408,21 +1796,26 @@ function CartContent({
         </div>
       </div>
 
-      {orderCompleted ? (
-        <div className="message success">
-          Pedido grabado con exito.
-          <div className="message-detail">
-            Comprobante:{" "}
-            <strong>
-              {order?.tc} {order?.idComprobante}
-            </strong>
-          </div>
-        </div>
-      ) : null}
-
       {cartStepActive ? null : errorMessage ? (
         <div className="message error">{errorMessage}</div>
       ) : null}
+
+      {successMessage ? <div className="message success">{successMessage}</div> : null}
+
+      <div className="order-metrics" aria-label="Resumen del pedido">
+        <div className="order-metric">
+          <strong>{orderProductCount}</strong>
+          <span>Productos</span>
+        </div>
+        <div className="order-metric">
+          <strong>{itemCount}</strong>
+          <span>Unidades</span>
+        </div>
+        <div className="order-metric">
+          <strong>{formatCurrency(total)}</strong>
+          <span>Estimado</span>
+        </div>
+      </div>
 
       {cartStepActive ? (
         cart.length === 0 ? (
@@ -1480,33 +1873,18 @@ function CartContent({
       ) : null}
 
       <div className="order-summary">
-        {orderCompleted ? (
-          <>
-            <div className="summary-row">
-              <span>Articulos</span>
-              <span>{order?.itemCount ?? 0}</span>
-            </div>
-            <div className="summary-row total">
-              <span>Total confirmado</span>
-              <strong>{formatCurrency(order?.total ?? 0)}</strong>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="summary-row">
-              <span>Subtotal neto</span>
-              <span>{formatCurrency(subtotal)}</span>
-            </div>
-            <div className="summary-row">
-              <span>IVA</span>
-              <span>{formatCurrency(taxTotal)}</span>
-            </div>
-            <div className="summary-row total">
-              <span>Total pedido</span>
-              <strong>{formatCurrency(total)}</strong>
-            </div>
-          </>
-        )}
+        <div className="summary-row">
+          <span>Subtotal neto</span>
+          <span>{formatCurrency(subtotal)}</span>
+        </div>
+        <div className="summary-row">
+          <span>IVA</span>
+          <span>{formatCurrency(taxTotal)}</span>
+        </div>
+        <div className="summary-row total">
+          <span>Total pedido</span>
+          <strong>{formatCurrency(total)}</strong>
+        </div>
       </div>
 
       {cartStepActive ? (
@@ -1527,22 +1905,16 @@ function CartContent({
             Continuar compra
           </button>
         </div>
-      ) : orderCompleted ? (
-        <div className="checkout-success-actions">
-          <button
-            type="button"
-            className="checkout-secondary-button"
-            onClick={onClose}
-          >
-            Seguir comprando
-          </button>
-        </div>
       ) : (
         <>
           <div className="checkout-step-summary">
             <div>
               <strong>{itemCount} unidades listas para confirmar</strong>
-              <p>Revisa tus datos y completa el pedido.</p>
+              <p>
+                {mercadoPagoEnabled
+                  ? "Revisa tus datos y te redirigimos a Mercado Pago."
+                  : "Revisa tus datos y grabamos el pedido en el sistema."}
+              </p>
             </div>
             <button
               type="button"
@@ -1676,14 +2048,11 @@ function CartContent({
                 <select
                   id="paymentMethod"
                   value={customer.paymentMethod}
-                  onChange={(event) =>
-                    onCustomerChange("paymentMethod", event.target.value)
-                  }
+                  disabled
                 >
-                  <option>Coordinar pago</option>
-                  <option>Transferencia</option>
-                  <option>Efectivo</option>
-                  <option>Tarjeta</option>
+                  <option>
+                    {mercadoPagoEnabled ? "Mercado Pago" : "Pedido directo"}
+                  </option>
                 </select>
               </div>
 
@@ -1714,7 +2083,13 @@ function CartContent({
                 className="submit-order-button"
                 disabled={submitting || cart.length === 0}
               >
-                {submitting ? "Grabando pedido..." : "Confirmar pedido"}
+                {submitting
+                  ? mercadoPagoEnabled
+                    ? "Redirigiendo a Mercado Pago..."
+                    : "Grabando pedido..."
+                  : mercadoPagoEnabled
+                    ? "Ir a pagar"
+                    : "Confirmar pedido"}
               </button>
             </div>
           </form>
@@ -1737,6 +2112,158 @@ function resolveWhatsappHref(rawValue: string) {
   return `https://wa.me/${digits}`;
 }
 
+function buildProductGroups(products: Product[]) {
+  const groups = new Map<
+    string,
+    { parentProduct: Product | null; members: Product[]; children: Product[] }
+  >();
+
+  for (const product of products) {
+    const parentCode = getParentProductCode(product.code);
+    const group = groups.get(parentCode) || {
+      parentProduct: null,
+      members: [],
+      children: [],
+    };
+
+    group.members.push(product);
+
+    if (isChildProduct(product)) {
+      group.children.push(product);
+    } else if (!group.parentProduct) {
+      group.parentProduct = product;
+    }
+
+    groups.set(parentCode, group);
+  }
+
+  return Array.from(groups.entries()).map(([parentCode, group]) => {
+    const sortedChildren = [...group.children].sort(compareVariantProducts);
+    const stockPool = sortedChildren.length > 0 ? sortedChildren : group.members;
+    const groupStock = stockPool.reduce(
+      (sum, product) => sum + Math.max(0, product.stock),
+      0,
+    );
+    const primaryProduct =
+      group.parentProduct || sortedChildren[0] || group.members[0];
+    const defaultSelectable =
+      sortedChildren.find((product) => product.stock > 0) ||
+      sortedChildren[0] ||
+      group.parentProduct ||
+      group.members[0];
+    const imageProduct =
+      [group.parentProduct, defaultSelectable, ...sortedChildren, ...group.members]
+        .filter((product): product is Product => Boolean(product))
+        .find((product) => Boolean(product.imageUrl)) || primaryProduct;
+    const catalogProduct: Product = {
+      ...primaryProduct,
+      price: defaultSelectable.price,
+      netPrice: defaultSelectable.netPrice,
+      taxAmount: defaultSelectable.taxAmount,
+      rawPrice: defaultSelectable.rawPrice,
+      taxRate: defaultSelectable.taxRate,
+      currency: defaultSelectable.currency,
+      unitId: defaultSelectable.unitId || primaryProduct.unitId,
+      defaultSize: defaultSelectable.defaultSize || primaryProduct.defaultSize,
+      presentation:
+        primaryProduct.presentation || defaultSelectable.presentation,
+      barcode: primaryProduct.barcode || defaultSelectable.barcode,
+      imageUrl: imageProduct.imageUrl,
+      imageMode: imageProduct.imageMode,
+      imageNote: imageProduct.imageNote,
+      imageSourceUrl: imageProduct.imageSourceUrl,
+      stock: groupStock,
+    };
+
+    return {
+      parentCode,
+      parentProduct: group.parentProduct,
+      catalogProduct,
+      children: sortedChildren,
+      members: group.members,
+      groupStock,
+    } satisfies ProductGroup;
+  });
+}
+
+function getParentProductCode(code: string) {
+  return code.split("|")[0]?.trim() || code.trim();
+}
+
+function isChildProduct(product: Product) {
+  return product.code.includes("|");
+}
+
+function getDefaultSelectableProduct(group: ProductGroup) {
+  return (
+    group.children.find((product) => product.stock > 0) ||
+    group.children[0] ||
+    group.parentProduct ||
+    group.catalogProduct
+  );
+}
+
+function getVariantLabel(product: Product) {
+  if (product.defaultSize) {
+    return product.defaultSize;
+  }
+
+  const variantSegments = product.code
+    .split("|")
+    .slice(1)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment && segment !== "-");
+
+  if (variantSegments.length > 0) {
+    return variantSegments.join(" / ");
+  }
+
+  return product.presentation || product.unitId || product.code;
+}
+
+function compareVariantProducts(left: Product, right: Product) {
+  const leftLabel = getVariantLabel(left);
+  const rightLabel = getVariantLabel(right);
+  const leftRank = getVariantSortRank(leftLabel);
+  const rightRank = getVariantSortRank(rightLabel);
+
+  if (leftRank.group !== rightRank.group) {
+    return leftRank.group - rightRank.group;
+  }
+
+  if (leftRank.group !== 2 && leftRank.value !== rightRank.value) {
+    return leftRank.value - rightRank.value;
+  }
+
+  return VARIANT_LABEL_COLLATOR.compare(leftLabel, rightLabel);
+}
+
+function getVariantSortRank(label: string) {
+  const firstSegment = label.split("/")[0]?.trim() || label.trim();
+  const normalizedSegment = normalizeFilterValue(firstSegment).replace(/\s+/g, "");
+  const apparelIndex = APPAREL_SIZE_ORDER.indexOf(normalizedSegment);
+
+  if (apparelIndex !== -1) {
+    return {
+      group: 0,
+      value: apparelIndex,
+    };
+  }
+
+  const numericMatch = firstSegment.replace(",", ".").match(/-?\d+(?:\.\d+)?/);
+  if (numericMatch) {
+    return {
+      group: 1,
+      value: Number(numericMatch[0]),
+    };
+  }
+
+  return {
+    group: 2,
+    value: 0,
+  };
+}
+
 function buildMapEmbedUrl(address: string) {
   const encodedAddress = encodeURIComponent(address.trim());
   return `https://maps.google.com/maps?q=${encodedAddress}&t=m&z=18&ie=UTF8&iwloc=&output=embed`;
@@ -1756,9 +2283,9 @@ function getPromoDefinition(href: string, index: number) {
   }
 
   const fallbacks = [
-    { label: "Kids", filterValue: "ninez" as AudienceFilter },
     { label: "Mujeres", filterValue: "mujeres" as AudienceFilter },
     { label: "Hombres", filterValue: "hombres" as AudienceFilter },
+    { label: "Kids", filterValue: "ninez" as AudienceFilter },
   ];
 
   return (
@@ -1767,6 +2294,11 @@ function getPromoDefinition(href: string, index: number) {
       filterValue: "all" as AudienceFilter,
     }
   );
+}
+
+function getAudienceDisplayOrder(audience: AudienceFilter) {
+  const index = AUDIENCE_DISPLAY_ORDER.indexOf(audience);
+  return index === -1 ? AUDIENCE_DISPLAY_ORDER.length : index;
 }
 
 function getPromoImageOverride(href: string) {

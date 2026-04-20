@@ -14,6 +14,7 @@ export type Product = {
   unitId: string;
   familyId: string;
   typeId: string;
+  defaultSize: string;
   presentation: string;
   supplierAccount: string;
   barcode: string | null;
@@ -58,11 +59,51 @@ export type OrderSummary = {
   itemCount: number;
 };
 
+export type PaymentFlowStatus =
+  | "pending"
+  | "processing"
+  | "approved"
+  | "finalized"
+  | "rejected"
+  | "cancelled"
+  | "error";
+
+export type PaymentPreferenceResponse = {
+  pendingOrderId: number;
+  externalReference: string;
+  preferenceId: string;
+  checkoutUrl: string;
+  total: number;
+  itemCount: number;
+  status: PaymentFlowStatus;
+};
+
+export type PaymentStatusResult = {
+  pendingOrderId: number;
+  externalReference: string;
+  status: PaymentFlowStatus;
+  paymentStatus: string | null;
+  paymentStatusDetail: string | null;
+  paymentId: string | null;
+  preferenceId: string | null;
+  merchantOrderId: string | null;
+  total: number;
+  itemCount: number;
+  checkoutUrl: string | null;
+  finalizationError: string | null;
+  customerName: string;
+  customerEmail: string;
+  createdAt: string;
+  updatedAt: string;
+  order: OrderSummary | null;
+};
+
 export type PublicStoreSettings = {
   storeName: string;
   logoUrl: string;
   storeTagline: string;
   allowBackorders: boolean;
+  mercadoPagoEnabled: boolean;
   showOutOfStock: boolean;
   heroImageUrl: string;
   supportWhatsapp: string;
@@ -85,4 +126,46 @@ export type PromoTile = {
   alt: string;
   label: string;
   filterValue: string;
+};
+
+export type AdminConfigFieldType = "text" | "password" | "boolean";
+
+export type AdminConfigField = {
+  key: string;
+  label: string;
+  description: string;
+  section: string;
+  type: AdminConfigFieldType;
+  value: string | boolean;
+  placeholder?: string;
+};
+
+export type AdminOrderStatusFilter = PaymentFlowStatus | "orders";
+
+export type AdminOrderItem = {
+  productId: string;
+  quantity: number;
+};
+
+export type AdminOrderRecord = PaymentStatusResult & {
+  customerPhone: string;
+  customerAddress: string;
+  customerCity: string;
+  customerProvince: string;
+  customerPostalCode: string;
+  deliveryMethod: string;
+  notes: string;
+  items: AdminOrderItem[];
+  approvedAt: string;
+  finalizedAt: string;
+  lastSyncAt: string;
+  paymentMethodId: string | null;
+  paymentTypeId: string | null;
+};
+
+export type AdminOrdersSnapshot = {
+  orders: AdminOrderRecord[];
+  summary: Record<PaymentFlowStatus, number> & {
+    total: number;
+  };
 };

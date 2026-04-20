@@ -74,10 +74,19 @@ export function resolveImageUrl(
   return `${base}${cleanPath}`;
 }
 
-export function buildImageProxyUrl(imageUrl: string | null) {
+export function buildImageProxyUrl(
+  imageUrl: string | null,
+  options?: { transparentBackground?: boolean },
+) {
   if (!imageUrl) return null;
   if (!/^https?:\/\//i.test(imageUrl)) return imageUrl;
-  return `/api/image-proxy?url=${encodeURIComponent(imageUrl)}`;
+
+  if (!options?.transparentBackground) {
+    return imageUrl;
+  }
+
+  const encodedUrl = encodeURIComponent(imageUrl);
+  return `/api/image-proxy?url=${encodedUrl}&transparent=1`;
 }
 
 export function formatCurrency(value: number) {
@@ -87,6 +96,16 @@ export function formatCurrency(value: number) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value);
+}
+
+export function formatSizeLabel(value: string | null | undefined) {
+  if (!value) return "";
+
+  return value
+    .split("/")
+    .map((segment) => segment.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join(" / ");
 }
 
 export function toCartItem(product: Product): CartItem {

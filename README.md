@@ -1,19 +1,23 @@
 # Diez Deportes Shop
 
-Tienda web base hecha con `Next.js + TypeScript + SQL Server` para vender articulos leyendo desde `V_MA_ARTICULOS` y grabando pedidos en:
+Tienda web base hecha con `Next.js + TypeScript + SQL Server` para vender articulos leyendo desde `V_MA_ARTICULOS`, iniciando pagos por Mercado Pago y grabando pedidos aprobados en:
 
 - `V_MV_Cpte`
 - `V_MV_CpteInsumos`
 - `V_MV_Stock`
+- `TA_WEB_PEDIDOS_MP`
 
 ## Que incluye
 
 - catalogo con busqueda
 - carrito persistido en navegador
 - checkout simple para cliente final
-- grabacion transaccional del pedido
+- preferencia, webhook y estado de Mercado Pago
+- persistencia de pedidos web pendientes en SQL Server
+- grabacion transaccional del pedido cuando el pago queda aprobado
+- panel admin para configuracion y seguimiento de pedidos web
 - stock por deposito
-- configuracion por `.env`
+- configuracion operativa en `TA_CONFIGURACION` con fallback por `.env`
 - opcion de reutilizar imagenes publicas desde Odoo
 
 ## Variables necesarias
@@ -21,8 +25,10 @@ Tienda web base hecha con `Next.js + TypeScript + SQL Server` para vender articu
 Copiar `.env.example` a `.env` y completar:
 
 - conexion SQL Server
+- `ADMIN_SESSION_SECRET` para firmar la sesion del panel admin
 - deposito de stock
 - `TC`, sucursal y letra del comprobante
+- `APP_MP_ACCESS_TOKEN` y `APP_PUBLIC_BASE_URL` para Mercado Pago si no los van a cargar desde `/admin`
 - cuenta cliente por defecto si no usan `CUENTACONSUMIDORFINAL` en `TA_CONFIGURACION`
 - `ODOO_SHOP_URL` si quieren tomar imagenes y logos del shop actual
 
@@ -34,6 +40,8 @@ npm run dev
 ```
 
 Abrir `http://localhost:3000`.
+
+Panel admin: `http://localhost:3000/admin`
 
 ## Exponer por internet
 
@@ -53,12 +61,15 @@ Despues apuntar el tunel al puerto `3000`.
 - Si ese precio ya incluye IVA, dejar `APP_PRICES_INCLUDE_TAX=true`.
 - El sistema intenta usar `dbo.FN_OBTIENE_PROXIMO_NUMERO_CPTE`. Si no existe, genera el siguiente numero leyendo `V_MV_Cpte`.
 - Si tu base ya tiene triggers que generan movimientos de stock, poner `APP_WRITE_STOCK_MOVEMENTS=false` para evitar duplicados.
+- Si queres grabar los pagos web con otro `TC`, definir `APP_MP_ORDER_TC`.
+- `APP_PUBLIC_BASE_URL` debe apuntar a la URL publica real para que vuelvan bien el webhook y las pantallas de retorno.
+- El panel admin guarda sus valores en `dbo.TA_CONFIGURACION` usando `GRUPO='TiendaWeb'`. El token de Mercado Pago se guarda con `CLAVE='Token'`.
+- Los usuarios del panel admin se guardan en `dbo.TA_UsuariosWeb`. La tabla se crea sola al primer acceso, migra `TA_UsuarioWeb` si existia y asegura el acceso inicial del panel.
 - `IDPROVINCIA` no se infiere automaticamente desde texto libre del checkout. El dato de provincia se guarda en observaciones.
 - Si `ODOO_SYNC_IMAGES=true`, la app lee las imagenes publicas del shop Odoo y las vincula por codigo de articulo.
 
 ## Pendientes recomendados
 
-- pasarela de pago
 - login de clientes
 - alta/edicion de clientes reales en `VT_CLIENTES`
 - panel de administracion

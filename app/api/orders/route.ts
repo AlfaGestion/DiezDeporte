@@ -21,6 +21,8 @@ export async function POST(request: Request) {
     const order = await createOrder(payload);
     return NextResponse.json({ order }, { status: 201 });
   } catch (error) {
+    console.error("Order API error", error);
+
     const message =
       error instanceof Error ? error.message : "No se pudo grabar el pedido.";
 

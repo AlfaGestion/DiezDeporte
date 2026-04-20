@@ -1,6 +1,7 @@
 import "server-only";
 import type { ConnectionPool, IResult, Transaction } from "mssql";
 import {
+  formatSizeLabel,
   getPriceBreakdown,
   resolveImageUrl,
   toNumber,
@@ -8,6 +9,7 @@ import {
 import { getConnection, sql } from "@/lib/db";
 import { getOdooAssets } from "@/lib/odoo";
 import { getServerSettings } from "@/lib/store-config";
+import type { ServerSettings } from "@/lib/store-config";
 import type { Product } from "@/lib/types";
 
 type Executor = ConnectionPool | Transaction;
@@ -23,6 +25,7 @@ type ProductRecord = {
   IDUNIDAD: string | null;
   IdFamilia: string | null;
   IDTIPO: string | null;
+  TalleDefault: string | null;
   Presentacion: string | null;
   CUENTAPROVEEDOR: string | null;
   CODIGOBARRA: string | null;
@@ -38,8 +41,7 @@ function setInput(
   request.input(name, value);
 }
 
-function mapProduct(record: ProductRecord) {
-  const settings = getServerSettings();
+function mapProduct(record: ProductRecord, settings: ServerSettings) {
   const taxRate = toNumber(record.TasaIVA, settings.defaultTaxRate);
   const pricing = getPriceBreakdown(
     toNumber(record.RawPrice),
@@ -66,6 +68,7 @@ function mapProduct(record: ProductRecord) {
     unitId: record.IDUNIDAD?.trim() || "",
     familyId: record.IdFamilia?.trim() || "",
     typeId: record.IDTIPO?.trim() || "",
+    defaultSize: formatSizeLabel(record.TalleDefault),
     presentation: record.Presentacion?.trim() || "",
     supplierAccount: record.CUENTAPROVEEDOR?.trim() || "",
     barcode: record.CODIGOBARRA?.trim() || null,
@@ -80,7 +83,7 @@ function mapProduct(record: ProductRecord) {
 }
 
 export async function listProducts() {
-  const settings = getServerSettings();
+  const settings = await getServerSettings();
   const pool = await getConnection();
   const request = pool.request();
   const safeLimit = Math.max(1, Math.min(1000, Math.trunc(settings.productLimit)));
@@ -108,6 +111,7 @@ export async function listProducts() {
       a.IDUNIDAD,
       a.IdFamilia,
       a.IDTIPO,
+      a.TalleDefault,
       a.Presentacion,
       a.CUENTAPROVEEDOR,
       a.CODIGOBARRA,
@@ -121,7 +125,7 @@ export async function listProducts() {
     ORDER BY a.DESCRIPCION ASC;
   `);
 
-  const products = result.recordset.map(mapProduct);
+  const products = result.recordset.map((record) => mapProduct(record, settings));
   const odooAssets = await getOdooAssets();
   const odooProductImages = Array.from(odooAssets.productImages.values());
 
@@ -138,8 +142,8 @@ export async function listProducts() {
         ...product,
         imageUrl: illustrativeImage.imageUrl,
         imageMode: "illustrative" as const,
-        imageNote: "Imagen ilustrativa tomada de un articulo similar publicado online.",
-        imageSourceUrl: illustrativeImage.href,
+        imageNote: null,
+        imageSourceUrl: null,
       };
     }
 
@@ -159,7 +163,7 @@ export async function getProductsByIds(
 ) {
   if (productIds.length === 0) return [];
 
-  const settings = getServerSettings();
+  const settings = await getServerSettings();
   const connection = executor || (await getConnection());
   const request = createRequest(connection);
   setInput(request, "depositId", settings.stockDepositId || null);
@@ -190,6 +194,7 @@ export async function getProductsByIds(
       a.IDUNIDAD,
       a.IdFamilia,
       a.IDTIPO,
+      a.TalleDefault,
       a.Presentacion,
       a.CUENTAPROVEEDOR,
       a.CODIGOBARRA,
@@ -201,7 +206,7 @@ export async function getProductsByIds(
     WHERE LTRIM(RTRIM(a.IDARTICULO)) IN (${placeholders.join(", ")});
   `);
 
-  return result.recordset.map(mapProduct);
+  return result.recordset.map((record) => mapProduct(record, settings));
 }
 function createRequest(executor: Executor) {
   if ("begin" in executor) {

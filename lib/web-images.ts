@@ -4,7 +4,7 @@ type BingImageResult = {
   imageUrl: string;
   imageSourceUrl: string | null;
   imageMode: "illustrative";
-  imageNote: string;
+  imageNote: string | null;
 };
 
 type CachedSearch = {
@@ -146,10 +146,9 @@ function pickBestImageResult(html: string, query: string) {
     bestScore = score;
     bestResult = {
       imageUrl,
-      imageSourceUrl: normalizeRemoteUrl(data.purl),
+      imageSourceUrl: null,
       imageMode: "illustrative",
-      imageNote:
-        "Imagen ilustrativa encontrada en internet. Es solo de referencia y puede no coincidir exactamente con el producto.",
+      imageNote: null,
     };
   }
 

@@ -29,6 +29,15 @@ type HeaderInsertRow = {
   ID: number;
 };
 
+type SqlErrorLike = Error & {
+  number?: number;
+  originalError?: { info?: { message?: string; number?: number }; message?: string; number?: number };
+  precedingErrors?: Array<{ message?: string; number?: number }>;
+};
+
+const ORDER_INSERT_MAX_ATTEMPTS = 3;
+const DUPLICATE_KEY_ERROR_NUMBERS = new Set([2601, 2627]);
+
 type SalesContext = {
   tc: string;
   branch: string;
@@ -46,10 +55,15 @@ type SalesContext = {
   orderUser: string;
   depositId: string | null;
   writeStockMovements: boolean;
-  allowBackorders: boolean;
 };
 
-type OrderLine = {
+export type CreateOrderOptions = {
+  orderTc?: string;
+  paymentCondition?: string;
+  orderUser?: string;
+};
+
+export type OrderLine = {
   sequence: number;
   product: Product;
   quantity: number;
@@ -63,6 +77,13 @@ type ComprobanteParts = {
   sucursal: string;
   numero: string;
   letra: string;
+};
+
+export type OrderQuote = {
+  lines: OrderLine[];
+  total: number;
+  itemCount: number;
+  currency: string;
 };
 
 function setInput(request: ReturnType<typeof createRequest>, name: string, value: unknown) {
@@ -97,12 +118,19 @@ async function getConfigurationRows(executor: Executor) {
   );
 }
 
-async function resolveSalesContext(executor: Executor): Promise<SalesContext> {
-  const settings = getServerSettings();
+async function resolveSalesContext(
+  executor: Executor,
+  options: CreateOrderOptions = {},
+): Promise<SalesContext> {
+  const settings = await getServerSettings();
   const config = await getConfigurationRows(executor);
 
   return {
-    tc: settings.orderTc || config.get("APP_WEB_TC_DEFAULT_CARRO") || "NP",
+    tc:
+      options.orderTc ||
+      settings.orderTc ||
+      config.get("APP_WEB_TC_DEFAULT_CARRO") ||
+      "NP",
     branch:
       settings.orderBranch || config.get("APP_WEB_BRANCH_DEFAULT_NP") || "9999",
     letter: settings.orderLetter || "X",
@@ -122,13 +150,15 @@ async function resolveSalesContext(executor: Executor): Promise<SalesContext> {
     stockReasonId: normalizeCode(settings.stockReasonId || "1", 4),
     documentType: normalizeCode(settings.documentType || "1", 4),
     ivaCondition: normalizeCode(settings.ivaCondition || "1", 4),
-    paymentCondition: normalizeCode(settings.paymentCondition || "1", 4),
-    orderUser: settings.orderUser || "web-shop",
+    paymentCondition: normalizeCode(
+      options.paymentCondition || settings.paymentCondition || "1",
+      4,
+    ),
+    orderUser: options.orderUser || settings.orderUser || "web-shop",
     depositId: settings.stockDepositId
       ? normalizeCode(settings.stockDepositId, 4)
       : null,
     writeStockMovements: settings.writeStockMovements,
-    allowBackorders: settings.allowBackorders,
   };
 }
 
@@ -140,36 +170,6 @@ async function getNextComprobante(
 ): Promise<ComprobanteParts> {
   const normalizedBranch = normalizeBranch(branch);
   const normalizedLetter = (letter || "X").slice(0, 1).toUpperCase();
-
-  try {
-    const request = createRequest(executor);
-    setInput(request, "tc", tc);
-    setInput(request, "branch", normalizedBranch);
-    setInput(request, "letter", normalizedLetter);
-
-    const functionResult = await request.query<{ idComprobante: string }>(`
-      IF OBJECT_ID('dbo.FN_OBTIENE_PROXIMO_NUMERO_CPTE') IS NOT NULL
-      BEGIN
-        SELECT dbo.FN_OBTIENE_PROXIMO_NUMERO_CPTE(@tc, @branch, @letter) AS idComprobante;
-      END
-      ELSE
-      BEGIN
-        SELECT CAST(NULL AS nvarchar(13)) AS idComprobante;
-      END
-    `);
-
-    const value = functionResult.recordset[0]?.idComprobante?.trim();
-    if (value && value.length >= 13) {
-      return {
-        idComprobante: value,
-        sucursal: value.slice(0, 4),
-        numero: value.slice(4, 12),
-        letra: value.slice(12, 13) || normalizedLetter,
-      };
-    }
-  } catch {
-    // Fallback below when the function is unavailable in this installation.
-  }
 
   const request = createRequest(executor);
   setInput(request, "tc", tc);
@@ -196,7 +196,7 @@ async function getNextComprobante(
   };
 }
 
-function validatePayload(payload: CreateOrderPayload) {
+export function validatePayload(payload: CreateOrderPayload) {
   if (!payload.customer) {
     throw new Error("Faltan los datos del cliente.");
   }
@@ -212,6 +212,25 @@ function validatePayload(payload: CreateOrderPayload) {
   if (invalidItem) {
     throw new Error("Hay artículos con cantidad inválida.");
   }
+}
+
+export async function quoteOrderPayload(
+  payload: CreateOrderPayload,
+  executor?: Executor,
+): Promise<OrderQuote> {
+  validatePayload(payload);
+
+  const settings = await getServerSettings();
+  const productIds = payload.items.map((item) => item.productId.trim());
+  const products = await getProductsByIds(productIds, executor);
+  const lines = buildLines(payload, products, settings.allowBackorders);
+
+  return {
+    lines,
+    total: lines.reduce((sum, line) => sum + line.lineTotal, 0),
+    itemCount: lines.reduce((sum, line) => sum + line.quantity, 0),
+    currency: lines[0]?.product.currency || "ARS",
+  };
 }
 
 function buildLines(
@@ -303,6 +322,12 @@ async function insertHeader(
   setInput(request, "usuario", truncate(context.orderUser, 50));
 
   const result: IResult<HeaderInsertRow> = await request.query(`
+    SET DATEFORMAT dmy;
+
+    DECLARE @InsertedHeader TABLE (
+      ID numeric(18, 0)
+    );
+
     INSERT INTO dbo.V_MV_Cpte (
       TC,
       IDCOMPROBANTE,
@@ -351,7 +376,7 @@ async function insertHeader(
       ExentoIVAArticulos,
       ExentoIVAOtros
     )
-    OUTPUT INSERTED.ID
+    OUTPUT INSERTED.ID INTO @InsertedHeader (ID)
     VALUES (
       @tc,
       @idComprobante,
@@ -400,6 +425,9 @@ async function insertHeader(
       0,
       0
     );
+
+    SELECT TOP (1) CAST(ID AS int) AS ID
+    FROM @InsertedHeader;
   `);
 
   return result.recordset[0]?.ID ?? null;
@@ -444,6 +472,8 @@ async function insertDetailLine(
   setInput(request, "cantM3", 0);
 
   await request.query(`
+    SET DATEFORMAT dmy;
+
     INSERT INTO dbo.V_MV_CpteInsumos (
       TC,
       IDCOMPROBANTE,
@@ -550,6 +580,8 @@ async function insertStockMovement(
   setInput(request, "cantM3", 0);
 
   await request.query(`
+    SET DATEFORMAT dmy;
+
     INSERT INTO dbo.V_MV_Stock (
       TC,
       IDCOMPROBANTE,
@@ -617,15 +649,75 @@ async function insertStockMovement(
   `);
 }
 
-export async function createOrder(payload: CreateOrderPayload): Promise<OrderSummary> {
+export async function createOrderWithExecutor(
+  executor: Executor,
+  payload: CreateOrderPayload,
+  options: CreateOrderOptions = {},
+): Promise<OrderSummary> {
+  await createRequest(executor).query(`
+    SET DATEFORMAT dmy;
+  `);
+
+  const context = await resolveSalesContext(executor, options);
+
+  if (!context.customerAccount) {
+    throw new Error(
+      "No se encontrÃ³ la cuenta cliente por defecto. DefinÃ­ APP_CUSTOMER_ACCOUNT o CUENTACONSUMIDORFINAL.",
+    );
+  }
+
+  const quote = await quoteOrderPayload(payload, executor);
+  const lines = quote.lines;
+  const comprobante = await getNextComprobante(
+    executor,
+    context.tc,
+    context.branch,
+    context.letter,
+  );
+
+  const headerId = await insertHeader(
+    executor,
+    context,
+    comprobante,
+    payload,
+    lines,
+  );
+
+  for (const line of lines) {
+    await insertDetailLine(executor, context, comprobante, line);
+    await insertStockMovement(executor, context, comprobante, line);
+  }
+
+  return {
+    tc: context.tc,
+    idComprobante: comprobante.idComprobante,
+    internalId: headerId,
+    total: quote.total,
+    itemCount: quote.itemCount,
+  };
+}
+
+export async function createOrder(
+  payload: CreateOrderPayload,
+  options: CreateOrderOptions = {},
+): Promise<OrderSummary> {
   validatePayload(payload);
 
   const pool = await getConnection();
-  const transaction = new sql.Transaction(pool);
-  await transaction.begin();
+  for (let attempt = 1; attempt <= ORDER_INSERT_MAX_ATTEMPTS; attempt += 1) {
+    const transaction = new sql.Transaction(pool);
+    await transaction.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
 
-  try {
-    const context = await resolveSalesContext(transaction);
+    try {
+      const order = await createOrderWithExecutor(transaction, payload, options);
+      await transaction.commit();
+      return order;
+
+    await createRequest(transaction).query(`
+      SET DATEFORMAT dmy;
+    `);
+
+    const context = await resolveSalesContext(transaction, options);
 
     if (!context.customerAccount) {
       throw new Error(
@@ -633,9 +725,8 @@ export async function createOrder(payload: CreateOrderPayload): Promise<OrderSum
       );
     }
 
-    const productIds = payload.items.map((item) => item.productId.trim());
-    const products = await getProductsByIds(productIds, transaction);
-    const lines = buildLines(payload, products, context.allowBackorders);
+    const quote = await quoteOrderPayload(payload, transaction);
+    const lines = quote.lines;
     const comprobante = await getNextComprobante(
       transaction,
       context.tc,
@@ -658,18 +749,122 @@ export async function createOrder(payload: CreateOrderPayload): Promise<OrderSum
 
     await transaction.commit();
 
-    return {
-      tc: context.tc,
-      idComprobante: comprobante.idComprobante,
-      internalId: headerId,
-      total: lines.reduce((sum, line) => sum + line.lineTotal, 0),
-      itemCount: lines.reduce((sum, line) => sum + line.quantity, 0),
-    };
-  } catch (error) {
-    await transaction.rollback();
-    throw error;
+      return {
+        tc: context.tc,
+        idComprobante: comprobante.idComprobante,
+        internalId: headerId,
+        total: quote.total,
+        itemCount: quote.itemCount,
+      };
+    } catch (error) {
+      try {
+        await transaction.rollback();
+      } catch (rollbackError) {
+        console.error("Order rollback failed", rollbackError);
+      }
+
+      if (
+        attempt < ORDER_INSERT_MAX_ATTEMPTS &&
+        isDuplicateComprobanteError(error)
+      ) {
+        console.warn(
+          `Duplicate comprobante detected on attempt ${attempt}. Retrying order insert.`,
+        );
+        continue;
+      }
+
+      throw normalizeOrderError(error);
+    }
   }
+
+  throw new Error("No se pudo grabar el pedido.");
 }
+
+function normalizeOrderError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return new Error("No se pudo grabar el pedido.");
+  }
+
+  const messages = collectSqlErrorMessages(error as SqlErrorLike);
+  const rootMessage =
+    messages.find((message) => message !== "Transaction has been aborted.") ||
+    error.message;
+
+  const normalized = new Error(rootMessage);
+  normalized.name = error.name;
+  normalized.stack = error.stack;
+  return normalized;
+}
+
+function collectSqlErrorMessages(error: SqlErrorLike) {
+  const messages = new Set<string>();
+
+  if (error.message?.trim()) {
+    messages.add(error.message.trim());
+  }
+
+  const originalMessage = error.originalError?.info?.message || error.originalError?.message;
+  if (originalMessage?.trim()) {
+    messages.add(originalMessage.trim());
+  }
+
+  for (const precedingError of error.precedingErrors || []) {
+    if (precedingError.message?.trim()) {
+      messages.add(precedingError.message.trim());
+    }
+  }
+
+  return Array.from(messages);
+}
+
+function collectSqlErrorNumbers(error: SqlErrorLike) {
+  const numbers = new Set<number>();
+
+  if (typeof error.number === "number") {
+    numbers.add(error.number);
+  }
+
+  const originalNumber = error.originalError?.info?.number || error.originalError?.number;
+  if (typeof originalNumber === "number") {
+    numbers.add(originalNumber);
+  }
+
+  for (const precedingError of error.precedingErrors || []) {
+    if (typeof precedingError.number === "number") {
+      numbers.add(precedingError.number);
+    }
+  }
+
+  return Array.from(numbers);
+}
+
+function isDuplicateComprobanteError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const sqlError = error as SqlErrorLike;
+  const numbers = collectSqlErrorNumbers(sqlError);
+  const hasDuplicateNumber = numbers.some((number) =>
+    DUPLICATE_KEY_ERROR_NUMBERS.has(number),
+  );
+
+  if (!hasDuplicateNumber) {
+    return false;
+  }
+
+  const messages = collectSqlErrorMessages(sqlError).map((message) =>
+    message.toLowerCase(),
+  );
+
+  return messages.some(
+    (message) =>
+      message.includes("dbo.v_mv_cpte") ||
+      message.includes("pk_v_mv_cpte") ||
+      message.includes("idcomprobante"),
+  );
+}
+
 function createRequest(executor: Executor) {
   if ("begin" in executor) {
     return new sql.Request(executor);

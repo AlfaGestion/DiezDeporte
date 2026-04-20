@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export default async function HomePage() {
-  const settings = getPublicStoreSettings();
+  const settings = await getPublicStoreSettings();
 
   try {
     const [products, odooAssets] = await Promise.all([

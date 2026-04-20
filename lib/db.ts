@@ -41,7 +41,13 @@ function getSqlConfig(): mssql.config {
 
 export async function getConnection() {
   if (!global.__diezDeportesSqlPool) {
-    global.__diezDeportesSqlPool = new sql.ConnectionPool(getSqlConfig()).connect();
+    global.__diezDeportesSqlPool = new sql
+      .ConnectionPool(getSqlConfig())
+      .connect()
+      .catch((error) => {
+        global.__diezDeportesSqlPool = undefined;
+        throw error;
+      });
   }
 
   return global.__diezDeportesSqlPool;
