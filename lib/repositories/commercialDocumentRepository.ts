@@ -22,7 +22,7 @@ function trimOrNull(value: string | null | undefined) {
 
 function buildDocumentObservations(order: StoredOrder) {
   const parts = [
-    `Pedido web ${order.numero_pedido}`,
+    `NP / pedido web ${order.metadata.webOrderNumber || order.numero_pedido}`,
     order.email_cliente ? `Email: ${order.email_cliente}` : null,
     order.metadata.deliveryMethod ? `Entrega: ${order.metadata.deliveryMethod}` : null,
     order.metadata.paymentMethod ? `Pago: ${order.metadata.paymentMethod}` : null,
@@ -247,3 +247,5 @@ export async function createCommercialDocument(input: {
     throw error;
   }
 }
+
+export const createOrderNoteDocument = createCommercialDocument;

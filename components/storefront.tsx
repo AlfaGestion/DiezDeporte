@@ -99,6 +99,10 @@ async function readJsonResponse<T>(response: Response): Promise<T | null> {
   }
 }
 
+function isPickupDeliveryMethod(value: string) {
+  return value.trim().toLowerCase() !== "envio a domicilio";
+}
+
 function buildEmptyCustomer(settings: PublicStoreSettings): CheckoutCustomer {
   return {
     fullName: "",
@@ -751,16 +755,25 @@ export function Storefront({
       return;
     }
 
+    const pickupOrder = isPickupDeliveryMethod(customer.deliveryMethod);
+    const requiresShippingAddress =
+      !pickupOrder || !settings.allowPickupCheckoutWithoutAddress;
+
     if (
       !customer.fullName ||
+      !customer.email ||
       !customer.phone ||
-      !customer.address ||
-      !customer.city
+      (requiresShippingAddress && !customer.address) ||
+      (requiresShippingAddress && !customer.city)
     ) {
       setErrorMessage(
         settings.mercadoPagoEnabled
-          ? "Completa nombre, telefono, direccion y localidad para iniciar el pago."
-          : "Completa nombre, telefono, direccion y localidad para registrar el pedido.",
+          ? requiresShippingAddress
+            ? "Completa nombre, email, telefono, direccion y localidad para iniciar el pago."
+            : "Completa nombre, email y telefono para iniciar el pago."
+          : requiresShippingAddress
+            ? "Completa nombre, email, telefono, direccion y localidad para registrar el pedido."
+            : "Completa nombre, email y telefono para registrar el pedido.",
       );
       return;
     }
@@ -770,6 +783,7 @@ export function Storefront({
       items: cart.map((item) => ({
         productId: item.id,
         quantity: item.quantity,
+        unitPrice: item.price,
       })),
     };
 
@@ -1743,6 +1757,9 @@ export function Storefront({
       <aside className={checkoutSheetClassName}>
         <CartContent
           cart={cart}
+          allowPickupCheckoutWithoutAddress={
+            settings.allowPickupCheckoutWithoutAddress
+          }
           customer={customer}
           checkoutStep={checkoutStep}
           errorMessage={errorMessage}
@@ -1767,6 +1784,7 @@ export function Storefront({
 
 type CartContentProps = {
   cart: CartItem[];
+  allowPickupCheckoutWithoutAddress: boolean;
   customer: CheckoutCustomer;
   checkoutStep: CheckoutStep;
   errorMessage: string | null;
@@ -1787,6 +1805,7 @@ type CartContentProps = {
 
 function CartContent({
   cart,
+  allowPickupCheckoutWithoutAddress,
   customer,
   checkoutStep,
   errorMessage,
@@ -1805,13 +1824,16 @@ function CartContent({
   total,
 }: CartContentProps) {
   const cartStepActive = checkoutStep === "cart";
+  const pickupOrder = isPickupDeliveryMethod(customer.deliveryMethod);
+  const requiresShippingAddress =
+    !pickupOrder || !allowPickupCheckoutWithoutAddress;
   const stepLabel = cartStepActive ? "Paso 1 de 2" : "Paso 2 de 2";
   const heading = cartStepActive ? "Carrito" : "Tu pedido";
   const subtitle = cartStepActive
     ? `${itemCount} unidades`
     : mercadoPagoEnabled
-      ? "Completa tus datos para ir a pagar con Mercado Pago."
-      : "Completa tus datos para grabar el pedido directo.";
+      ? "Completa tus datos. Antes de pagar revalidamos stock, precio y disponibilidad."
+      : "Completa tus datos para grabar la NP del pedido.";
   const orderProductCount = cart.length;
 
   return (
@@ -2002,56 +2024,7 @@ function CartContent({
                     onCustomerChange("email", event.target.value)
                   }
                   placeholder="correo@cliente.com"
-                />
-              </div>
-
-              <div className="field span-2">
-                <label htmlFor="address">Direccion</label>
-                <input
-                  id="address"
-                  value={customer.address}
-                  onChange={(event) =>
-                    onCustomerChange("address", event.target.value)
-                  }
-                  placeholder="Calle, altura y referencias"
                   required
-                />
-              </div>
-
-              <div className="field">
-                <label htmlFor="city">Localidad</label>
-                <input
-                  id="city"
-                  value={customer.city}
-                  onChange={(event) =>
-                    onCustomerChange("city", event.target.value)
-                  }
-                  placeholder="Ciudad"
-                  required
-                />
-              </div>
-
-              <div className="field">
-                <label htmlFor="province">Provincia</label>
-                <input
-                  id="province"
-                  value={customer.province}
-                  onChange={(event) =>
-                    onCustomerChange("province", event.target.value)
-                  }
-                  placeholder="Provincia"
-                />
-              </div>
-
-              <div className="field">
-                <label htmlFor="postalCode">Codigo postal</label>
-                <input
-                  id="postalCode"
-                  value={customer.postalCode}
-                  onChange={(event) =>
-                    onCustomerChange("postalCode", event.target.value)
-                  }
-                  placeholder="CP"
                 />
               </div>
 
@@ -2078,8 +2051,12 @@ function CartContent({
                 >
                   <option>Retiro en local</option>
                   <option>Envio a domicilio</option>
-                  <option>Coordinar por WhatsApp</option>
                 </select>
+                <small className="panel-note">
+                  {pickupOrder
+                    ? "Para retiro solo pedimos tus datos de contacto."
+                    : "Para envio necesitamos los datos logisticos del destino."}
+                </small>
               </div>
 
               <div className="field">
@@ -2094,6 +2071,60 @@ function CartContent({
                   </option>
                 </select>
               </div>
+
+              {requiresShippingAddress ? (
+                <>
+                  <div className="field span-2">
+                    <label htmlFor="address">Direccion</label>
+                    <input
+                      id="address"
+                      value={customer.address}
+                      onChange={(event) =>
+                        onCustomerChange("address", event.target.value)
+                      }
+                      placeholder="Calle, altura y referencias"
+                      required
+                    />
+                  </div>
+
+                  <div className="field">
+                    <label htmlFor="city">Localidad</label>
+                    <input
+                      id="city"
+                      value={customer.city}
+                      onChange={(event) =>
+                        onCustomerChange("city", event.target.value)
+                      }
+                      placeholder="Ciudad"
+                      required
+                    />
+                  </div>
+
+                  <div className="field">
+                    <label htmlFor="province">Provincia</label>
+                    <input
+                      id="province"
+                      value={customer.province}
+                      onChange={(event) =>
+                        onCustomerChange("province", event.target.value)
+                      }
+                      placeholder="Provincia"
+                    />
+                  </div>
+
+                  <div className="field">
+                    <label htmlFor="postalCode">Codigo postal</label>
+                    <input
+                      id="postalCode"
+                      value={customer.postalCode}
+                      onChange={(event) =>
+                        onCustomerChange("postalCode", event.target.value)
+                      }
+                      placeholder="CP"
+                    />
+                  </div>
+                </>
+              ) : null}
 
               <div className="field span-2">
                 <label htmlFor="notes">Notas</label>

@@ -41,6 +41,10 @@ export type OrderChangeOrigin = (typeof ORDER_CHANGE_ORIGINS)[number];
 export type OrderItem = {
   productId: string;
   quantity: number;
+  productName?: string | null;
+  unitPrice?: number | null;
+  subtotal?: number | null;
+  currency?: string | null;
 };
 
 export type OrderDocumentItem = {
@@ -73,6 +77,11 @@ export type OrderMetadata = {
   lastPaymentPayload?: string | null;
   pickupCode?: string | null;
   pickupQrVersion?: number | null;
+  webOrderNumber?: string | null;
+  documentKind?: string | null;
+  checkoutValidatedAt?: string | null;
+  stockValidatedAtCheckout?: boolean | null;
+  priceValidatedAtCheckout?: boolean | null;
   documentInternalId?: number | null;
   documentTc?: string | null;
   documentNumber?: string | null;
@@ -106,6 +115,7 @@ export type StoredOrder = Order & {
   email_facturado_enviado_at: string | null;
   email_listo_enviado_at: string | null;
   email_enviado_enviado_at: string | null;
+  email_pedido_recibido_enviado_at: string | null;
   resolved_item_count?: number | null;
   resolved_line_count?: number | null;
 };
@@ -155,6 +165,7 @@ export type UpdateOrderInput = Partial<
     | "email_facturado_enviado_at"
     | "email_listo_enviado_at"
     | "email_enviado_enviado_at"
+    | "email_pedido_recibido_enviado_at"
   >
 >;
 

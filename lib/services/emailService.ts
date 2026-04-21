@@ -61,13 +61,72 @@ function buildDeliveryAddress(order: StoredOrder) {
   return parts.join(", ");
 }
 
+function getOrderItems(order: StoredOrder) {
+  return order.metadata.items || [];
+}
+
+function buildOrderDeliveryLabel(order: StoredOrder) {
+  return (
+    order.metadata.deliveryMethod ||
+    (order.tipo_pedido === "envio" ? "Envio a domicilio" : "Retiro en local")
+  );
+}
+
+function buildOrderNextStep(order: StoredOrder) {
+  const isMercadoPago = (order.metadata.paymentMethod || "")
+    .toLowerCase()
+    .includes("mercado pago");
+
+  if (order.estado_pago === "aprobado" && order.estado === "APROBADO") {
+    return "Tu pago fue aprobado. Ahora el pedido queda en control administrativo antes de facturarse.";
+  }
+
+  if (order.estado_pago === "pendiente") {
+    return isMercadoPago
+      ? "Tu pedido ya fue recibido. Mercado Pago todavia esta procesando o esperando la confirmacion del pago."
+      : "Tu pedido ya fue recibido y quedo pendiente de gestion comercial.";
+  }
+
+  if (order.estado === "FACTURADO") {
+    return "El pedido ya fue facturado y pasa a preparacion.";
+  }
+
+  if (order.estado === "LISTO_PARA_RETIRO") {
+    return "Ya puedes pasar por el local con tu QR o tu codigo de retiro.";
+  }
+
+  if (order.estado === "ENVIADO") {
+    return "Tu pedido ya salio del local y se encuentra en camino.";
+  }
+
+  return "Puedes seguir el estado actualizado desde el enlace de tu pedido.";
+}
+
+function buildItemsText(order: StoredOrder) {
+  const items = getOrderItems(order);
+
+  if (items.length === 0) {
+    return ["- Sin detalle de articulos disponible."];
+  }
+
+  return items.map((item) => {
+    const itemName = item.productName || item.productId;
+    const subtotal =
+      Number(item.subtotal || 0) > 0
+        ? ` - ${formatCurrency(Number(item.subtotal || 0))}`
+        : "";
+
+    return `- ${itemName} x ${item.quantity}${subtotal}`;
+  });
+}
+
 function buildItemsHtml(order: StoredOrder) {
-  const items = order.metadata.items || [];
+  const items = getOrderItems(order);
 
   if (items.length === 0) {
     return `
       <div style="padding:14px 16px;border:1px dashed #cbd5e1;border-radius:14px;background:#f8fafc;color:#475569;font-size:14px;">
-        No pudimos adjuntar el detalle de articulos en este email, pero tu pedido ya fue despachado.
+        No pudimos adjuntar el detalle de articulos en este email, pero tu pedido ya quedo registrado.
       </div>
     `;
   }
@@ -78,6 +137,7 @@ function buildItemsHtml(order: StoredOrder) {
         <tr>
           <th align="left" style="padding:10px 12px;border-bottom:1px solid #e2e8f0;color:#475569;font-size:12px;text-transform:uppercase;letter-spacing:.08em;">Articulo</th>
           <th align="right" style="padding:10px 12px;border-bottom:1px solid #e2e8f0;color:#475569;font-size:12px;text-transform:uppercase;letter-spacing:.08em;">Cantidad</th>
+          <th align="right" style="padding:10px 12px;border-bottom:1px solid #e2e8f0;color:#475569;font-size:12px;text-transform:uppercase;letter-spacing:.08em;">Subtotal</th>
         </tr>
       </thead>
       <tbody>
@@ -86,10 +146,17 @@ function buildItemsHtml(order: StoredOrder) {
             (item) => `
               <tr>
                 <td style="padding:12px;border-bottom:1px solid #eef2f7;color:#0f172a;font-size:14px;">
-                  ${escapeHtml(item.productId)}
+                  ${escapeHtml(item.productName || item.productId)}
                 </td>
                 <td align="right" style="padding:12px;border-bottom:1px solid #eef2f7;color:#0f172a;font-size:14px;font-weight:600;">
                   ${escapeHtml(String(item.quantity || 0))}
+                </td>
+                <td align="right" style="padding:12px;border-bottom:1px solid #eef2f7;color:#0f172a;font-size:14px;font-weight:600;">
+                  ${escapeHtml(
+                    Number(item.subtotal || 0) > 0
+                      ? formatCurrency(Number(item.subtotal || 0))
+                      : "-",
+                  )}
                 </td>
               </tr>
             `,
@@ -98,6 +165,103 @@ function buildItemsHtml(order: StoredOrder) {
       </tbody>
     </table>
   `;
+}
+
+async function buildOrderReceivedEmail(order: StoredOrder) {
+  const publicOrderUrl = await buildPublicOrderUrl(order);
+  const deliveryLabel = buildOrderDeliveryLabel(order);
+  const isMercadoPago = (order.metadata.paymentMethod || "")
+    .toLowerCase()
+    .includes("mercado pago");
+  const textLines = [
+    `Hola ${order.nombre_cliente},`,
+    "",
+    isMercadoPago
+      ? `Recibimos tu pedido / NP ${order.numero_pedido} y ya iniciamos el proceso de pago.`
+      : `Recibimos tu pedido / NP ${order.numero_pedido}.`,
+    buildOrderNextStep(order),
+    "",
+    "Resumen:",
+    `- Cliente: ${order.nombre_cliente}`,
+    `- Entrega: ${deliveryLabel}`,
+    `- Total: ${formatCurrency(order.monto_total)}`,
+    ...buildItemsText(order),
+    publicOrderUrl ? "" : null,
+    publicOrderUrl ? `Sigue tu pedido aqui: ${publicOrderUrl}` : null,
+  ].filter(Boolean);
+
+  return {
+    subject: isMercadoPago
+      ? "Recibimos tu pedido / estamos procesando tu pago"
+      : "Recibimos tu pedido",
+    text: textLines.join("\n"),
+    html: `
+      <div style="margin:0;padding:24px;background:#f1f5f9;font-family:Arial,sans-serif;color:#0f172a;">
+        <div style="max-width:720px;margin:0 auto;background:#ffffff;border:1px solid #dbe3ee;border-radius:24px;overflow:hidden;">
+          <div style="padding:28px 32px;background:linear-gradient(135deg,#0f172a 0%,#1d4ed8 100%);color:#ffffff;">
+            <div style="font-size:12px;letter-spacing:.18em;text-transform:uppercase;opacity:.78;">Diez Deportes</div>
+            <h1 style="margin:10px 0 8px;font-size:28px;line-height:1.2;">Recibimos tu pedido</h1>
+            <p style="margin:0;font-size:15px;line-height:1.7;opacity:.92;">
+              Tu NP / pedido web <strong>#${escapeHtml(order.numero_pedido)}</strong> ya quedo registrada para ${escapeHtml(order.nombre_cliente)}.
+            </p>
+          </div>
+
+          <div style="padding:28px 32px;">
+            <p style="margin:0 0 18px;font-size:15px;line-height:1.7;color:#334155;">
+              ${escapeHtml(buildOrderNextStep(order))}
+            </p>
+
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:separate;border-spacing:0 14px;">
+              <tr>
+                <td width="50%" valign="top" style="padding:18px;border:1px solid #e2e8f0;border-radius:18px;background:#f8fafc;">
+                  <div style="font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:#64748b;font-weight:700;">Pedido</div>
+                  <div style="margin-top:10px;font-size:15px;line-height:1.8;color:#0f172a;">
+                    <div><strong>NP:</strong> ${escapeHtml(order.numero_pedido)}</div>
+                    <div><strong>Entrega:</strong> ${escapeHtml(deliveryLabel)}</div>
+                    <div><strong>Total:</strong> ${escapeHtml(formatCurrency(order.monto_total))}</div>
+                  </div>
+                </td>
+                <td width="50%" valign="top" style="padding:18px;border:1px solid #e2e8f0;border-radius:18px;background:#f8fafc;">
+                  <div style="font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:#64748b;font-weight:700;">Siguiente paso</div>
+                  <div style="margin-top:10px;font-size:15px;line-height:1.7;color:#0f172a;">
+                    ${escapeHtml(buildOrderNextStep(order))}
+                  </div>
+                </td>
+              </tr>
+            </table>
+
+            <div style="margin-top:8px;border:1px solid #e2e8f0;border-radius:18px;overflow:hidden;background:#ffffff;">
+              <div style="padding:16px 18px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">
+                <div style="font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:#64748b;font-weight:700;">Detalle del pedido</div>
+              </div>
+              <div style="padding:0 18px 6px;">
+                ${buildItemsHtml(order)}
+              </div>
+            </div>
+
+            ${
+              publicOrderUrl
+                ? `
+                  <div style="margin-top:22px;">
+                    <a
+                      href="${publicOrderUrl}"
+                      style="display:inline-flex;align-items:center;justify-content:center;padding:14px 20px;border-radius:14px;background:#0f172a;color:#ffffff;text-decoration:none;font-weight:700;"
+                    >
+                      Seguir estado del pedido
+                    </a>
+                  </div>
+                  <p style="margin:18px 0 0;font-size:13px;line-height:1.7;color:#64748b;">
+                    Si el boton no abre, copia este enlace en tu navegador:<br />
+                    <a href="${publicOrderUrl}" style="color:#0f172a;word-break:break-all;">${publicOrderUrl}</a>
+                  </p>
+                `
+                : ""
+            }
+          </div>
+        </div>
+      </div>
+    `,
+  };
 }
 
 function buildDispatchedEmail(order: StoredOrder) {
@@ -109,12 +273,11 @@ function buildDispatchedEmail(order: StoredOrder) {
     "",
     `Tu pedido ${order.numero_pedido} fue despachado.`,
     trackingNumber ? `Numero de seguimiento: ${trackingNumber}.` : null,
+    `Entrega: ${buildOrderDeliveryLabel(order)}.`,
     deliveryAddress ? `Direccion de entrega: ${deliveryAddress}.` : null,
     "",
     "Detalle del pedido:",
-    ...(order.metadata.items || []).map(
-      (item) => `- ${item.productId} x ${item.quantity}`,
-    ),
+    ...buildItemsText(order),
     "",
     `Total: ${formatCurrency(order.monto_total)}.`,
     "",
@@ -284,10 +447,67 @@ async function buildEmailContent(
   options?: EmailContentOptions,
 ) {
   if (state === "FACTURADO") {
+    const publicOrderUrl = await buildPublicOrderUrl(order);
+
     return {
       subject: "Tu pedido fue confirmado",
-      text: `Hola ${order.nombre_cliente}, tu pedido ${order.numero_pedido} fue confirmado y ya esta en preparacion.`,
-      html: `<p>Hola ${order.nombre_cliente},</p><p>Tu pedido <strong>${order.numero_pedido}</strong> fue confirmado y ya esta en preparacion.</p>`,
+      text: [
+        `Hola ${order.nombre_cliente},`,
+        "",
+        `Tu pedido / NP ${order.numero_pedido} fue confirmado.`,
+        buildOrderNextStep(order),
+        "",
+        `Entrega: ${buildOrderDeliveryLabel(order)}.`,
+        `Total: ${formatCurrency(order.monto_total)}.`,
+        ...buildItemsText(order),
+        publicOrderUrl ? "" : null,
+        publicOrderUrl ? `Sigue tu pedido aqui: ${publicOrderUrl}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      html: `
+        <div style="margin:0;padding:24px;background:#f1f5f9;font-family:Arial,sans-serif;color:#0f172a;">
+          <div style="max-width:720px;margin:0 auto;background:#ffffff;border:1px solid #dbe3ee;border-radius:24px;overflow:hidden;">
+            <div style="padding:28px 32px;background:linear-gradient(135deg,#0f172a 0%,#1d4ed8 100%);color:#ffffff;">
+              <div style="font-size:12px;letter-spacing:.18em;text-transform:uppercase;opacity:.78;">Diez Deportes</div>
+              <h1 style="margin:10px 0 8px;font-size:28px;line-height:1.2;">Tu pedido fue confirmado</h1>
+              <p style="margin:0;font-size:15px;line-height:1.7;opacity:.92;">
+                La NP <strong>#${escapeHtml(order.numero_pedido)}</strong> ya quedo confirmada para ${escapeHtml(order.nombre_cliente)}.
+              </p>
+            </div>
+
+            <div style="padding:28px 32px;">
+              <p style="margin:0 0 18px;font-size:15px;line-height:1.7;color:#334155;">
+                ${escapeHtml(buildOrderNextStep(order))}
+              </p>
+
+              <div style="margin-top:8px;border:1px solid #e2e8f0;border-radius:18px;overflow:hidden;background:#ffffff;">
+                <div style="padding:16px 18px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">
+                  <div style="font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:#64748b;font-weight:700;">Detalle del pedido</div>
+                </div>
+                <div style="padding:0 18px 6px;">
+                  ${buildItemsHtml(order)}
+                </div>
+              </div>
+
+              ${
+                publicOrderUrl
+                  ? `
+                    <div style="margin-top:22px;">
+                      <a
+                        href="${publicOrderUrl}"
+                        style="display:inline-flex;align-items:center;justify-content:center;padding:14px 20px;border-radius:14px;background:#0f172a;color:#ffffff;text-decoration:none;font-weight:700;"
+                      >
+                        Seguir estado del pedido
+                      </a>
+                    </div>
+                  `
+                  : ""
+              }
+            </div>
+          </div>
+        </div>
+      `,
     };
   }
 
@@ -347,6 +567,15 @@ async function buildEmailContent(
                 </div>
                 <div style="margin-top:8px;font-size:14px;line-height:1.6;color:#475569;">
                   Si no puedes mostrar el QR, con este codigo tambien podemos identificar tu pedido en el local.
+                </div>
+              </div>
+
+              <div style="margin-top:18px;border:1px solid #e2e8f0;border-radius:18px;overflow:hidden;background:#ffffff;">
+                <div style="padding:16px 18px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">
+                  <div style="font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:#64748b;font-weight:700;">Resumen del pedido</div>
+                </div>
+                <div style="padding:0 18px 6px;">
+                  ${buildItemsHtml(order)}
                 </div>
               </div>
 
@@ -426,19 +655,21 @@ function createTransport(config: SmtpConfig, account: SmtpAccount): MailTranspor
   });
 }
 
-export async function sendOrderStatusEmail(
+async function sendEmail(
   order: StoredOrder,
-  state: OrderState,
-  options?: EmailContentOptions,
+  content: {
+    subject: string;
+    text: string;
+    html: string;
+  },
 ) {
-  const content = await buildEmailContent(order, state, options);
   const config = getSmtpConfig();
 
   if (!config.host || config.accounts.length === 0) {
     console.info("Email skipped because SMTP is not configured", {
       orderId: order.id,
-      state,
       to: order.email_cliente,
+      subject: content.subject,
     });
     return;
   }
@@ -462,7 +693,6 @@ export async function sendOrderStatusEmail(
       lastError = error;
       console.error("SMTP send attempt failed", {
         orderId: order.id,
-        state,
         to: order.email_cliente,
         from: account.from,
         error: error instanceof Error ? error.message : String(error),
@@ -473,4 +703,18 @@ export async function sendOrderStatusEmail(
   throw lastError instanceof Error
     ? lastError
     : new Error("No se pudo enviar el email con ninguna cuenta SMTP.");
+}
+
+export async function sendOrderStatusEmail(
+  order: StoredOrder,
+  state: OrderState,
+  options?: EmailContentOptions,
+) {
+  const content = await buildEmailContent(order, state, options);
+  return sendEmail(order, content);
+}
+
+export async function sendOrderReceivedEmail(order: StoredOrder) {
+  const content = await buildOrderReceivedEmail(order);
+  return sendEmail(order, content);
 }

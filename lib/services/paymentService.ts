@@ -22,6 +22,7 @@ import {
   ensurePickupAssets,
   markOrderPaymentStatus,
   registerMercadoPagoApproval,
+  sendOrderReceivedEmailIfNeeded,
   updateOrderStatus,
 } from "@/lib/services/orderService";
 import type {
@@ -207,6 +208,7 @@ export async function createMercadoPagoOrder(input: {
       externalReference,
       paymentMethod: "Mercado Pago",
     });
+    await sendOrderReceivedEmailIfNeeded(order.id);
 
     return {
       pendingOrderId: order.id,

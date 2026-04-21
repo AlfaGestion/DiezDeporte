@@ -55,6 +55,7 @@ export type CreateOrderPayload = {
   items: Array<{
     productId: string;
     quantity: number;
+    unitPrice?: number | null;
   }>;
 };
 
@@ -115,6 +116,7 @@ export type PublicStoreSettings = {
   logoUrl: string;
   storeTagline: string;
   allowBackorders: boolean;
+  allowPickupCheckoutWithoutAddress: boolean;
   mercadoPagoEnabled: boolean;
   showOutOfStock: boolean;
   heroImageUrl: string;

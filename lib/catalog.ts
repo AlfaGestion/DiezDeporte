@@ -171,7 +171,9 @@ export async function getProductsByIds(
     FROM dbo.V_MA_ARTICULOS a WITH (NOLOCK)
     LEFT JOIN StockActual s
       ON s.IDArticulo = LTRIM(RTRIM(a.IDARTICULO))
-    WHERE LTRIM(RTRIM(a.IDARTICULO)) IN (${placeholders.join(", ")});
+    WHERE LTRIM(RTRIM(a.IDARTICULO)) IN (${placeholders.join(", ")})
+      AND ISNULL(a.SUSPENDIDO, 0) = 0
+      AND ISNULL(a.SuspendidoV, 0) = 0;
   `);
 
   return result.recordset.map((record) => mapProduct(record, settings));

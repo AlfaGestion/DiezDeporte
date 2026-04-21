@@ -7,7 +7,8 @@ import type { CreateOrderPayload, OrderSummary } from "@/lib/types";
 export async function createOrder(payload: CreateOrderPayload): Promise<OrderSummary> {
   const settings = await getServerSettings();
   const order = await createOrderFromCheckoutPayload(payload);
-  const itemCount = payload.items.reduce((sum, item) => sum + item.quantity, 0);
+  const itemCount =
+    order.metadata.items?.reduce((sum, item) => sum + item.quantity, 0) || 0;
   return formatOrderAsLegacySummary(order, itemCount, {
     tc: order.metadata.documentTc || settings.mercadoPagoOrderTc || settings.orderTc || "WEB",
     branch: settings.orderBranch,

@@ -45,6 +45,10 @@ export type ServerSettings = {
   mercadoPagoBinaryMode: boolean;
   imageBaseUrl: string;
   showOutOfStock: boolean;
+  validarStockAlConfirmarPedido: boolean;
+  validarClasePrecioAlConfirmarPedido: boolean;
+  enviarEmailPedidoRecibido: boolean;
+  permitirCheckoutSinDireccionEnRetiro: boolean;
 };
 
 function readSetting(
@@ -127,6 +131,26 @@ export async function getServerSettings(): Promise<ServerSettings> {
       readSetting(storedValues, "NEXT_PUBLIC_SHOW_OUT_OF_STOCK", "true"),
       true,
     ),
+    validarStockAlConfirmarPedido: parseBoolean(
+      readSetting(storedValues, "APP_VALIDATE_STOCK_ON_CHECKOUT", "true"),
+      true,
+    ),
+    validarClasePrecioAlConfirmarPedido: parseBoolean(
+      readSetting(storedValues, "APP_VALIDATE_PRICE_CLASS_ON_CHECKOUT", "false"),
+      false,
+    ),
+    enviarEmailPedidoRecibido: parseBoolean(
+      readSetting(storedValues, "APP_SEND_ORDER_RECEIVED_EMAIL", "true"),
+      true,
+    ),
+    permitirCheckoutSinDireccionEnRetiro: parseBoolean(
+      readSetting(
+        storedValues,
+        "APP_ALLOW_PICKUP_CHECKOUT_WITHOUT_ADDRESS",
+        "true",
+      ),
+      true,
+    ),
   };
 }
 
@@ -145,6 +169,8 @@ export async function getPublicStoreSettings(): Promise<PublicStoreSettings> {
       process.env.NEXT_PUBLIC_STORE_TAGLINE?.trim() ||
       "Equipamiento deportivo con stock real y pedido directo",
     allowBackorders: settings.allowBackorders,
+    allowPickupCheckoutWithoutAddress:
+      settings.permitirCheckoutSinDireccionEnRetiro,
     mercadoPagoEnabled,
     showOutOfStock: settings.showOutOfStock,
     heroImageUrl:

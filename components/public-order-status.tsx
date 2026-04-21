@@ -38,6 +38,49 @@ function resolveTitle(status: PaymentStatusResult | null, error?: string | null)
   };
 }
 
+function getPaymentStatusLabel(value: string | null) {
+  switch ((value || "").trim().toLowerCase()) {
+    case "aprobado":
+      return "Aprobado";
+    case "rechazado":
+      return "Rechazado";
+    default:
+      return "Pendiente";
+  }
+}
+
+function getOrderTypeLabel(value: PaymentStatusResult["orderType"]) {
+  if (value === "envio") {
+    return "Envio a domicilio";
+  }
+
+  if (value === "retiro") {
+    return "Retiro en local";
+  }
+
+  return "Sin definir";
+}
+
+function getNextStepMessage(status: PaymentStatusResult) {
+  if (status.orderState === "LISTO_PARA_RETIRO") {
+    return "Tu pedido ya esta listo. Acercate al local con el QR o el codigo de retiro.";
+  }
+
+  if (status.orderState === "ENVIADO") {
+    return "Tu pedido ya fue despachado y esta en camino.";
+  }
+
+  if (status.orderState === "APROBADO" && status.paymentStatus === "aprobado") {
+    return "El pago fue aprobado. Ahora queda pendiente la facturacion administrativa.";
+  }
+
+  if (status.paymentStatus === "pendiente") {
+    return "Recibimos tu pedido. Estamos esperando la confirmacion del pago para avanzar.";
+  }
+
+  return "Puedes seguir consultando el estado de tu pedido desde este enlace.";
+}
+
 export function PublicOrderStatus({
   storeName,
   supportWhatsapp,
@@ -62,12 +105,20 @@ export function PublicOrderStatus({
           <>
             <div className="payment-return-summary">
               <div className="payment-return-row">
-                <span>Pedido</span>
-                <strong>{status.externalReference}</strong>
+                <span>Pedido / NP</span>
+                <strong>{status.order?.idComprobante || status.externalReference}</strong>
               </div>
               <div className="payment-return-row">
                 <span>Estado</span>
                 <strong>{status.orderState || "Pendiente"}</strong>
+              </div>
+              <div className="payment-return-row">
+                <span>Pago</span>
+                <strong>{getPaymentStatusLabel(status.paymentStatus)}</strong>
+              </div>
+              <div className="payment-return-row">
+                <span>Entrega</span>
+                <strong>{getOrderTypeLabel(status.orderType)}</strong>
               </div>
               <div className="payment-return-row">
                 <span>Total</span>
@@ -79,6 +130,10 @@ export function PublicOrderStatus({
                   <strong>{status.pickupCode}</strong>
                 </div>
               ) : null}
+            </div>
+
+            <div className="mt-4 rounded-[18px] border border-[color:var(--line)] bg-[color:var(--surface-soft)] p-4 text-sm text-[color:var(--text-soft)]">
+              {getNextStepMessage(status)}
             </div>
 
             {status.qrCode ? (

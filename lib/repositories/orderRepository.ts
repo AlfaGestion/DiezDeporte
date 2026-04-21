@@ -38,6 +38,7 @@ type OrderRow = {
   EMAIL_FACTURADO_ENVIADO_AT: Date | null;
   EMAIL_LISTO_ENVIADO_AT: Date | null;
   EMAIL_ENVIADO_ENVIADO_AT: Date | null;
+  EMAIL_PEDIDO_RECIBIDO_ENVIADO_AT: Date | null;
   FECHA_CREACION: Date;
   FECHA_ACTUALIZACION: Date;
 };
@@ -113,6 +114,9 @@ function mapOrderRow(row: OrderRow): StoredOrder {
     email_facturado_enviado_at: toIsoString(row.EMAIL_FACTURADO_ENVIADO_AT),
     email_listo_enviado_at: toIsoString(row.EMAIL_LISTO_ENVIADO_AT),
     email_enviado_enviado_at: toIsoString(row.EMAIL_ENVIADO_ENVIADO_AT),
+    email_pedido_recibido_enviado_at: toIsoString(
+      row.EMAIL_PEDIDO_RECIBIDO_ENVIADO_AT,
+    ),
   };
 }
 
@@ -194,6 +198,7 @@ async function ensureSchema() {
           EMAIL_FACTURADO_ENVIADO_AT datetime2 NULL,
           EMAIL_LISTO_ENVIADO_AT datetime2 NULL,
           EMAIL_ENVIADO_ENVIADO_AT datetime2 NULL,
+          EMAIL_PEDIDO_RECIBIDO_ENVIADO_AT datetime2 NULL,
           FECHA_CREACION datetime2 NOT NULL CONSTRAINT DF_WEB_V_MV_PEDIDOS_FECHA_CREACION DEFAULT SYSDATETIME(),
           FECHA_ACTUALIZACION datetime2 NOT NULL CONSTRAINT DF_WEB_V_MV_PEDIDOS_FECHA_ACTUALIZACION DEFAULT SYSDATETIME()
         );
@@ -244,6 +249,11 @@ async function ensureSchema() {
       IF COL_LENGTH('${ORDERS_TABLE}', 'EMAIL_ENVIADO_ENVIADO_AT') IS NULL
       BEGIN
         ALTER TABLE ${ORDERS_TABLE} ADD EMAIL_ENVIADO_ENVIADO_AT datetime2 NULL;
+      END;
+
+      IF COL_LENGTH('${ORDERS_TABLE}', 'EMAIL_PEDIDO_RECIBIDO_ENVIADO_AT') IS NULL
+      BEGIN
+        ALTER TABLE ${ORDERS_TABLE} ADD EMAIL_PEDIDO_RECIBIDO_ENVIADO_AT datetime2 NULL;
       END;
 
       IF COL_LENGTH('${ORDER_LOGS_TABLE}', 'ORIGEN_CAMBIO') IS NULL
@@ -587,6 +597,14 @@ export async function update(id: number, input: UpdateOrderInput) {
       "EMAIL_ENVIADO_ENVIADO_AT",
       input.email_enviado_enviado_at
         ? new Date(input.email_enviado_enviado_at)
+        : null,
+    ]);
+  }
+  if (input.email_pedido_recibido_enviado_at !== undefined) {
+    entries.push([
+      "EMAIL_PEDIDO_RECIBIDO_ENVIADO_AT",
+      input.email_pedido_recibido_enviado_at
+        ? new Date(input.email_pedido_recibido_enviado_at)
         : null,
     ]);
   }

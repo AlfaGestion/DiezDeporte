@@ -8,14 +8,20 @@ import {
   deriveNextOrderState,
   getEmailSentAtField,
   InvalidOrderTransitionError,
-  normalizeOrderType,
   OrderNotFoundError,
   OrderValidationError,
   shouldSendEmailForState,
 } from "@/lib/models/order";
 import * as orderRepository from "@/lib/repositories/orderRepository";
-import { createCommercialDocument } from "@/lib/repositories/commercialDocumentRepository";
-import { sendOrderStatusEmail } from "@/lib/services/emailService";
+import { createOrderNoteDocument } from "@/lib/repositories/commercialDocumentRepository";
+import {
+  sendOrderReceivedEmail,
+  sendOrderStatusEmail,
+} from "@/lib/services/emailService";
+import {
+  buildCheckoutOrderDraft as buildCheckoutOrderDraftFromPayload,
+  type CheckoutOrderDraft,
+} from "@/lib/services/checkoutService";
 import { getServerSettings } from "@/lib/store-config";
 import type { CreateOrderPayload } from "@/lib/types";
 import { normalizeNumber } from "@/lib/commerce";
@@ -31,17 +37,6 @@ import type {
   UpdateOrderInput,
 } from "@/lib/types/order";
 
-export type CheckoutOrderDraft = {
-  input: CreateOrderInput;
-  paymentItems: Array<{
-    title: string;
-    quantity: number;
-    unitPrice: number;
-    currency: string;
-  }>;
-  itemCount: number;
-};
-
 type OrderTransitionOptions = {
   origin?: OrderChangeOrigin;
 };
@@ -55,6 +50,10 @@ function ensureOrderCreateInput(input: CreateOrderInput) {
 
   if (!input.email_cliente.trim()) {
     throw new OrderValidationError("El email del cliente es obligatorio.");
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email_cliente.trim())) {
+    throw new OrderValidationError("El email del cliente no es valido.");
   }
 
   if (!input.telefono_cliente.trim()) {
@@ -158,7 +157,38 @@ async function runTransitionSideEffects(order: StoredOrder, nextState: OrderStat
   return patchedOrder;
 }
 
-async function ensureCommercialDocument(order: StoredOrder) {
+export async function sendOrderReceivedEmailIfNeeded(orderId: number) {
+  const settings = await getServerSettings();
+
+  if (!settings.enviarEmailPedidoRecibido) {
+    return getOrderById(orderId);
+  }
+
+  const order = await getOrderById(orderId);
+
+  if (order.email_pedido_recibido_enviado_at) {
+    return order;
+  }
+
+  try {
+    await sendOrderReceivedEmail(order);
+
+    const updated = await orderRepository.update(order.id, {
+      email_pedido_recibido_enviado_at: new Date().toISOString(),
+    });
+
+    return updated || order;
+  } catch (error) {
+    console.error("No se pudo enviar el email inicial del pedido", {
+      orderId: order.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    return order;
+  }
+}
+
+async function ensureOrderNoteDocument(order: StoredOrder) {
   if (order.metadata.documentInternalId && order.metadata.documentNumber && order.metadata.documentTc) {
     return order;
   }
@@ -180,7 +210,7 @@ async function ensureCommercialDocument(order: StoredOrder) {
   }
 
   const settings = await getServerSettings();
-  const document = await createCommercialDocument({
+  const document = await createOrderNoteDocument({
     order,
     settings,
     lines: itemInputs.map((item) => {
@@ -195,7 +225,7 @@ async function ensureCommercialDocument(order: StoredOrder) {
       return {
         articleId: product.id,
         quantity: item.quantity,
-        unitPrice: product.price,
+        unitPrice: Number(item.unitPrice || product.price || 0),
       };
     }),
   });
@@ -204,6 +234,8 @@ async function ensureCommercialDocument(order: StoredOrder) {
     numero_pedido: document.idComprobante,
     metadata: {
       ...order.metadata,
+      webOrderNumber: order.metadata.webOrderNumber || order.numero_pedido,
+      documentKind: "NP",
       documentInternalId: document.id,
       documentTc: document.tc,
       documentNumber: document.idComprobante,
@@ -259,7 +291,9 @@ function buildFallbackDocumentItem(
   index: number,
 ): OrderDocumentItem {
   const quantity = Number(item.quantity || 0);
-  const unitPrice = quantity > 0 ? order.monto_total / quantity : order.monto_total;
+  const unitPrice =
+    Number(item.unitPrice || 0) ||
+    (quantity > 0 ? order.monto_total / quantity : order.monto_total);
 
   return {
     id: null,
@@ -267,10 +301,10 @@ function buildFallbackDocumentItem(
     idComprobante: documentNumber,
     sequence: index + 1,
     articleId: item.productId,
-    description: item.productId,
+    description: item.productName || item.productId,
     quantity,
     unitPrice,
-    total: unitPrice * quantity,
+    total: Number(item.subtotal || unitPrice * quantity),
   };
 }
 
@@ -362,65 +396,7 @@ async function attachResolvedItemCounts(orders: StoredOrder[]) {
 export async function buildCheckoutOrderDraft(
   payload: CreateOrderPayload,
 ): Promise<CheckoutOrderDraft> {
-  if (!payload.items.length) {
-    throw new OrderValidationError("El pedido no tiene articulos.");
-  }
-
-  const products = await getProductsByIds(payload.items.map((item) => item.productId));
-  const productMap = new Map(products.map((product) => [product.id, product]));
-  const missingProduct = payload.items.find((item) => !productMap.has(item.productId.trim()));
-
-  if (missingProduct) {
-    throw new OrderValidationError(
-      `No se encontro el articulo ${missingProduct.productId}.`,
-    );
-  }
-
-  const paymentItems = payload.items.map((item) => {
-    const product = productMap.get(item.productId.trim());
-
-    if (!product) {
-      throw new OrderValidationError(`No se encontro el articulo ${item.productId}.`);
-    }
-
-    return {
-      title: product.description,
-      quantity: item.quantity,
-      unitPrice: product.price,
-      currency: product.currency || "ARS",
-    };
-  });
-
-  const montoTotal = paymentItems.reduce(
-    (sum, item) => sum + item.unitPrice * item.quantity,
-    0,
-  );
-  const itemCount = payload.items.reduce((sum, item) => sum + item.quantity, 0);
-  const tipoPedido = normalizeOrderType(payload.customer.deliveryMethod);
-
-  return {
-    input: {
-      nombre_cliente: payload.customer.fullName,
-      email_cliente: payload.customer.email,
-      telefono_cliente: payload.customer.phone,
-      monto_total: montoTotal,
-      tipo_pedido: tipoPedido,
-      direccion: payload.customer.address || null,
-      metadata: {
-        items: payload.items,
-        customerDocumentNumber: payload.customer.documentNumber || null,
-        customerAddress: payload.customer.address || null,
-        customerCity: payload.customer.city || null,
-        customerProvince: payload.customer.province || null,
-        customerPostalCode: payload.customer.postalCode || null,
-        customerNotes: payload.customer.notes || null,
-        deliveryMethod: payload.customer.deliveryMethod || null,
-        paymentMethod: payload.customer.paymentMethod || null,
-      },
-    },
-    paymentItems,
-    itemCount,
-  };
+  return buildCheckoutOrderDraftFromPayload(payload);
 }
 
 export async function getOrderById(orderId: number) {
@@ -487,11 +463,13 @@ export async function createOrder(
     estado: input.estado || "PENDIENTE",
     estado_pago: input.estado_pago || "pendiente",
   });
-  const orderWithDocument = await ensureCommercialDocument(order).catch(async (error) => {
+  const orderWithDocument = await ensureOrderNoteDocument(order).catch(async (error) => {
     const message = error instanceof Error ? error.message : "No se pudo generar el comprobante.";
     await orderRepository.update(order.id, {
       metadata: {
         ...order.metadata,
+        webOrderNumber: order.metadata.webOrderNumber || order.numero_pedido,
+        documentKind: "NP",
         documentError: message,
       },
     });
@@ -507,9 +485,20 @@ export async function createOrder(
   return orderWithDocument;
 }
 
-export async function createOrderFromCheckoutPayload(payload: CreateOrderPayload) {
+export async function createOrderFromCheckoutPayload(
+  payload: CreateOrderPayload,
+  options?: {
+    sendReceivedEmail?: boolean;
+  },
+) {
   const draft = await buildCheckoutOrderDraft(payload);
-  return createOrder(draft.input, { origin: "sistema" });
+  const order = await createOrder(draft.input, { origin: "sistema" });
+
+  if (options?.sendReceivedEmail ?? true) {
+    return sendOrderReceivedEmailIfNeeded(order.id);
+  }
+
+  return order;
 }
 
 export async function updateOrderStatus(

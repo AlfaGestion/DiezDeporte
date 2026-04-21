@@ -13,6 +13,7 @@ type StoreSettingDefinition = {
   section: string;
   type: AdminConfigFieldType;
   placeholder?: string;
+  fallback?: string;
 };
 
 type ConfigRow = {
@@ -64,6 +65,7 @@ export const STORE_SETTING_DEFINITIONS: StoreSettingDefinition[] = [
     description: "Cuando esta activo, Mercado Pago simplifica los estados posibles.",
     section: "Mercado Pago",
     type: "boolean",
+    fallback: "false",
   },
   {
     key: "APP_ORDER_TC",
@@ -73,6 +75,7 @@ export const STORE_SETTING_DEFINITIONS: StoreSettingDefinition[] = [
     section: "Pedido",
     type: "text",
     placeholder: "NP",
+    fallback: "NP",
   },
   {
     key: "APP_ORDER_BRANCH",
@@ -128,6 +131,7 @@ export const STORE_SETTING_DEFINITIONS: StoreSettingDefinition[] = [
     section: "Pedido",
     type: "text",
     placeholder: "120",
+    fallback: "120",
   },
   {
     key: "APP_ALLOW_BACKORDERS",
@@ -136,6 +140,47 @@ export const STORE_SETTING_DEFINITIONS: StoreSettingDefinition[] = [
     description: "Si esta activo, deja vender aunque el stock sea insuficiente.",
     section: "Checkout",
     type: "boolean",
+    fallback: "false",
+  },
+  {
+    key: "APP_VALIDATE_STOCK_ON_CHECKOUT",
+    configKey: "ValidarStockConfirmacion",
+    label: "Validar stock al confirmar",
+    description:
+      "Revalida stock real antes de crear la NP y antes de iniciar Mercado Pago.",
+    section: "Checkout",
+    type: "boolean",
+    fallback: "true",
+  },
+  {
+    key: "APP_VALIDATE_PRICE_CLASS_ON_CHECKOUT",
+    configKey: "ValidarPrecioConfirmacion",
+    label: "Validar lista de precio",
+    description:
+      "Si cambia el precio vigente del articulo, frena el checkout para evitar inconsistencias.",
+    section: "Checkout",
+    type: "boolean",
+    fallback: "false",
+  },
+  {
+    key: "APP_SEND_ORDER_RECEIVED_EMAIL",
+    configKey: "EnviarEmailPedidoRecibido",
+    label: "Email pedido recibido",
+    description:
+      "Envia un email inicial cuando la NP queda creada y el checkout ya fue iniciado.",
+    section: "Checkout",
+    type: "boolean",
+    fallback: "true",
+  },
+  {
+    key: "APP_ALLOW_PICKUP_CHECKOUT_WITHOUT_ADDRESS",
+    configKey: "PermitirRetiroSinDireccion",
+    label: "Retiro sin direccion",
+    description:
+      "Si esta activo, el checkout de retiro solo exige nombre, email y telefono.",
+    section: "Checkout",
+    type: "boolean",
+    fallback: "true",
   },
   {
     key: "APP_WRITE_STOCK_MOVEMENTS",
@@ -144,6 +189,7 @@ export const STORE_SETTING_DEFINITIONS: StoreSettingDefinition[] = [
     description: "Inserta movimientos en V_MV_Stock al finalizar el pedido.",
     section: "Checkout",
     type: "boolean",
+    fallback: "true",
   },
   {
     key: "NEXT_PUBLIC_SHOW_OUT_OF_STOCK",
@@ -152,6 +198,7 @@ export const STORE_SETTING_DEFINITIONS: StoreSettingDefinition[] = [
     description: "Si esta activo, el catalogo sigue mostrando articulos agotados.",
     section: "Checkout",
     type: "boolean",
+    fallback: "true",
   },
 ];
 
@@ -198,7 +245,12 @@ function resolveRawValue(
   definition: StoreSettingDefinition,
   rows: Map<string, string>,
 ) {
-  return rows.get(definition.configKey) ?? process.env[definition.key] ?? "";
+  return (
+    rows.get(definition.configKey) ??
+    process.env[definition.key] ??
+    definition.fallback ??
+    ""
+  );
 }
 
 export async function getStoredSettingValuesByEnvKey() {
