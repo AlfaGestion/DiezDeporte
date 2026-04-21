@@ -263,13 +263,19 @@ svg {
 }
 
 .theme-toggle {
-  min-width: 84px;
-  padding: 10px 14px;
+  width: 42px;
+  height: 42px;
+  padding: 0;
   border-radius: 999px;
   background: var(--header-control-bg);
   color: var(--header-text);
   box-shadow: inset 0 0 0 1px var(--header-control-line);
-  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.theme-toggle svg {
+  width: 18px;
+  height: 18px;
 }
 
 .site-cart-pill {

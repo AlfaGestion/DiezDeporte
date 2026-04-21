@@ -117,6 +117,7 @@ export type PublicStoreSettings = {
   storeTagline: string;
   welcomeMessage: string;
   storeHours: string;
+  pickupSchedule: string;
   allowBackorders: boolean;
   allowPickupCheckoutWithoutAddress: boolean;
   mercadoPagoEnabled: boolean;
@@ -215,6 +216,14 @@ export type AdminOrdersSnapshot = {
   summary: Record<AdminOrderBucket, number> & {
     total: number;
   };
+};
+
+export type AdminOrderWatchSnapshot = {
+  totalOrders: number;
+  latestOrderId: number | null;
+  latestOrderNumber: string | null;
+  latestCustomerName: string | null;
+  latestCreatedAt: string | null;
 };
 
 export * from "@/lib/types/order";

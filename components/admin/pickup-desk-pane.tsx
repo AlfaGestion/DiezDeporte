@@ -13,6 +13,7 @@ import {
   cn,
   formatAdminDateTime,
 } from "@/components/admin/admin-ui";
+import { isPickupLocalPaymentOrder } from "@/lib/models/order";
 import type { OrderState, PaymentCollectionAccount } from "@/lib/types";
 
 type PickupLookupOrder = {
@@ -82,8 +83,16 @@ export function PickupDeskPane({
   const [feedbackTone, setFeedbackTone] = useState<"success" | "error" | "warning">("warning");
   const [isLookingUp, startLookupTransition] = useTransition();
   const [isRedeeming, startRedeemTransition] = useTransition();
+  const isLocalPickupPayment = lookup
+    ? isPickupLocalPaymentOrder({
+        tipo_pedido: "retiro",
+        metadata: {
+          paymentMethod: lookup.order.paymentMethod || null,
+        },
+      })
+    : false;
   const requiresLocalPaymentAccount =
-    lookup?.order.paymentMethod === "Pago en local" && lookup.order.paymentStatus !== "aprobado";
+    isLocalPickupPayment && lookup?.order.paymentStatus !== "aprobado";
 
   const resetResolvedState = () => {
     setLookup(null);
@@ -120,8 +129,9 @@ export function PickupDeskPane({
           return;
         }
 
-        setPaymentAccounts(result.accounts);
-        setPaymentAccountCode((current) => current || result.accounts[0]?.code || "");
+        const accounts = result.accounts;
+        setPaymentAccounts(accounts);
+        setPaymentAccountCode((current) => current || accounts[0]?.code || "");
       })
       .catch((error) => {
         if (!cancelled) {

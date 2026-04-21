@@ -113,6 +113,7 @@ export default async function AdminOrderDetailPage({
                 canMarkCancelled={canMarkCancelled}
                 canMarkError={canMarkError}
                 allowPickupLocalFallback={serverSettings.permitirRetiroYPagoLocalSiFallaMP}
+                pickupSchedule={serverSettings.pickupAvailabilityText}
               />
               {order.tipo_pedido === "retiro" ? (
                 <PickupRedeemPanel

@@ -17,6 +17,7 @@ import {
   getByPreferenceId,
   update as updateOrderRepository,
 } from "@/lib/repositories/orderRepository";
+import { syncCommercialDocumentHeader } from "@/lib/repositories/commercialDocumentRepository";
 import {
   buildCheckoutOrderDraft,
   cancelExpiredPendingOrders,
@@ -413,6 +414,10 @@ export async function enablePickupLocalPaymentFallback(orderId: number) {
       fallbackPickupLocalPaymentReservedUntil: reservedUntil.toISOString(),
     },
   });
+
+  if (updated) {
+    await syncCommercialDocumentHeader(updated).catch(() => false);
+  }
 
   return updated || order;
 }

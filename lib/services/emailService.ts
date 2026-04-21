@@ -746,8 +746,10 @@ async function buildEmailContent(
   }
 
   if (state === "LISTO_PARA_RETIRO") {
+    const settings = await getServerSettings();
     const pickupCode = order.metadata.pickupCode || "Sin codigo";
     const publicOrderUrl = await buildPublicOrderUrl(order);
+    const pickupSchedule = normalizeOptionalString(settings.pickupAvailabilityText);
     const pickupMessage =
       normalizeOptionalString(options?.customMessage) ||
       "Ya puedes pasar por el local. Para retirar, abre tu pedido desde el boton de abajo y muestra el QR junto con tu codigo.";
@@ -774,6 +776,7 @@ async function buildEmailContent(
         "",
         `Pedido ${order.numero_pedido}.`,
         `Codigo de retiro: ${pickupCode}.`,
+        pickupSchedule ? `Dias y horarios para retirar: ${pickupSchedule}.` : null,
         publicOrderUrl ? `Ver pedido y QR: ${publicOrderUrl}` : null,
       ]
         .filter(Boolean)
@@ -803,6 +806,19 @@ async function buildEmailContent(
                   Si no puedes mostrar el QR, con este codigo tambien podemos identificar tu pedido en el local.
                 </div>
               </div>
+
+              ${
+                pickupSchedule
+                  ? `
+                    <div style="margin-top:18px;padding:18px;border:1px solid #dbeafe;border-radius:18px;background:#f8fbff;">
+                      <div style="font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:#1d4ed8;font-weight:700;">Dias y horarios para retirar</div>
+                      <div style="margin-top:8px;font-size:15px;line-height:1.7;color:#334155;">
+                        ${escapeHtml(pickupSchedule).replace(/\r?\n/g, "<br />")}
+                      </div>
+                    </div>
+                  `
+                  : ""
+              }
 
               <div style="margin-top:18px;border:1px solid #e2e8f0;border-radius:18px;overflow:hidden;background:#ffffff;">
                 <div style="padding:16px 18px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">
@@ -1016,8 +1032,30 @@ export async function sendOrderStatusEmail(
   options?: EmailContentOptions,
 ) {
   const hydratedOrder = await hydrateOrderItemsForEmail(order);
-  const baseContent = await buildEmailContent(hydratedOrder, state, options);
   const stateConfig = await getOrderStateAutomationConfig(state);
+
+  if (state === "LISTO_PARA_RETIRO") {
+    const trackingUrl = await buildPublicOrderUrl(hydratedOrder);
+    const subjectTemplate = normalizeOptionalString(stateConfig.emailSubject);
+    const bodyTemplate =
+      normalizeOptionalString(options?.customMessage) ||
+      normalizeOptionalString(stateConfig.emailBody);
+    const pickupMessage = bodyTemplate
+      ? renderOrderTemplate(bodyTemplate, hydratedOrder, state, trackingUrl)
+      : null;
+    const baseContent = await buildEmailContent(hydratedOrder, state, {
+      customMessage: pickupMessage,
+    });
+
+    return sendEmail(hydratedOrder, {
+      ...baseContent,
+      subject: subjectTemplate
+        ? renderOrderTemplate(subjectTemplate, hydratedOrder, state, trackingUrl)
+        : baseContent.subject,
+    });
+  }
+
+  const baseContent = await buildEmailContent(hydratedOrder, state, options);
   const content = await applyOrderTemplateOverrides(hydratedOrder, state, baseContent, {
     subject: stateConfig.emailSubject,
     body: stateConfig.emailBody,

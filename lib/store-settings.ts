@@ -91,7 +91,7 @@ const ORDER_STATE_VISUAL_DEFAULTS: Record<OrderState, OrderStateVisualDefaults> 
     text: "#21673d",
     border: "#b7ddc1",
     dot: "#2f855a",
-    sendEmail: false,
+    sendEmail: true,
   },
   CANCELADO: {
     bg: "#eef2f6",
@@ -139,7 +139,7 @@ function getStateEmailBodyDefault(state: OrderState) {
     case "FACTURADO":
       return "Hola {{nombre_cliente}},\n\nTu pedido {{numero_pedido}} fue confirmado correctamente.\n\nEn breve comenzamos a prepararlo.\n\nTe vamos a avisar cuando este listo o en camino.";
     case "LISTO_PARA_RETIRO":
-      return "Hola {{nombre_cliente}},\n\nTu pedido ya esta listo para retirar en el local.\n\nCodigo de retiro:\n{{codigo_retiro}}\n\nPresenta este codigo o el QR al momento de retirar.";
+      return "Hola {{nombre_cliente}},\n\nTu pedido {{numero_pedido}} ya esta listo para retirar.\n\nDebajo te dejamos el codigo de retiro, los horarios disponibles y el boton para abrir tu pedido con el QR.";
     case "ENVIADO":
       return "Hola {{nombre_cliente}},\n\nTu pedido ya fue despachado.\n\nPronto lo vas a recibir en la direccion indicada.";
     case "ENTREGADO":
@@ -612,6 +612,16 @@ const ORDER_SETTING_DEFINITIONS: StoreSettingDefinition[] = [
 ];
 
 const PICKUP_SETTING_DEFINITIONS: StoreSettingDefinition[] = [
+  {
+    key: "APP_PICKUP_SCHEDULE",
+    configKey: "RetiroDiasHorarios",
+    label: "Dias y horarios para retirar",
+    description: "Texto que se envia al cliente cuando el pedido esta listo. Si queda vacio, se usa el horario general del local.",
+    section: "Retiro en local",
+    group: "Disponibilidad",
+    type: "textarea",
+    placeholder: "Lunes a viernes de 9 a 13 hs y de 16 a 20 hs. Sabados de 9 a 13 hs.",
+  },
   {
     key: "APP_GENERATE_PICKUP_QR",
     configKey: "GenerarQrRetiro",

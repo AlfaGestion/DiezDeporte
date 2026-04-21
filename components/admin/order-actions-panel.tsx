@@ -20,6 +20,7 @@ export function OrderActionsPanel({
   canMarkCancelled,
   canMarkError,
   allowPickupLocalFallback,
+  pickupSchedule,
 }: {
   order: StoredOrder;
   returnTo: string;
@@ -27,6 +28,7 @@ export function OrderActionsPanel({
   canMarkCancelled: boolean;
   canMarkError: boolean;
   allowPickupLocalFallback: boolean;
+  pickupSchedule?: string | null;
 }) {
   const isLocalPickupPayment =
     order.tipo_pedido === "retiro" &&
@@ -62,7 +64,7 @@ export function OrderActionsPanel({
       </div>
 
       {pickupEmailOnlyMode ? (
-        <PickupEmailComposer order={order} />
+        <PickupEmailComposer order={order} pickupSchedule={pickupSchedule} />
       ) : (
         <div className="space-y-2">
           {needsApprovedPayment ? (

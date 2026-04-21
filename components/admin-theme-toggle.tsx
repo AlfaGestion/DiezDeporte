@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ThemeToggleIcon, getThemeToggleLabel } from "@/components/theme-toggle-icon";
 
 const LOCAL_STORAGE_THEME_KEY = "diezdeportes-theme";
 
@@ -34,9 +35,10 @@ export function AdminThemeToggle() {
       type="button"
       className="theme-toggle"
       onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
-      aria-label={`Cambiar a modo ${theme === "dark" ? "claro" : "oscuro"}`}
+      aria-label={getThemeToggleLabel(theme)}
+      title={theme === "dark" ? "Modo claro" : "Modo oscuro"}
     >
-      {theme === "dark" ? "Claro" : "Oscuro"}
+      <ThemeToggleIcon theme={theme} />
     </button>
   );
 }

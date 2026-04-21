@@ -482,6 +482,10 @@ export function AdminConfigWorkspace(props: AdminConfigWorkspaceProps) {
               "Entrega en mostrador",
               "Esto controla como se entregan los pedidos en el local.",
               <>
+                {renderTextField("APP_PICKUP_SCHEDULE", {
+                  rows: 4,
+                  help: "Texto que ve el cliente cuando el pedido esta listo para retirar. Si lo dejas vacio, usamos el horario general del local.",
+                })}
                 {renderBooleanField("APP_GENERATE_PICKUP_QR")}
                 {renderBooleanField("APP_REQUIRE_PICKUP_FULL_NAME")}
                 {renderBooleanField("APP_REQUIRE_PICKUP_DNI")}
@@ -540,6 +544,7 @@ export function AdminConfigWorkspace(props: AdminConfigWorkspaceProps) {
               enabledKey: "APP_STATE_LISTO_PARA_RETIRO_SEND_EMAIL",
               subjectKey: "APP_STATE_LISTO_PARA_RETIRO_EMAIL_SUBJECT",
               bodyKey: "APP_STATE_LISTO_PARA_RETIRO_EMAIL_BODY",
+              note: "El sistema agrega automaticamente el codigo de retiro, los horarios configurados y el link al pedido con QR.",
             })}
 
             {renderEmailTemplateCard({

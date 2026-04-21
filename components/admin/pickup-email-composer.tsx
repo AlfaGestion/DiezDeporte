@@ -9,22 +9,31 @@ import {
 } from "@/components/admin/admin-ui";
 import type { StoredOrder } from "@/lib/types";
 
-function buildDefaultPickupEmailText(order: StoredOrder) {
+function buildDefaultPickupEmailText(order: StoredOrder, pickupSchedule?: string | null) {
   return [
     `Hola ${order.nombre_cliente},`,
     "",
     `Tu pedido ${order.numero_pedido} ya esta listo para retirar.`,
-    "Pasa por el local con tu codigo de retiro o abre el enlace del pedido para mostrar el QR.",
+    pickupSchedule
+      ? `Puedes pasar en estos dias y horarios:\n${pickupSchedule}`
+      : "Pasa por el local con tu codigo de retiro.",
+    "",
+    "Debajo agregamos automaticamente el codigo de retiro, el link al pedido y el QR.",
   ].join("\n");
 }
 
 export function PickupEmailComposer({
   order,
+  pickupSchedule,
 }: {
   order: StoredOrder;
+  pickupSchedule?: string | null;
 }) {
   const router = useRouter();
-  const defaultMessage = useMemo(() => buildDefaultPickupEmailText(order), [order]);
+  const defaultMessage = useMemo(
+    () => buildDefaultPickupEmailText(order, pickupSchedule),
+    [order, pickupSchedule],
+  );
   const [message, setMessage] = useState(defaultMessage);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [feedbackTone, setFeedbackTone] = useState<"success" | "error">("success");
@@ -78,6 +87,10 @@ export function PickupEmailComposer({
           disabled={isPending}
         />
       </label>
+
+      <div className="rounded-[14px] border border-[color:var(--admin-pane-line)] bg-[color:var(--admin-card-bg)] px-4 py-3 text-sm text-[color:var(--admin-text)]">
+        El sistema agrega automaticamente abajo el horario de retiro configurado, el codigo y el link al pedido con QR.
+      </div>
 
       <button
         type="button"

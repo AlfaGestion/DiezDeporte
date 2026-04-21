@@ -11,6 +11,7 @@ import {
   formatAdminDateTime,
 } from "@/components/admin/admin-ui";
 import { PickupStatusBadge } from "@/components/admin/pickup-status-badge";
+import { isPickupLocalPaymentOrder } from "@/lib/models/order";
 import type { PaymentCollectionAccount, StoredOrder } from "@/lib/types";
 
 export function PickupRedeemPanel({
@@ -38,8 +39,9 @@ export function PickupRedeemPanel({
   const [feedbackTone, setFeedbackTone] = useState<"success" | "error">("success");
   const [isPending, startTransition] = useTransition();
   const isLocked = order.retirado === "SI";
+  const isLocalPickupPayment = isPickupLocalPaymentOrder(order);
   const requiresLocalPaymentAccount =
-    order.metadata.paymentMethod === "Pago en local" && order.estado_pago !== "aprobado";
+    isLocalPickupPayment && order.estado_pago !== "aprobado";
   const canSubmit =
     !isLocked &&
     !isPending &&
@@ -74,8 +76,9 @@ export function PickupRedeemPanel({
           return;
         }
 
-        setPaymentAccounts(result.accounts);
-        setPaymentAccountCode((current) => current || result.accounts[0]?.code || "");
+        const accounts = result.accounts;
+        setPaymentAccounts(accounts);
+        setPaymentAccountCode((current) => current || accounts[0]?.code || "");
       })
       .catch((error) => {
         if (!cancelled) {
@@ -183,7 +186,7 @@ export function PickupRedeemPanel({
             ? "El retiro ya fue registrado. Solo se muestra la informacion final."
             : "Escanea el QR o pega el codigo de retiro para validarlo una sola vez."}
         </p>
-        {!isLocked && order.metadata.paymentMethod === "Pago en local" ? (
+        {!isLocked && isLocalPickupPayment ? (
           <p className="mt-2 text-sm text-[color:var(--admin-text)]">
             Al registrar el retiro tambien dejamos informado el pago realizado en el local.
           </p>

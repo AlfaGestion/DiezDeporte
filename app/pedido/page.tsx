@@ -56,6 +56,7 @@ export default async function PublicOrderPage({
   return (
     <PublicOrderStatus
       storeName={settings.storeName}
+      pickupSchedule={settings.pickupSchedule}
       supportWhatsapp={settings.supportWhatsapp}
       status={status}
       error={mode === "error" ? "No pudimos consultar el estado del pedido en este momento." : null}

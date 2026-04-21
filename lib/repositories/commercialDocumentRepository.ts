@@ -1,5 +1,6 @@
 import "server-only";
 import { getConnection, sql } from "@/lib/db";
+import { isPickupLocalPaymentOrder } from "@/lib/models/order";
 import type { ServerSettings } from "@/lib/store-config";
 import type { StoredOrder } from "@/lib/types/order";
 
@@ -18,6 +19,75 @@ type CommercialDocumentLine = {
 function trimOrNull(value: string | null | undefined) {
   const normalized = (value || "").trim();
   return normalized || null;
+}
+
+function trimToMax(value: string | null | undefined, maxLength: number) {
+  const normalized = trimOrNull(value);
+  return normalized ? normalized.slice(0, maxLength) : null;
+}
+
+function resolveDeliveryLabel(order: StoredOrder) {
+  return order.tipo_pedido === "retiro" ? "Retiro local" : "Envio";
+}
+
+function resolveSerieLabel(order: StoredOrder) {
+  if (isPickupLocalPaymentOrder(order) && order.estado_pago !== "aprobado") {
+    return "Paga en local";
+  }
+
+  if (order.estado_pago === "aprobado") {
+    return "Ya lo pago";
+  }
+
+  return null;
+}
+
+function resolvePickupPaymentLabel(order: StoredOrder) {
+  return (
+    trimOrNull(order.metadata.pickupPaymentAccountLabel) ||
+    trimOrNull(order.metadata.pickupPaymentOptionalCode) ||
+    null
+  );
+}
+
+function resolvePickupRedeemerFullName(order: StoredOrder) {
+  const fullName = trimOrNull(order.nombre_apellido_retiro);
+
+  if (fullName) {
+    return fullName;
+  }
+
+  return trimOrNull(
+    [order.nombre_retiro, order.apellido_retiro].filter(Boolean).join(" "),
+  );
+}
+
+function resolveDeliveryDate(order: StoredOrder) {
+  if (order.fecha_hora_retiro) {
+    return new Date(order.fecha_hora_retiro);
+  }
+
+  if (order.estado === "ENTREGADO") {
+    return new Date(order.fecha_actualizacion);
+  }
+
+  return null;
+}
+
+function buildCommercialDocumentHeaderPatch(order: StoredOrder) {
+  return {
+    modelo: trimToMax(order.email_cliente, 50),
+    matricula: trimToMax(resolveDeliveryLabel(order), 20),
+    serie: trimToMax(resolveSerieLabel(order), 20),
+    nombre: trimToMax(order.nombre_cliente, 50),
+    domicilio: trimToMax(order.metadata.customerAddress || order.direccion, 50),
+    telefono: trimToMax(order.telefono_cliente, 100),
+    localidad: trimToMax(order.metadata.customerCity, 50),
+    transporte: trimToMax(resolvePickupPaymentLabel(order), 15),
+    transporteNombre: trimToMax(resolvePickupRedeemerFullName(order), 100),
+    transporteDomicilio: trimToMax(order.dni_retiro, 100),
+    fechaEntrega: resolveDeliveryDate(order),
+  };
 }
 
 function buildDocumentObservations(order: StoredOrder) {
@@ -149,19 +219,49 @@ async function stampHeaderMetadata(
   transaction: InstanceType<typeof sql.Transaction>,
   input: {
     headerId: number;
+    order: StoredOrder;
     user: string;
-    createdAt: string;
-    observations: string;
   },
 ) {
+  const headerPatch = buildCommercialDocumentHeaderPatch(input.order);
   const request = new sql.Request(transaction);
   request.input("id", sql.Int, input.headerId);
+  request.input("modelo", sql.NVarChar(50), headerPatch.modelo);
+  request.input("matricula", sql.NVarChar(20), headerPatch.matricula);
+  request.input("serie", sql.NVarChar(20), headerPatch.serie);
+  request.input("nombre", sql.NVarChar(50), headerPatch.nombre);
+  request.input("domicilio", sql.NVarChar(50), headerPatch.domicilio);
+  request.input("telefono", sql.NVarChar(100), headerPatch.telefono);
+  request.input("localidad", sql.NVarChar(50), headerPatch.localidad);
+  request.input("transporte", sql.NVarChar(15), headerPatch.transporte);
+  request.input("transporteNombre", sql.NVarChar(100), headerPatch.transporteNombre);
+  request.input(
+    "transporteDomicilio",
+    sql.NVarChar(100),
+    headerPatch.transporteDomicilio,
+  );
+  request.input("fechaEntrega", sql.DateTime, headerPatch.fechaEntrega);
   request.input("usuario", sql.NVarChar(250), input.user);
-  request.input("fecha", sql.DateTime, new Date(input.createdAt));
-  request.input("observaciones", sql.NVarChar(250), input.observations);
+  request.input("fecha", sql.DateTime, new Date(input.order.fecha_creacion));
+  request.input(
+    "observaciones",
+    sql.NVarChar(250),
+    buildDocumentObservations(input.order),
+  );
   await request.query(`
     UPDATE dbo.V_MV_Cpte
-    SET Usuario = @usuario,
+    SET MODELO = @modelo,
+        MATRICULA = @matricula,
+        SERIE = @serie,
+        NOMBRE = @nombre,
+        DOMICILIO = @domicilio,
+        TELEFONO = @telefono,
+        LOCALIDAD = @localidad,
+        TRANSPORTE = @transporte,
+        TRANSPORTE_NOMBRE = @transporteNombre,
+        TRANSPORTE_DOMICILIO = @transporteDomicilio,
+        FechaEntrega = @fechaEntrega,
+        Usuario = @usuario,
         FechaHora_Grabacion = @fecha,
         Observaciones = @observaciones
     WHERE ID = @id;
@@ -230,9 +330,8 @@ export async function createCommercialDocument(input: {
 
     await stampHeaderMetadata(transaction, {
       headerId,
+      order: input.order,
       user: resolveOrderUser(input.order, input.settings),
-      createdAt: input.order.fecha_creacion,
-      observations: buildDocumentObservations(input.order),
     });
 
     const header = await getHeaderById(transaction, headerId);
@@ -249,3 +348,53 @@ export async function createCommercialDocument(input: {
 }
 
 export const createOrderNoteDocument = createCommercialDocument;
+
+export async function syncCommercialDocumentHeader(order: StoredOrder) {
+  const headerId = Number(order.metadata.documentInternalId || 0);
+
+  if (!Number.isFinite(headerId) || headerId <= 0) {
+    return false;
+  }
+
+  const headerPatch = buildCommercialDocumentHeaderPatch(order);
+  const pool = await getConnection();
+  const request = pool.request();
+  request.input("id", sql.Int, headerId);
+  request.input("modelo", sql.NVarChar(50), headerPatch.modelo);
+  request.input("matricula", sql.NVarChar(20), headerPatch.matricula);
+  request.input("serie", sql.NVarChar(20), headerPatch.serie);
+  request.input("nombre", sql.NVarChar(50), headerPatch.nombre);
+  request.input("domicilio", sql.NVarChar(50), headerPatch.domicilio);
+  request.input("telefono", sql.NVarChar(100), headerPatch.telefono);
+  request.input("localidad", sql.NVarChar(50), headerPatch.localidad);
+  request.input("transporte", sql.NVarChar(15), headerPatch.transporte);
+  request.input("transporteNombre", sql.NVarChar(100), headerPatch.transporteNombre);
+  request.input(
+    "transporteDomicilio",
+    sql.NVarChar(100),
+    headerPatch.transporteDomicilio,
+  );
+  request.input("fechaEntrega", sql.DateTime, headerPatch.fechaEntrega);
+  request.input("observaciones", sql.NVarChar(250), buildDocumentObservations(order));
+  const result = await request.query(`
+    UPDATE dbo.V_MV_Cpte
+    SET MODELO = @modelo,
+        MATRICULA = @matricula,
+        SERIE = @serie,
+        NOMBRE = @nombre,
+        DOMICILIO = @domicilio,
+        TELEFONO = @telefono,
+        LOCALIDAD = @localidad,
+        TRANSPORTE = @transporte,
+        TRANSPORTE_NOMBRE = @transporteNombre,
+        TRANSPORTE_DOMICILIO = @transporteDomicilio,
+        FechaEntrega = @fechaEntrega,
+        Observaciones = @observaciones,
+        FechaHora_Modificacion = SYSDATETIME()
+    WHERE ID = @id;
+
+    SELECT @@ROWCOUNT AS AffectedRows;
+  `);
+
+  return Number(result.recordset[0]?.AffectedRows || 0) > 0;
+}

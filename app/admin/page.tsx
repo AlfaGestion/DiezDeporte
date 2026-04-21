@@ -8,8 +8,10 @@ import {
   saveAdminSettingsAction,
   updateAdminUserAction,
 } from "@/app/admin/actions";
+import { AdminHelpWorkspace } from "@/components/admin/admin-help-workspace";
 import { AdminPageHeader } from "@/components/admin/admin-page-header";
 import { AdminConfigWorkspace } from "@/components/admin/admin-config-workspace";
+import { AdminLiveOrderWatcher } from "@/components/admin/admin-live-order-watcher";
 import { AdminThemeToggle } from "@/components/admin-theme-toggle";
 import { cn } from "@/components/admin/admin-ui";
 import { EmptyState } from "@/components/admin/empty-state";
@@ -17,6 +19,7 @@ import { OrderFiltersBar } from "@/components/admin/order-filters-bar";
 import { PickupDeskPane } from "@/components/admin/pickup-desk-pane";
 import { OrdersTable } from "@/components/admin/orders-table";
 import { OrderTabs } from "@/components/admin/order-tabs";
+import { getWatchSnapshot } from "@/lib/repositories/orderRepository";
 import {
   ADMIN_SESSION_COOKIE,
   getAdminSessionUser,
@@ -67,7 +70,7 @@ type AdminPageProps = {
   }>;
 };
 
-type AdminView = "orders" | "pickups" | "users" | "config";
+type AdminView = "orders" | "pickups" | "users" | "config" | "help";
 
 type AdminHrefInput = {
   view?: AdminView;
@@ -94,6 +97,10 @@ function normalizeView(rawValue: string | undefined): AdminView {
 
   if (rawValue === "config" || rawValue === "general") {
     return "config";
+  }
+
+  if (rawValue === "help" || rawValue === "ayuda") {
+    return "help";
   }
 
   return "orders";
@@ -128,7 +135,12 @@ function buildAdminHref(input: AdminHrefInput) {
     params.set("view", input.view);
   }
 
-  if (input.view !== "users" && input.view !== "config" && input.view !== "pickups") {
+  if (
+    input.view !== "users" &&
+    input.view !== "config" &&
+    input.view !== "pickups" &&
+    input.view !== "help"
+  ) {
     if (input.vista && input.vista !== "pedidos") {
       params.set("vista", input.vista);
     }
@@ -195,6 +207,11 @@ function getViewMeta(view: AdminView) {
       return {
         label: "Configuracion",
         description: "Parametros del checkout y comportamiento comercial.",
+      };
+    case "help":
+      return {
+        label: "Ayuda",
+        description: "Guia operativa e instructivo completo de uso del sistema.",
       };
     default:
       return {
@@ -732,6 +749,24 @@ function ConfigPane(props: {
   );
 }
 
+function HelpPane(props: {
+  storeName: string;
+  configFields: Awaited<ReturnType<typeof getAdminConfigFields>>;
+  showTechnicalSection: boolean;
+}) {
+  const { storeName, configFields, showTechnicalSection } = props;
+
+  return (
+    <section className="admin-pane">
+      <AdminHelpWorkspace
+        storeName={storeName}
+        configFields={configFields}
+        showTechnicalSection={showTechnicalSection}
+      />
+    </section>
+  );
+}
+
 export default async function AdminPage({ searchParams }: AdminPageProps) {
   const [
     {
@@ -770,24 +805,33 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     fecha_hasta,
     limit: null,
   });
-  const [settings, serverSettings, configFields, filteredOrders, summaryOrders, adminUsers, stateColorStyle] =
-    await Promise.all([
-      getPublicStoreSettings(),
-      getServerSettings(),
-      getAdminConfigFields(),
-      getOrders({
-        ...baseOrderFilters,
-        vista: activeOrderView === "pedidos" ? null : activeOrderView,
-        limit: 120,
-      }),
-      getOrders({
-        ...baseOrderFilters,
-        vista: null,
-        limit: null,
-      }),
-      listAdminUsers(),
-      getAdminOrderStateCssVariables(),
-    ]);
+  const [
+    settings,
+    serverSettings,
+    configFields,
+    filteredOrders,
+    summaryOrders,
+    adminUsers,
+    stateColorStyle,
+    initialWatchSnapshot,
+  ] = await Promise.all([
+    getPublicStoreSettings(),
+    getServerSettings(),
+    getAdminConfigFields(),
+    getOrders({
+      ...baseOrderFilters,
+      vista: activeOrderView === "pedidos" ? null : activeOrderView,
+      limit: 120,
+    }),
+    getOrders({
+      ...baseOrderFilters,
+      vista: null,
+      limit: null,
+    }),
+    listAdminUsers(),
+    getAdminOrderStateCssVariables(),
+    getWatchSnapshot(),
+  ]);
   const ordersSnapshot = buildAdminOrdersSnapshot({
     orders: filteredOrders,
     allOrders: summaryOrders,
@@ -835,6 +879,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     fecha_desde: baseOrderFilters.fecha_desde,
     fecha_hasta: baseOrderFilters.fecha_hasta,
   });
+  const showTechnicalHelp =
+    sessionUser.username.trim().toLowerCase() === "useralfa";
 
   return (
     <main className="admin-page" style={stateColorStyle}>
@@ -870,6 +916,11 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         </header>
 
         <FlashMessages saved={saved} error={error} />
+        <AdminLiveOrderWatcher
+          initialSnapshot={initialWatchSnapshot}
+          ordersHref={currentOrdersHref}
+          refreshOnNewOrders={activeView === "orders"}
+        />
 
         <nav
           className="flex gap-2 overflow-x-auto rounded-[18px] border border-[color:var(--admin-pane-line)] bg-[color:var(--admin-pane-bg)] p-2"
@@ -931,6 +982,20 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               8
             </small>
           </Link>
+          <Link
+            href={buildAdminHref({ view: "help" })}
+            className={cn(
+              "inline-flex min-w-[140px] items-center justify-between rounded-[14px] px-4 py-2.5 text-sm transition",
+              activeView === "help"
+                ? "bg-[color:var(--admin-accent)] text-white"
+                : "text-[color:var(--admin-title)] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]",
+            )}
+          >
+            <span>Ayuda</span>
+            <small className={activeView === "help" ? "text-white/80" : "text-[color:var(--admin-text)]"}>
+              Guia
+            </small>
+          </Link>
         </nav>
 
         {activeView === "orders" ? (
@@ -952,6 +1017,12 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             showUserCreateForm={showUserCreateForm}
             showUserEditForm={showUserEditForm}
             editingUser={editingUser}
+          />
+        ) : activeView === "help" ? (
+          <HelpPane
+            storeName={settings.storeName}
+            configFields={configFields}
+            showTechnicalSection={showTechnicalHelp}
           />
         ) : (
             <ConfigPane

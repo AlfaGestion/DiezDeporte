@@ -49,6 +49,7 @@ export type ServerSettings = {
   validarClasePrecioAlConfirmarPedido: boolean;
   enviarEmailPedidoRecibido: boolean;
   permitirCheckoutSinDireccionEnRetiro: boolean;
+  pickupAvailabilityText: string;
   requerirNombreApellidoAlRetirar: boolean;
   requerirDniAlRetirar: boolean;
   permitirFinalizacionManualSinDatosRetiro: boolean;
@@ -171,6 +172,13 @@ export async function getServerSettings(): Promise<ServerSettings> {
       ),
       true,
     ),
+    pickupAvailabilityText:
+      readSetting(storedValues, "APP_PICKUP_SCHEDULE") ||
+      readSetting(
+        storedValues,
+        "NEXT_PUBLIC_STORE_HOURS",
+        "Lunes a sabados de 9 a 13 hs y de 16 a 20 hs.",
+      ),
     requerirNombreApellidoAlRetirar: parseBoolean(
       readSetting(storedValues, "APP_REQUIRE_PICKUP_FULL_NAME", "true"),
       true,
@@ -284,6 +292,13 @@ export async function getPublicStoreSettings(): Promise<PublicStoreSettings> {
       "NEXT_PUBLIC_STORE_HOURS",
       "Lunes a sabados de 9 a 13 hs y de 16 a 20 hs.",
     ),
+    pickupSchedule:
+      readSetting(storedValues, "APP_PICKUP_SCHEDULE") ||
+      readSetting(
+        storedValues,
+        "NEXT_PUBLIC_STORE_HOURS",
+        "Lunes a sabados de 9 a 13 hs y de 16 a 20 hs.",
+      ),
     allowBackorders: settings.allowBackorders,
     allowPickupCheckoutWithoutAddress:
       settings.permitirCheckoutSinDireccionEnRetiro,

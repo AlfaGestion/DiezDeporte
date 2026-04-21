@@ -5,6 +5,7 @@ import type { PaymentStatusResult } from "@/lib/types";
 
 type PublicOrderStatusProps = {
   storeName: string;
+  pickupSchedule: string;
   supportWhatsapp: string;
   status: PaymentStatusResult | null;
   error?: string | null;
@@ -83,6 +84,7 @@ function getNextStepMessage(status: PaymentStatusResult) {
 
 export function PublicOrderStatus({
   storeName,
+  pickupSchedule,
   supportWhatsapp,
   status,
   error = null,
@@ -139,6 +141,13 @@ export function PublicOrderStatus({
             <div className="mt-4 rounded-[18px] border border-[color:var(--line)] bg-[color:var(--surface-soft)] p-4 text-sm text-[color:var(--text-soft)]">
               {getNextStepMessage(status)}
             </div>
+
+            {status.orderType === "retiro" && status.orderState === "LISTO_PARA_RETIRO" && pickupSchedule ? (
+              <div className="mt-4 rounded-[18px] border border-[color:var(--line)] bg-[color:var(--surface)] p-4 text-sm text-[color:var(--text-soft)]">
+                <strong className="block text-[color:var(--text)]">Dias y horarios para retirar</strong>
+                <div className="mt-2 whitespace-pre-wrap">{pickupSchedule}</div>
+              </div>
+            ) : null}
 
             {status.finalizationError ? (
               <div className="mt-4 rounded-[18px] border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-400/20 dark:bg-amber-500/10 dark:text-amber-200">

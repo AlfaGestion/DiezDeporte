@@ -1,1 +1,2 @@
-Validation failed for parameter 'code'. parameter.type.validate is not a function
+para retirar el pedido falta informar los dias y horarios que puede ir, esto tambien hace falta agregarlo en la config.
+y tambien por lo que vi no estas mandando el lick para ver el pedido y el qr

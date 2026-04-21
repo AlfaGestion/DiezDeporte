@@ -60,7 +60,7 @@ const DEFAULT_STATE_CONFIG: Record<OrderState, OrderStateConfig> = {
   },
   ENTREGADO: {
     colors: { bg: "#e8f6ec", text: "#21673d", border: "#b7ddc1", dot: "#2f855a" },
-    automation: { sendEmailOnEnter: false, emailSubject: "", emailBody: "" },
+    automation: { sendEmailOnEnter: true, emailSubject: "", emailBody: "" },
   },
   CANCELADO: {
     colors: { bg: "#eef2f6", text: "#546273", border: "#d3dbe5", dot: "#7b8794" },

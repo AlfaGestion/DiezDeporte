@@ -13,6 +13,7 @@ import {
   LOCAL_STORE_LOGO_DARK_URL,
   LOCAL_STORE_LOGO_URL,
 } from "@/lib/site-assets";
+import { ThemeToggleIcon, getThemeToggleLabel } from "@/components/theme-toggle-icon";
 import type {
   BrandImage,
   CartItem,
@@ -952,9 +953,10 @@ export function Storefront({
               onClick={() =>
                 setTheme((current) => (current === "dark" ? "light" : "dark"))
               }
-              aria-label={`Cambiar a modo ${theme === "dark" ? "claro" : "oscuro"}`}
+              aria-label={getThemeToggleLabel(theme)}
+              title={theme === "dark" ? "Modo claro" : "Modo oscuro"}
             >
-              {theme === "dark" ? "Claro" : "Oscuro"}
+              <ThemeToggleIcon theme={theme} />
             </button>
 
             <button

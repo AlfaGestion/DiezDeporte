@@ -9,6 +9,7 @@ import type {
   StoredOrder,
   UpdateOrderInput,
 } from "@/lib/types/order";
+import type { AdminOrderWatchSnapshot } from "@/lib/types";
 
 const ORDERS_TABLE = "dbo.WEB_V_MV_PEDIDOS";
 const ORDER_LOGS_TABLE = "dbo.WEB_V_MV_PEDIDOS_LOGS";
@@ -79,6 +80,17 @@ type OrderDocumentItemStatsRow = {
   IDCOMPROBANTE: string;
   TOTAL_ITEMS: number | null;
   LINE_COUNT: number | null;
+};
+
+type OrderWatchTotalRow = {
+  TOTAL_ORDERS: number | null;
+};
+
+type OrderWatchLatestRow = {
+  ID: number | null;
+  NUMERO_PEDIDO: string | null;
+  NOMBRE_CLIENTE: string | null;
+  FECHA_CREACION: Date | null;
 };
 
 function toIsoString(value: Date | null) {
@@ -453,6 +465,39 @@ export async function getFiltered(filters: OrderFilters) {
   `);
 
   return result.recordset.map(mapOrderRow);
+}
+
+export async function getWatchSnapshot(): Promise<AdminOrderWatchSnapshot> {
+  await ensureSchema();
+  const pool = await getConnection();
+  const result = await pool.request().query<OrderWatchTotalRow | OrderWatchLatestRow>(`
+    SELECT COUNT_BIG(1) AS TOTAL_ORDERS
+    FROM ${ORDERS_TABLE} WITH (NOLOCK);
+
+    SELECT TOP (1)
+      ID,
+      NUMERO_PEDIDO,
+      NOMBRE_CLIENTE,
+      FECHA_CREACION
+    FROM ${ORDERS_TABLE} WITH (NOLOCK)
+    ORDER BY FECHA_CREACION DESC, ID DESC;
+  `);
+
+  const totalRow = result.recordsets[0]?.[0] as OrderWatchTotalRow | undefined;
+  const latestRow = result.recordsets[1]?.[0] as OrderWatchLatestRow | undefined;
+
+  return {
+    totalOrders: Number(totalRow?.TOTAL_ORDERS || 0),
+    latestOrderId:
+      latestRow?.ID && Number.isFinite(Number(latestRow.ID))
+        ? Number(latestRow.ID)
+        : null,
+    latestOrderNumber: latestRow?.NUMERO_PEDIDO?.trim() || null,
+    latestCustomerName: latestRow?.NOMBRE_CLIENTE?.trim() || null,
+    latestCreatedAt: latestRow?.FECHA_CREACION
+      ? new Date(latestRow.FECHA_CREACION).toISOString()
+      : null,
+  };
 }
 
 export async function getExpiredPending(ttlMinutes: number) {

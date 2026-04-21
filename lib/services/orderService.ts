@@ -14,7 +14,10 @@ import {
   shouldSendEmailForState,
 } from "@/lib/models/order";
 import * as orderRepository from "@/lib/repositories/orderRepository";
-import { createOrderNoteDocument } from "@/lib/repositories/commercialDocumentRepository";
+import {
+  createOrderNoteDocument,
+  syncCommercialDocumentHeader,
+} from "@/lib/repositories/commercialDocumentRepository";
 import {
   sendManualInvoiceEmail,
   sendOrderReceivedEmail,
@@ -711,6 +714,7 @@ export async function updateOrderStatus(
   );
   const orderWithPayment =
     nextState === "ENTREGADO" ? await markPickupLocalPaymentAsPaidIfNeeded(updated) : updated;
+  await syncCommercialDocumentHeader(orderWithPayment).catch(() => false);
   return runTransitionSideEffects(orderWithPayment, nextState);
 }
 
@@ -772,6 +776,7 @@ export async function markOrderPaymentStatus(
     throw new OrderNotFoundError(orderId);
   }
 
+  await syncCommercialDocumentHeader(updated).catch(() => false);
   return updated;
 }
 
@@ -964,6 +969,7 @@ export async function registrarRetiroPedido(
     redeemed.order,
     localPaymentMetadata,
   );
+  await syncCommercialDocumentHeader(paidOrder).catch(() => false);
   const deliveredAutomation = await getOrderStateAutomationConfig("ENTREGADO");
 
   if (deliveredAutomation.sendEmailOnEnter) {
