@@ -67,6 +67,12 @@ type OrderDocumentItemRow = {
   SECUENCIA: number | null;
 };
 
+type OrderDocumentItemStatsRow = {
+  IDCOMPROBANTE: string;
+  TOTAL_ITEMS: number | null;
+  LINE_COUNT: number | null;
+};
+
 function toIsoString(value: Date | null) {
   return value ? new Date(value).toISOString() : null;
 }
@@ -390,6 +396,26 @@ export async function getFiltered(filters: OrderFilters) {
     SELECT ${safeLimit ? `TOP (${safeLimit})` : ""} *
     FROM ${ORDERS_TABLE} WITH (NOLOCK)
     WHERE ${whereClauses.join(" AND ")}
+    ORDER BY FECHA_CREACION DESC, ID DESC;
+  `);
+
+  return result.recordset.map(mapOrderRow);
+}
+
+export async function getExpiredPending(ttlMinutes: number) {
+  await ensureSchema();
+  const pool = await getConnection();
+  const request = pool.request();
+  request.input(
+    "ttlMinutes",
+    Math.max(1, Math.min(43200, Math.trunc(Number(ttlMinutes) || 0))),
+  );
+  const result = await request.query<OrderRow>(`
+    SELECT *
+    FROM ${ORDERS_TABLE} WITH (NOLOCK)
+    WHERE ESTADO = 'PENDIENTE'
+      AND ESTADO_PAGO = 'pendiente'
+      AND FECHA_CREACION <= DATEADD(MINUTE, -@ttlMinutes, SYSDATETIME())
     ORDER BY FECHA_CREACION DESC, ID DESC;
   `);
 
@@ -727,6 +753,56 @@ export async function getDocumentItemsByNumber(idComprobante: string) {
   `);
 
   return result.recordset.map(mapOrderDocumentItemRow);
+}
+
+export async function getDocumentItemStatsByOrderNumbers(orderNumbers: string[]) {
+  const normalizedOrderNumbers = Array.from(
+    new Set(orderNumbers.map((value) => value.trim()).filter(Boolean)),
+  );
+
+  if (normalizedOrderNumbers.length === 0) {
+    return new Map<string, { itemCount: number; lineCount: number }>();
+  }
+
+  await ensureSchema();
+  const pool = await getConnection();
+  const request = pool.request();
+  const placeholders = normalizedOrderNumbers.map((orderNumber, index) => {
+    const parameterName = `orderNumber${index}`;
+    request.input(parameterName, orderNumber);
+    return `@${parameterName}`;
+  });
+
+  const result = await request.query<OrderDocumentItemStatsRow>(`
+    IF OBJECT_ID('dbo.V_MV_CpteInsumos') IS NOT NULL
+    BEGIN
+      SELECT
+        LTRIM(RTRIM(ISNULL(IDCOMPROBANTE, ''))) AS IDCOMPROBANTE,
+        SUM(ISNULL(CANTIDAD, 0)) AS TOTAL_ITEMS,
+        COUNT(*) AS LINE_COUNT
+      FROM dbo.V_MV_CpteInsumos WITH (NOLOCK)
+      WHERE LTRIM(RTRIM(ISNULL(IDCOMPROBANTE, ''))) IN (${placeholders.join(", ")})
+      GROUP BY LTRIM(RTRIM(ISNULL(IDCOMPROBANTE, '')));
+    END
+    ELSE
+    BEGIN
+      SELECT
+        CAST('' AS nvarchar(40)) AS IDCOMPROBANTE,
+        CAST(0 AS float) AS TOTAL_ITEMS,
+        CAST(0 AS int) AS LINE_COUNT
+      WHERE 1 = 0;
+    END
+  `);
+
+  return new Map(
+    result.recordset.map((row) => [
+      row.IDCOMPROBANTE.trim(),
+      {
+        itemCount: Number(row.TOTAL_ITEMS || 0),
+        lineCount: Number(row.LINE_COUNT || 0),
+      },
+    ]),
+  );
 }
 
 export async function markPickupAsRedeemed(orderId: number, nombreApellido: string) {

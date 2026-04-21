@@ -72,6 +72,7 @@ export type OrderMetadata = {
   paymentMethodId?: string | null;
   lastPaymentPayload?: string | null;
   pickupCode?: string | null;
+  pickupQrVersion?: number | null;
   documentInternalId?: number | null;
   documentTc?: string | null;
   documentNumber?: string | null;
@@ -105,6 +106,8 @@ export type StoredOrder = Order & {
   email_facturado_enviado_at: string | null;
   email_listo_enviado_at: string | null;
   email_enviado_enviado_at: string | null;
+  resolved_item_count?: number | null;
+  resolved_line_count?: number | null;
 };
 
 export type OrderStatusLog = {

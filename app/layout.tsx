@@ -11,6 +11,11 @@ const storeTagline =
 export const metadata: Metadata = {
   title: storeName,
   description: storeTagline,
+  icons: {
+    icon: [{ url: "/favicon.png?v=6", type: "image/png" }],
+    shortcut: ["/favicon.png?v=6"],
+    apple: [{ url: "/apple-touch-icon.png?v=6", type: "image/png" }],
+  },
 };
 
 export default function RootLayout({
@@ -21,6 +26,7 @@ export default function RootLayout({
   return (
     <html lang="es" suppressHydrationWarning>
       <head>
+        <meta name="color-scheme" content="light dark" />
         <ThemeBootScript />
       </head>
       <body suppressHydrationWarning>{children}</body>

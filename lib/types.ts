@@ -118,6 +118,8 @@ export type PublicStoreSettings = {
   mercadoPagoEnabled: boolean;
   showOutOfStock: boolean;
   heroImageUrl: string;
+  facebookUrl: string;
+  instagramUrl: string;
   supportWhatsapp: string;
   supportEmail: string;
   supportPhone: string;
@@ -183,6 +185,9 @@ export type AdminOrderRecord = {
   trackingNumber: string | null;
   qrCode: string | null;
   pickupCode: string | null;
+  pickupRedeemed: boolean;
+  pickupRedeemedAt: string | null;
+  pickupRedeemedBy: string | null;
   createdAt: string;
   updatedAt: string;
   nextActionLabel: string | null;

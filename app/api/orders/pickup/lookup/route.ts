@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentAdminSessionUser } from "@/lib/admin-auth";
 import { OrderNotFoundError, OrderValidationError } from "@/lib/models/order";
-import { findPickupOrderByCode } from "@/lib/services/orderService";
+import { lookupPickupOrderByCode } from "@/lib/services/orderService";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { order, pickupCode } = await findPickupOrderByCode(body.codigo || "");
+    const { order, pickupCode, documentItems } = await lookupPickupOrderByCode(body.codigo || "");
     const disponible = order.estado === "LISTO_PARA_RETIRO" && order.retirado !== "SI";
 
     return NextResponse.json({
@@ -34,9 +34,16 @@ export async function POST(request: Request) {
         nombre_cliente: order.nombre_cliente,
         estado: order.estado,
         retirado: order.retirado,
+        fecha_creacion: order.fecha_creacion,
         fecha_hora_retiro: order.fecha_hora_retiro,
         nombre_apellido_retiro: order.nombre_apellido_retiro,
       },
+      items: documentItems.map((item) => ({
+        articleId: item.articleId,
+        description: item.description,
+        quantity: item.quantity,
+        total: item.total,
+      })),
     });
   } catch (error) {
     if (error instanceof OrderNotFoundError) {

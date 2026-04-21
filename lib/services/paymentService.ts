@@ -19,6 +19,7 @@ import {
   buildCheckoutOrderDraft,
   cancelExpiredPendingOrders,
   createOrder,
+  ensurePickupAssets,
   markOrderPaymentStatus,
   registerMercadoPagoApproval,
   updateOrderStatus,
@@ -99,48 +100,52 @@ async function buildPickupReadyUrl(order: StoredOrder) {
 }
 
 async function toPaymentStatusResult(order: StoredOrder): Promise<PaymentStatusResult> {
+  const hydratedOrder =
+    order.tipo_pedido === "retiro"
+      ? await ensurePickupAssets(order)
+      : order;
   const settings = await getServerSettings();
   const itemCount =
-    order.metadata.items?.reduce((sum, item) => sum + item.quantity, 0) || 0;
+    hydratedOrder.metadata.items?.reduce((sum, item) => sum + item.quantity, 0) || 0;
   const hasOperationalOrder = [
     "FACTURADO",
     "PREPARANDO",
     "LISTO_PARA_RETIRO",
     "ENVIADO",
     "ENTREGADO",
-  ].includes(order.estado);
+  ].includes(hydratedOrder.estado);
   const pickupReadyUrl =
-    order.tipo_pedido === "retiro" ? await buildPickupReadyUrl(order) : null;
+    hydratedOrder.tipo_pedido === "retiro" ? await buildPickupReadyUrl(hydratedOrder) : null;
 
   return {
-    pendingOrderId: order.id,
-    externalReference: order.metadata.externalReference || order.numero_pedido,
-    status: toPaymentFlowStatus(order),
-    paymentStatus: order.estado_pago,
-    paymentStatusDetail: order.metadata.paymentStatusDetail || null,
-    paymentId: order.id_pago,
-    preferenceId: order.metadata.preferenceId || null,
+    pendingOrderId: hydratedOrder.id,
+    externalReference: hydratedOrder.metadata.externalReference || hydratedOrder.numero_pedido,
+    status: toPaymentFlowStatus(hydratedOrder),
+    paymentStatus: hydratedOrder.estado_pago,
+    paymentStatusDetail: hydratedOrder.metadata.paymentStatusDetail || null,
+    paymentId: hydratedOrder.id_pago,
+    preferenceId: hydratedOrder.metadata.preferenceId || null,
     merchantOrderId: null,
-    total: order.monto_total,
+    total: hydratedOrder.monto_total,
     itemCount,
     checkoutUrl: null,
     finalizationError:
-      order.estado === "ERROR" ? "El pedido requiere revision manual." : null,
-    customerName: order.nombre_cliente,
-    customerEmail: order.email_cliente,
-    createdAt: order.fecha_creacion,
-    updatedAt: order.fecha_actualizacion,
+      hydratedOrder.estado === "ERROR" ? "El pedido requiere revision manual." : null,
+    customerName: hydratedOrder.nombre_cliente,
+    customerEmail: hydratedOrder.email_cliente,
+    createdAt: hydratedOrder.fecha_creacion,
+    updatedAt: hydratedOrder.fecha_actualizacion,
     order: hasOperationalOrder
-      ? formatOrderAsLegacySummary(order, itemCount, {
-          tc: order.metadata.documentTc || settings.mercadoPagoOrderTc || settings.orderTc || "WEB",
+      ? formatOrderAsLegacySummary(hydratedOrder, itemCount, {
+          tc: hydratedOrder.metadata.documentTc || settings.mercadoPagoOrderTc || settings.orderTc || "WEB",
           branch: settings.orderBranch,
-          documentNumber: order.metadata.documentNumber || null,
+          documentNumber: hydratedOrder.metadata.documentNumber || null,
         })
       : null,
-    orderState: order.estado,
-    orderType: order.tipo_pedido,
-    pickupCode: order.metadata.pickupCode || null,
-    qrCode: order.codigo_qr,
+    orderState: hydratedOrder.estado,
+    orderType: hydratedOrder.tipo_pedido,
+    pickupCode: hydratedOrder.metadata.pickupCode || null,
+    qrCode: hydratedOrder.codigo_qr,
     pickupReadyUrl,
   };
 }

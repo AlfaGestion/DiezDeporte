@@ -1,17 +1,23 @@
-"use client";
-
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { PublicThemeToggle } from "@/components/public-theme-toggle";
 import { formatCurrency } from "@/lib/commerce";
 import type { PaymentStatusResult } from "@/lib/types";
 
 type PublicOrderStatusProps = {
   storeName: string;
   supportWhatsapp: string;
+  status: PaymentStatusResult | null;
+  error?: string | null;
 };
 
-function resolveTitle(status: PaymentStatusResult | null) {
+function resolveTitle(status: PaymentStatusResult | null, error?: string | null) {
+  if (error) {
+    return {
+      title: "No pudimos cargar tu pedido",
+      description: error,
+    };
+  }
+
   if (!status) {
     return {
       title: "Estamos buscando tu pedido",
@@ -35,78 +41,21 @@ function resolveTitle(status: PaymentStatusResult | null) {
 export function PublicOrderStatus({
   storeName,
   supportWhatsapp,
+  status,
+  error = null,
 }: PublicOrderStatusProps) {
-  const searchParams = useSearchParams();
-  const [status, setStatus] = useState<PaymentStatusResult | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const externalReference =
-    searchParams.get("externalReference") || searchParams.get("external_reference");
-
-  useEffect(() => {
-    if (!externalReference) {
-      setLoading(false);
-      setError("Falta el identificador del pedido.");
-      return;
-    }
-
-    let active = true;
-
-    async function loadOrder() {
-      try {
-        const response = await fetch(
-          `/api/payments/status?externalReference=${encodeURIComponent(externalReference)}`,
-          { cache: "no-store" },
-        );
-        const result = (await response.json()) as {
-          error?: string;
-          status?: PaymentStatusResult;
-        };
-
-        if (!response.ok || !result.status) {
-          throw new Error(result.error || "No se pudo consultar el pedido.");
-        }
-
-        if (!active) {
-          return;
-        }
-
-        setStatus(result.status);
-        setError(null);
-      } catch (fetchError) {
-        if (!active) {
-          return;
-        }
-
-        setError(
-          fetchError instanceof Error
-            ? fetchError.message
-            : "No se pudo consultar el pedido.",
-        );
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
-      }
-    }
-
-    loadOrder();
-
-    return () => {
-      active = false;
-    };
-  }, [externalReference]);
-
-  const heading = resolveTitle(status);
+  const heading = resolveTitle(status, error);
 
   return (
     <main className="payment-return-page">
       <section className="payment-return-card">
-        <span className="payment-return-eyebrow">{storeName}</span>
+        <div className="payment-return-topbar">
+          <span className="payment-return-eyebrow">{storeName}</span>
+          <PublicThemeToggle />
+        </div>
         <h1>{heading.title}</h1>
         <p>{heading.description}</p>
 
-        {loading ? <div className="message">Consultando el pedido...</div> : null}
         {error ? <div className="message error">{error}</div> : null}
 
         {status ? (
@@ -140,11 +89,17 @@ export function PublicOrderStatus({
                     Muestralo en el local junto con tu codigo.
                   </p>
                 </div>
-                <div className="mt-4 flex justify-center">
+                <div
+                  className="mt-4 flex justify-center rounded-[18px] border border-[color:var(--line)] px-4 py-5"
+                  style={{
+                    background:
+                      "linear-gradient(180deg, color-mix(in srgb, var(--accent) 8%, var(--surface) 92%), color-mix(in srgb, var(--surface-soft) 78%, var(--surface) 22%))",
+                  }}
+                >
                   <img
                     src={status.qrCode}
                     alt={`QR del pedido ${status.externalReference}`}
-                    className="max-w-[240px] rounded-[18px] bg-white p-3"
+                    className="max-w-[240px] drop-shadow-[0_16px_26px_rgba(15,23,42,0.12)]"
                   />
                 </div>
               </div>

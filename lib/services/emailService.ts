@@ -1,5 +1,6 @@
 import "server-only";
 import { getServerSettings } from "@/lib/store-config";
+import { formatSqlServerLocalDateTime } from "@/lib/store-datetime";
 import type { OrderState, StoredOrder } from "@/lib/types/order";
 
 type MailTransport = {
@@ -26,6 +27,10 @@ type SmtpConfig = {
   timeoutMs: number;
   ignoreTlsErrors: boolean;
   accounts: SmtpAccount[];
+};
+
+type EmailContentOptions = {
+  customMessage?: string | null;
 };
 
 function escapeHtml(value: string | null | undefined) {
@@ -273,7 +278,11 @@ function getSmtpConfig() {
   } satisfies SmtpConfig;
 }
 
-async function buildEmailContent(order: StoredOrder, state: OrderState) {
+async function buildEmailContent(
+  order: StoredOrder,
+  state: OrderState,
+  options?: EmailContentOptions,
+) {
   if (state === "FACTURADO") {
     return {
       subject: "Tu pedido fue confirmado",
@@ -285,6 +294,10 @@ async function buildEmailContent(order: StoredOrder, state: OrderState) {
   if (state === "LISTO_PARA_RETIRO") {
     const pickupCode = order.metadata.pickupCode || "Sin codigo";
     const publicOrderUrl = await buildPublicOrderUrl(order);
+    const pickupMessage =
+      normalizeOptionalString(options?.customMessage) ||
+      "Ya puedes pasar por el local. Para retirar, abre tu pedido desde el boton de abajo y muestra el QR junto con tu codigo.";
+    const pickupMessageHtml = escapeHtml(pickupMessage).replace(/\r?\n/g, "<br />");
     const linkBlock = publicOrderUrl
       ? `
         <div style="margin-top:22px;">
@@ -303,7 +316,9 @@ async function buildEmailContent(order: StoredOrder, state: OrderState) {
       text: [
         `Hola ${order.nombre_cliente},`,
         "",
-        `Tu pedido ${order.numero_pedido} ya esta listo para retirar.`,
+        pickupMessage,
+        "",
+        `Pedido ${order.numero_pedido}.`,
         `Codigo de retiro: ${pickupCode}.`,
         publicOrderUrl ? `Ver pedido y QR: ${publicOrderUrl}` : null,
       ]
@@ -322,7 +337,7 @@ async function buildEmailContent(order: StoredOrder, state: OrderState) {
 
             <div style="padding:28px 32px;">
               <p style="margin:0 0 18px;font-size:15px;line-height:1.7;color:#334155;">
-                Ya puedes pasar por el local. Para retirar, abre tu pedido desde el boton de abajo y muestra el QR junto con tu codigo.
+                ${pickupMessageHtml}
               </p>
 
               <div style="padding:18px;border:1px solid #bbf7d0;border-radius:18px;background:#f0fdf4;">
@@ -355,10 +370,7 @@ async function buildEmailContent(order: StoredOrder, state: OrderState) {
   if (state === "ENTREGADO" && order.tipo_pedido === "retiro") {
     const retiroPor = order.nombre_apellido_retiro || "Sin informar";
     const fechaRetiro = order.fecha_hora_retiro
-      ? new Intl.DateTimeFormat("es-AR", {
-          dateStyle: "short",
-          timeStyle: "short",
-        }).format(new Date(order.fecha_hora_retiro))
+      ? formatSqlServerLocalDateTime(order.fecha_hora_retiro)
       : "Sin fecha";
 
     return {
@@ -414,8 +426,12 @@ function createTransport(config: SmtpConfig, account: SmtpAccount): MailTranspor
   });
 }
 
-export async function sendOrderStatusEmail(order: StoredOrder, state: OrderState) {
-  const content = await buildEmailContent(order, state);
+export async function sendOrderStatusEmail(
+  order: StoredOrder,
+  state: OrderState,
+  options?: EmailContentOptions,
+) {
+  const content = await buildEmailContent(order, state, options);
   const config = getSmtpConfig();
 
   if (!config.host || config.accounts.length === 0) {

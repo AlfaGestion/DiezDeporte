@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function POST(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
   const sessionUser = await getCurrentAdminSessionUser();
@@ -24,7 +24,8 @@ export async function POST(
   }
 
   try {
-    const order = await resendPickupReadyEmail(orderId);
+    const body = (await request.json().catch(() => null)) as { message?: string } | null;
+    const order = await resendPickupReadyEmail(orderId, body?.message || null);
     return NextResponse.json({ order });
   } catch (error) {
     if (error instanceof OrderNotFoundError) {

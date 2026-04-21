@@ -7,7 +7,6 @@ import {
   toNumber,
 } from "@/lib/commerce";
 import { getConnection, sql } from "@/lib/db";
-import { getOdooAssets } from "@/lib/odoo";
 import { getServerSettings } from "@/lib/store-config";
 import type { ServerSettings } from "@/lib/store-config";
 import type { Product } from "@/lib/types";
@@ -54,7 +53,7 @@ function mapProduct(record: ProductRecord, settings: ServerSettings) {
     settings.imageBaseUrl,
   );
 
-  const product: Product = {
+  return {
     id: record.IDARTICULO.trim(),
     code: record.IDARTICULO.trim(),
     description: record.DESCRIPCION.trim(),
@@ -77,9 +76,7 @@ function mapProduct(record: ProductRecord, settings: ServerSettings) {
     imageNote: null,
     imageSourceUrl: null,
     cost: toNumber(record.COSTO),
-  };
-
-  return product;
+  } satisfies Product;
 }
 
 export async function listProducts() {
@@ -125,36 +122,7 @@ export async function listProducts() {
     ORDER BY a.DESCRIPCION ASC;
   `);
 
-  const products = result.recordset.map((record) => mapProduct(record, settings));
-  const odooAssets = await getOdooAssets();
-  const odooProductImages = Array.from(odooAssets.productImages.values());
-
-  return products.map<Product>((product) => {
-    const odooImage = odooAssets.productImages.get(product.id.trim().toUpperCase());
-
-    if (!odooImage) {
-      const illustrativeImage = findIllustrativeImage(product, odooProductImages);
-      if (!illustrativeImage) {
-        return product;
-      }
-
-      return {
-        ...product,
-        imageUrl: illustrativeImage.imageUrl,
-        imageMode: "illustrative" as const,
-        imageNote: null,
-        imageSourceUrl: null,
-      };
-    }
-
-    return {
-      ...product,
-      imageUrl: odooImage.imageUrl,
-      imageMode: "exact" as const,
-      imageNote: null,
-      imageSourceUrl: odooImage.href,
-    };
-  });
+  return result.recordset.map((record) => mapProduct(record, settings));
 }
 
 export async function getProductsByIds(
@@ -208,6 +176,7 @@ export async function getProductsByIds(
 
   return result.recordset.map((record) => mapProduct(record, settings));
 }
+
 function createRequest(executor: Executor) {
   if ("begin" in executor) {
     return new sql.Request(executor);
@@ -215,145 +184,3 @@ function createRequest(executor: Executor) {
 
   return executor.request();
 }
-
-function findIllustrativeImage(
-  product: Product,
-  candidates: Array<{
-    code: string;
-    imageUrl: string;
-    title: string;
-    href: string;
-  }>,
-) {
-  const productCode = product.code.trim().toUpperCase();
-  const baseCode = getBaseCode(productCode);
-
-  const codeMatch = candidates.find((candidate) => {
-    const candidateCode = candidate.code.trim().toUpperCase();
-    const candidateBaseCode = getBaseCode(candidateCode);
-
-    return (
-      candidateCode !== productCode &&
-      (candidateCode === baseCode ||
-        candidateCode.startsWith(`${baseCode}|`) ||
-        candidateBaseCode === baseCode)
-    );
-  });
-
-  if (codeMatch) {
-    return codeMatch;
-  }
-
-  const targetTokens = tokenizeDescription(product.description);
-  if (targetTokens.length === 0) {
-    return null;
-  }
-
-  let bestMatch: (typeof candidates)[number] | null = null;
-  let bestScore = 0;
-
-  for (const candidate of candidates) {
-    const candidateCode = candidate.code.trim().toUpperCase();
-    if (candidateCode === productCode) continue;
-
-    const score = scoreCandidate(targetTokens, candidate.title);
-    if (score > bestScore) {
-      bestScore = score;
-      bestMatch = candidate;
-    }
-  }
-
-  return bestScore >= 3 ? bestMatch : null;
-}
-
-function getBaseCode(value: string) {
-  return value.split("|")[0]?.trim().toUpperCase() || value.trim().toUpperCase();
-}
-
-function tokenizeDescription(value: string) {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
-    .split(/\s+/)
-    .filter((token) => {
-      return (
-        token.length >= 3 &&
-        !STOP_WORDS.has(token) &&
-        !COLOR_WORDS.has(token) &&
-        !SIZE_WORDS.has(token)
-      );
-    });
-}
-
-function scoreCandidate(targetTokens: string[], candidateTitle: string) {
-  const candidateTokens = new Set(tokenizeDescription(candidateTitle));
-  let score = 0;
-
-  for (const token of targetTokens) {
-    if (candidateTokens.has(token)) {
-      score += token.length >= 6 ? 2 : 1;
-    }
-  }
-
-  return score;
-}
-
-const STOP_WORDS = new Set([
-  "para",
-  "con",
-  "sin",
-  "the",
-  "and",
-  "men",
-  "man",
-  "mujer",
-  "hombre",
-  "kids",
-  "adulto",
-  "adulta",
-  "junior",
-  "nino",
-  "nina",
-  "niño",
-  "niña",
-  "blist",
-]);
-
-const COLOR_WORDS = new Set([
-  "negro",
-  "negra",
-  "blanco",
-  "blanca",
-  "gris",
-  "rojo",
-  "roja",
-  "azul",
-  "verde",
-  "rosa",
-  "fucsia",
-  "violeta",
-  "amarillo",
-  "amarilla",
-  "naranja",
-  "marron",
-  "bordo",
-  "celeste",
-  "colores",
-  "multicolor",
-]);
-
-const SIZE_WORDS = new Set([
-  "xxs",
-  "xs",
-  "s",
-  "m",
-  "l",
-  "xl",
-  "xxl",
-  "xxxl",
-  "uni",
-  "unico",
-  "talle",
-]);

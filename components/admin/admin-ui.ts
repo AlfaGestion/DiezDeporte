@@ -1,22 +1,11 @@
+import { formatSqlServerLocalDateTime } from "@/lib/store-datetime";
+
 export function cn(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
 }
 
 export function formatAdminDateTime(value: string | null | undefined) {
-  if (!value) {
-    return "Sin dato";
-  }
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "Sin dato";
-  }
-
-  return new Intl.DateTimeFormat("es-AR", {
-    dateStyle: "short",
-    timeStyle: "short",
-  }).format(date);
+  return formatSqlServerLocalDateTime(value);
 }
 
 export const adminPanelClass = cn(
@@ -33,6 +22,13 @@ export const adminCardClass = cn(
 export const adminInputClass = cn(
   "h-11 w-full rounded-[14px] border border-[color:var(--admin-input-line)]",
   "bg-[color:var(--admin-input-bg)] px-3 text-[14px] text-[color:var(--admin-title)]",
+  "outline-none transition placeholder:text-[color:var(--admin-text)]",
+  "focus:border-[color:var(--admin-accent)] focus:ring-4 focus:ring-[color:var(--admin-accent-soft)]",
+);
+
+export const adminTextAreaClass = cn(
+  "w-full rounded-[14px] border border-[color:var(--admin-input-line)]",
+  "bg-[color:var(--admin-input-bg)] px-3 py-3 text-[14px] leading-6 text-[color:var(--admin-title)]",
   "outline-none transition placeholder:text-[color:var(--admin-text)]",
   "focus:border-[color:var(--admin-accent)] focus:ring-4 focus:ring-[color:var(--admin-accent-soft)]",
 );

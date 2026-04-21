@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState, useTransition } from "react";
+import { AdminQrCameraScanner } from "@/components/admin/admin-qr-camera-scanner";
 import {
   adminCardClass,
   adminInputClass,
@@ -20,14 +21,23 @@ type PickupLookupOrder = {
   nombre_cliente: string;
   estado: OrderState;
   retirado: "SI" | "NO";
+  fecha_creacion: string | null;
   fecha_hora_retiro: string | null;
   nombre_apellido_retiro: string | null;
+};
+
+type PickupLookupItem = {
+  articleId: string;
+  description: string;
+  quantity: number;
+  total: number;
 };
 
 type PickupLookupResult = {
   pickupCode: string;
   disponible: boolean;
   order: PickupLookupOrder;
+  items: PickupLookupItem[];
 };
 
 function buildLookupMessage(result: PickupLookupResult) {
@@ -56,7 +66,7 @@ export function PickupDeskPane() {
     setNombreApellido("");
   };
 
-  const handleLookup = () => {
+  const runLookup = (pickupCode: string) => {
     setFeedback(null);
 
     startLookupTransition(async () => {
@@ -67,7 +77,7 @@ export function PickupDeskPane() {
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ codigo }),
+          body: JSON.stringify({ codigo: pickupCode }),
         });
 
         const result = (await response.json().catch(() => null)) as
@@ -85,6 +95,7 @@ export function PickupDeskPane() {
           pickupCode: result.pickupCode,
           disponible: Boolean(result.disponible),
           order: result.order as PickupLookupOrder,
+          items: Array.isArray(result.items) ? (result.items as PickupLookupItem[]) : [],
         } satisfies PickupLookupResult;
 
         setLookup(nextLookup);
@@ -97,6 +108,10 @@ export function PickupDeskPane() {
         setFeedback(error instanceof Error ? error.message : "No se pudo validar el codigo de retiro.");
       }
     });
+  };
+
+  const handleLookup = () => {
+    runLookup(codigo);
   };
 
   const handleRedeem = () => {
@@ -129,13 +144,26 @@ export function PickupDeskPane() {
           return;
         }
 
-        const nextLookup = {
-          pickupCode: codigo.trim(),
-          disponible: false,
-          order: result.order,
-        } satisfies PickupLookupResult;
-
-        setLookup(nextLookup);
+        setLookup((currentLookup) =>
+          currentLookup
+            ? {
+                ...currentLookup,
+                disponible: false,
+                order: {
+                  ...currentLookup.order,
+                  ...result.order,
+                },
+              }
+            : {
+                pickupCode: codigo.trim(),
+                disponible: false,
+                order: {
+                  ...(result.order as PickupLookupOrder),
+                  fecha_creacion: null,
+                },
+                items: [],
+              },
+        );
         setFeedbackTone("success");
         setFeedback("Retiro registrado correctamente. Este codigo ya no puede volver a usarse.");
         setNombreApellido("");
@@ -167,7 +195,7 @@ export function PickupDeskPane() {
           </p>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_260px]">
           <input
             value={codigo}
             onChange={(event) => {
@@ -179,14 +207,25 @@ export function PickupDeskPane() {
             disabled={isLookingUp || isRedeeming}
           />
 
-          <button
-            type="button"
-            onClick={handleLookup}
-            className={cn(adminPrimaryButtonClass, "w-full md:w-auto", !canLookup && "opacity-70")}
-            disabled={!canLookup}
-          >
-            {isLookingUp ? "Validando..." : "Validar codigo"}
-          </button>
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={handleLookup}
+              className={cn(adminPrimaryButtonClass, "w-full", !canLookup && "opacity-70")}
+              disabled={!canLookup}
+            >
+              {isLookingUp ? "Validando..." : "Validar codigo"}
+            </button>
+            <AdminQrCameraScanner
+              onDetected={(value) => {
+                setCodigo(value);
+                resetResolvedState();
+                runLookup(value);
+              }}
+              disabled={isLookingUp || isRedeeming}
+              buttonLabel="Leer QR con camara"
+            />
+          </div>
         </div>
 
         {lookup?.disponible ? (
@@ -236,6 +275,9 @@ export function PickupDeskPane() {
               <p className="mt-1 text-sm text-[color:var(--admin-text)]">
                 Cliente: {lookup.order.nombre_cliente}
               </p>
+              <p className="mt-1 text-sm text-[color:var(--admin-text)]">
+                Creado: {formatAdminDateTime(lookup.order.fecha_creacion)}
+              </p>
             </div>
 
             <Link
@@ -254,24 +296,56 @@ export function PickupDeskPane() {
               </dd>
             </div>
             <div className="rounded-[14px] border border-[color:var(--admin-pane-line)] px-4 py-3">
-              <dt className="text-[color:var(--admin-text)]">Retirado</dt>
+              <dt className="text-[color:var(--admin-text)]">Estado de retiro</dt>
               <dd className="mt-1 font-semibold text-[color:var(--admin-title)]">
-                {lookup.order.retirado}
+                {lookup.order.retirado === "SI" ? "Retirado" : "Pendiente de retiro"}
               </dd>
             </div>
             <div className="rounded-[14px] border border-[color:var(--admin-pane-line)] px-4 py-3">
-              <dt className="text-[color:var(--admin-text)]">FechaHoraRetiro</dt>
+              <dt className="text-[color:var(--admin-text)]">Fecha de retiro</dt>
               <dd className="mt-1 font-semibold text-[color:var(--admin-title)]">
-                {formatAdminDateTime(lookup.order.fecha_hora_retiro)}
+                {lookup.order.retirado === "SI"
+                  ? formatAdminDateTime(lookup.order.fecha_hora_retiro)
+                  : "Todavia no retirado"}
               </dd>
             </div>
             <div className="rounded-[14px] border border-[color:var(--admin-pane-line)] px-4 py-3">
-              <dt className="text-[color:var(--admin-text)]">NombreApellido</dt>
+              <dt className="text-[color:var(--admin-text)]">Retirado por</dt>
               <dd className="mt-1 font-semibold text-[color:var(--admin-title)]">
-                {lookup.order.nombre_apellido_retiro || "-"}
+                {lookup.order.nombre_apellido_retiro || "Sin registrar"}
               </dd>
             </div>
           </dl>
+
+          <div className="rounded-[14px] border border-[color:var(--admin-pane-line)] px-4 py-3">
+            <div className="text-[color:var(--admin-text)]">Articulos</div>
+            {lookup.items.length > 0 ? (
+              <div className="mt-3 space-y-2">
+                {lookup.items.map((item, index) => (
+                  <div
+                    key={`${item.articleId}-${index}`}
+                    className="flex items-start justify-between gap-3 border-t border-[color:var(--admin-pane-line)] pt-2 first:border-t-0 first:pt-0"
+                  >
+                    <div>
+                      <div className="font-medium text-[color:var(--admin-title)]">
+                        {item.description || item.articleId}
+                      </div>
+                      <div className="text-xs text-[color:var(--admin-text)]">
+                        {item.articleId}
+                      </div>
+                    </div>
+                    <div className="text-sm font-semibold text-[color:var(--admin-title)]">
+                      x{item.quantity}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-2 text-sm text-[color:var(--admin-text)]">
+                No se encontraron articulos para este retiro.
+              </div>
+            )}
+          </div>
         </section>
       ) : null}
     </section>

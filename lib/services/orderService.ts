@@ -46,6 +46,8 @@ type OrderTransitionOptions = {
   origin?: OrderChangeOrigin;
 };
 
+const PICKUP_QR_VERSION = 2;
+
 function ensureOrderCreateInput(input: CreateOrderInput) {
   if (!input.nombre_cliente.trim()) {
     throw new OrderValidationError("El nombre del cliente es obligatorio.");
@@ -72,8 +74,13 @@ async function buildQrCode(order: Order, pickupCode: string | null) {
     };
 
     return await QRCode.toDataURL(buildQrPayload(order, pickupCode), {
-      margin: 1,
-      width: 320,
+      errorCorrectionLevel: "M",
+      margin: 0,
+      width: 360,
+      color: {
+        dark: "#0f172a",
+        light: "#0000",
+      },
     });
   } catch (error) {
     console.warn("QR library unavailable", error);
@@ -81,7 +88,7 @@ async function buildQrCode(order: Order, pickupCode: string | null) {
   }
 }
 
-async function ensurePickupAssets(order: StoredOrder) {
+export async function ensurePickupAssets(order: StoredOrder) {
   if (order.tipo_pedido !== "retiro") {
     return order;
   }
@@ -94,18 +101,25 @@ async function ensurePickupAssets(order: StoredOrder) {
   const hasValidPickupCode =
     /^WEB-\d{4}-[A-Z0-9]{4}$/.test(currentPickupCode) &&
     currentPickupCode.startsWith(expectedPrefix);
+  const currentQrVersion = Number(order.metadata.pickupQrVersion || 0);
   const pickupCode = hasValidPickupCode
     ? currentPickupCode
     : buildPickupCode(documentNumber);
   const needsNewPickupCode = !hasValidPickupCode;
+  const needsQrRefresh = currentQrVersion !== PICKUP_QR_VERSION;
   const qrCode =
-    order.codigo_qr && !needsNewPickupCode
+    order.codigo_qr && !needsNewPickupCode && !needsQrRefresh
       ? order.codigo_qr
       : await buildQrCode(order, pickupCode);
   const nextMetadata =
-    order.metadata.pickupCode === pickupCode
+    order.metadata.pickupCode === pickupCode &&
+    currentQrVersion === PICKUP_QR_VERSION
       ? order.metadata
-      : { ...order.metadata, pickupCode };
+      : {
+          ...order.metadata,
+          pickupCode,
+          pickupQrVersion: PICKUP_QR_VERSION,
+        };
 
   if (nextMetadata === order.metadata && qrCode === order.codigo_qr) {
     return order;
@@ -321,6 +335,30 @@ async function resolveOrderDocument(order: StoredOrder) {
   };
 }
 
+async function attachResolvedItemCounts(orders: StoredOrder[]) {
+  if (orders.length === 0) {
+    return orders;
+  }
+
+  const statsByOrderNumber = await orderRepository.getDocumentItemStatsByOrderNumbers(
+    orders.map((order) => order.numero_pedido),
+  );
+
+  return orders.map((order) => {
+    const stats = statsByOrderNumber.get(order.numero_pedido.trim());
+
+    if (!stats) {
+      return order;
+    }
+
+    return {
+      ...order,
+      resolved_item_count: stats.itemCount,
+      resolved_line_count: stats.lineCount,
+    } satisfies StoredOrder;
+  });
+}
+
 export async function buildCheckoutOrderDraft(
   payload: CreateOrderPayload,
 ): Promise<CheckoutOrderDraft> {
@@ -395,29 +433,10 @@ export async function getOrderById(orderId: number) {
   return order;
 }
 
-function isPendingOrderExpired(order: StoredOrder, ttlMinutes: number) {
-  if (order.estado !== "PENDIENTE" || order.estado_pago !== "pendiente") {
-    return false;
-  }
-
-  const createdAt = new Date(order.fecha_creacion);
-
-  if (Number.isNaN(createdAt.getTime())) {
-    return false;
-  }
-
-  return Date.now() - createdAt.getTime() >= ttlMinutes * 60_000;
-}
-
 export async function cancelExpiredPendingOrders() {
   const settings = await getServerSettings();
-  const pendingOrders = await orderRepository.getFiltered({
-    estado: "PENDIENTE",
-    estado_pago: "pendiente",
-    limit: 200,
-  });
-  const expiredOrders = pendingOrders.filter((order) =>
-    isPendingOrderExpired(order, settings.pendingOrderTtlMinutes),
+  const expiredOrders = await orderRepository.getExpiredPending(
+    settings.pendingOrderTtlMinutes,
   );
 
   for (const order of expiredOrders) {
@@ -433,10 +452,14 @@ export async function getOrderLogs(orderId: number) {
 }
 
 export async function getOrderDetailById(orderId: number) {
-  const [order, logs] = await Promise.all([
+  const [rawOrder, logs] = await Promise.all([
     getOrderById(orderId),
     orderRepository.getLogsByOrderId(orderId),
   ]);
+  const order =
+    rawOrder.tipo_pedido === "retiro"
+      ? await ensurePickupAssets(rawOrder)
+      : rawOrder;
   const document = await resolveOrderDocument(order);
 
   return {
@@ -450,7 +473,8 @@ export async function getOrderDetailById(orderId: number) {
 
 export async function getOrders(filters: OrderFilters = {}) {
   await cancelExpiredPendingOrders();
-  return orderRepository.getFiltered(filters);
+  const orders = await orderRepository.getFiltered(filters);
+  return attachResolvedItemCounts(orders);
 }
 
 export async function createOrder(
@@ -614,15 +638,32 @@ export async function registerMercadoPagoApproval(input: {
   return order;
 }
 
-export async function resendPickupReadyEmail(orderId: number) {
+export async function resendPickupReadyEmail(
+  orderId: number,
+  customMessage?: string | null,
+) {
   const order = await getOrderById(orderId);
 
   if (order.tipo_pedido !== "retiro") {
     throw new OrderValidationError("Solo se puede reenviar este email para pedidos de retiro.");
   }
 
+  if (order.retirado === "SI" || order.estado === "ENTREGADO") {
+    throw new OrderValidationError(
+      "No se puede enviar el email de retiro porque el pedido ya fue retirado.",
+    );
+  }
+
+  if (order.estado !== "LISTO_PARA_RETIRO") {
+    throw new OrderValidationError(
+      "El email de retiro solo se puede enviar cuando el pedido esta listo para retirar.",
+    );
+  }
+
   const patchedOrder = await ensurePickupAssets(order);
-  await sendOrderStatusEmail(patchedOrder, "LISTO_PARA_RETIRO");
+  await sendOrderStatusEmail(patchedOrder, "LISTO_PARA_RETIRO", {
+    customMessage,
+  });
 
   const updated = await orderRepository.update(order.id, {
     email_listo_enviado_at: new Date().toISOString(),
@@ -647,6 +688,17 @@ export async function findPickupOrderByCode(rawPickupValue: string) {
   return {
     order,
     pickupCode,
+  };
+}
+
+export async function lookupPickupOrderByCode(rawPickupValue: string) {
+  const { order, pickupCode } = await findPickupOrderByCode(rawPickupValue);
+  const document = await resolveOrderDocument(order);
+
+  return {
+    order,
+    pickupCode,
+    documentItems: document.documentItems,
   };
 }
 

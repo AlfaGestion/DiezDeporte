@@ -1,4 +1,5 @@
 import { OrderRowActions } from "@/components/admin/order-row-actions";
+import { PickupStatusBadge } from "@/components/admin/pickup-status-badge";
 import { OrderStatusBadge } from "@/components/admin/order-status-badge";
 import { PaymentStatusBadge } from "@/components/admin/payment-status-badge";
 import {
@@ -121,8 +122,28 @@ export function OrdersTable({
                       <div className="font-medium text-[color:var(--admin-title)]">
                         {getOrderTypeLabel(order.orderType)}
                       </div>
-                      <div className="text-xs text-[color:var(--admin-text)]">{order.customerCity || "Sin localidad"}</div>
-                      <div className="text-xs text-[color:var(--admin-text)]">{order.customerAddress || "Sin direccion"}</div>
+                      {order.orderType === "retiro" ? (
+                        <>
+                          <PickupStatusBadge redeemed={order.pickupRedeemed} className="w-fit" />
+                          <div className="text-xs text-[color:var(--admin-text)]">
+                            {order.pickupRedeemed
+                              ? `Retirado ${formatAdminDateTime(order.pickupRedeemedAt)}`
+                              : "Todavia no retirado"}
+                          </div>
+                          <div className="text-xs text-[color:var(--admin-text)]">
+                            {order.pickupRedeemedBy
+                              ? `Retiro: ${order.pickupRedeemedBy}`
+                              : order.pickupCode
+                                ? `Codigo: ${order.pickupCode}`
+                                : "Sin codigo de retiro"}
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="text-xs text-[color:var(--admin-text)]">{order.customerCity || "Sin localidad"}</div>
+                          <div className="text-xs text-[color:var(--admin-text)]">{order.customerAddress || "Sin direccion"}</div>
+                        </>
+                      )}
                     </div>
                   </td>
                   <td className="px-5 py-4">

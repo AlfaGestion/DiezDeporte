@@ -60,18 +60,25 @@ export function resolveImageUrl(
   fallbackUrl: string | null,
   imageBaseUrl: string,
 ) {
-  if (fallbackUrl && /^https?:\/\//i.test(fallbackUrl)) {
+  if (fallbackUrl && /^https?:\/\//i.test(fallbackUrl) && !isLegacyOdooImageUrl(fallbackUrl)) {
     return fallbackUrl;
   }
 
   if (!imagePath) return null;
-  if (/^https?:\/\//i.test(imagePath)) return imagePath;
+  if (/^https?:\/\//i.test(imagePath)) {
+    return isLegacyOdooImageUrl(imagePath) ? null : imagePath;
+  }
   if (!imageBaseUrl) return null;
 
   const base = imageBaseUrl.endsWith("/") ? imageBaseUrl.slice(0, -1) : imageBaseUrl;
   const cleanPath = imagePath.startsWith("/") ? imagePath : `/${imagePath}`;
 
   return `${base}${cleanPath}`;
+}
+
+function isLegacyOdooImageUrl(value: string) {
+  return /^https?:\/\/(?:www\.)?diezdeportes\.com\.ar\/web\/image\//i.test(value)
+    || /^https?:\/\/diezdeportes\.odoo\.com\/web\/image\//i.test(value);
 }
 
 export function buildImageProxyUrl(

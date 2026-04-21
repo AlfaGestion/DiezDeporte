@@ -9,6 +9,10 @@ import {
   getStockBadgeClass,
   toCartItem,
 } from "@/lib/commerce";
+import {
+  LOCAL_STORE_LOGO_DARK_URL,
+  LOCAL_STORE_LOGO_URL,
+} from "@/lib/site-assets";
 import type {
   BrandImage,
   CartItem,
@@ -24,10 +28,6 @@ import type {
 const LOCAL_STORAGE_CART_KEY = "diezdeportes-cart";
 const LOCAL_STORAGE_THEME_KEY = "diezdeportes-theme";
 const LOCAL_STORAGE_WEB_IMAGE_KEY = "diezdeportes-web-images";
-const ODOO_FACEBOOK_URL =
-  "https://diezdeportes.odoo.com/website/social/facebook";
-const ODOO_INSTAGRAM_URL =
-  "https://diezdeportes.odoo.com/website/social/instagram";
 const VARIANT_LABEL_COLLATOR = new Intl.Collator("es", {
   numeric: true,
   sensitivity: "base",
@@ -386,7 +386,13 @@ export function Storefront({
   const itemCount = cartItemCount(cart);
 
   const whatsappHref = resolveWhatsappHref(settings.supportWhatsapp);
-  const resolvedLogoUrl = buildImageProxyUrl(logoUrl || settings.logoUrl);
+  const rawLogoUrl = logoUrl || settings.logoUrl;
+  const resolvedLogoUrl =
+    rawLogoUrl === LOCAL_STORE_LOGO_URL
+      ? theme === "dark"
+        ? LOCAL_STORE_LOGO_URL
+        : LOCAL_STORE_LOGO_DARK_URL
+      : buildImageProxyUrl(rawLogoUrl);
   const resolvedHeroImageUrl = heroImageUrl || settings.heroImageUrl;
   const displayHeroImageUrl = buildImageProxyUrl(resolvedHeroImageUrl);
   const heroStyle = resolvedHeroImageUrl
@@ -784,7 +790,7 @@ export function Storefront({
           preference?: PaymentPreferenceResponse;
         }>(response)) || null;
 
-        if (!response.ok || !result.preference) {
+        if (!response.ok || !result?.preference) {
           throw new Error(result?.error || "No se pudo iniciar el pago.");
         }
 
@@ -805,7 +811,7 @@ export function Storefront({
         order?: OrderSummary;
       }>(response)) || null;
 
-      if (!response.ok || !result.order) {
+      if (!response.ok || !result?.order) {
         throw new Error(result?.error || "No se pudo registrar el pedido.");
       }
 
@@ -839,7 +845,13 @@ export function Storefront({
         <header className="site-header">
           <a className="site-logo" href="#top" aria-label={settings.storeName}>
             {resolvedLogoUrl ? (
-              <img src={resolvedLogoUrl} alt={settings.storeName} />
+              <img
+                src={resolvedLogoUrl}
+                alt={settings.storeName}
+                width={351}
+                height={141}
+                fetchPriority="high"
+              />
             ) : (
               <>
                 <span>Diez</span>
@@ -876,22 +888,26 @@ export function Storefront({
             </button>
 
             <div className="site-socials" aria-label="Redes">
-              <a
-                href={ODOO_FACEBOOK_URL}
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Facebook"
-              >
-                <IconFacebook />
-              </a>
-              <a
-                href={ODOO_INSTAGRAM_URL}
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Instagram"
-              >
-                <IconInstagram />
-              </a>
+              {settings.facebookUrl ? (
+                <a
+                  href={settings.facebookUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label="Facebook"
+                >
+                  <IconFacebook />
+                </a>
+              ) : null}
+              {settings.instagramUrl ? (
+                <a
+                  href={settings.instagramUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label="Instagram"
+                >
+                  <IconInstagram />
+                </a>
+              ) : null}
             </div>
 
             <a className="site-email" href={`mailto:${settings.supportEmail}`}>
@@ -1421,7 +1437,12 @@ export function Storefront({
                 aria-label={settings.storeName}
               >
                 {resolvedLogoUrl ? (
-                  <img src={resolvedLogoUrl} alt={settings.storeName} />
+                  <img
+                    src={resolvedLogoUrl}
+                    alt={settings.storeName}
+                    width={351}
+                    height={141}
+                  />
                 ) : (
                   <>
                     <span>Diez</span>
@@ -1447,22 +1468,26 @@ export function Storefront({
             </div>
 
             <div className="site-socials footer-socials" aria-label="Redes">
-              <a
-                href={ODOO_FACEBOOK_URL}
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Facebook"
-              >
-                <IconFacebook />
-              </a>
-              <a
-                href={ODOO_INSTAGRAM_URL}
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Instagram"
-              >
-                <IconInstagram />
-              </a>
+              {settings.facebookUrl ? (
+                <a
+                  href={settings.facebookUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label="Facebook"
+                >
+                  <IconFacebook />
+                </a>
+              ) : null}
+              {settings.instagramUrl ? (
+                <a
+                  href={settings.instagramUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label="Instagram"
+                >
+                  <IconInstagram />
+                </a>
+              ) : null}
             </div>
           </footer>
         </section>

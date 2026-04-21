@@ -1,5 +1,6 @@
 import "server-only";
 import { parseBoolean } from "@/lib/commerce";
+import { LOCAL_HERO_IMAGE_URL, LOCAL_STORE_LOGO_URL } from "@/lib/site-assets";
 import { getStoredSettingValuesByEnvKey } from "@/lib/store-settings";
 import type { PublicStoreSettings } from "@/lib/types";
 
@@ -139,7 +140,7 @@ export async function getPublicStoreSettings(): Promise<PublicStoreSettings> {
     storeName: process.env.NEXT_PUBLIC_STORE_NAME?.trim() || "Diez Deportes",
     logoUrl:
       process.env.NEXT_PUBLIC_STORE_LOGO_URL?.trim() ||
-      "https://diezdeportes.odoo.com/web/image/website/2/logo/Diez%20Deportes?unique=cdf28c5",
+      LOCAL_STORE_LOGO_URL,
     storeTagline:
       process.env.NEXT_PUBLIC_STORE_TAGLINE?.trim() ||
       "Equipamiento deportivo con stock real y pedido directo",
@@ -148,7 +149,11 @@ export async function getPublicStoreSettings(): Promise<PublicStoreSettings> {
     showOutOfStock: settings.showOutOfStock,
     heroImageUrl:
       process.env.NEXT_PUBLIC_HERO_IMAGE_URL?.trim() ||
-      "https://diezdeportes.odoo.com/web/image/1120-f02b7f1a/image%20%286%29.webp",
+      LOCAL_HERO_IMAGE_URL,
+    facebookUrl:
+      process.env.NEXT_PUBLIC_FACEBOOK_URL?.trim() || "",
+    instagramUrl:
+      process.env.NEXT_PUBLIC_INSTAGRAM_URL?.trim() || "",
     supportWhatsapp:
       process.env.NEXT_PUBLIC_SUPPORT_WHATSAPP?.trim() ||
       "https://wa.me/message/DMXTLZXT6GVRG1",

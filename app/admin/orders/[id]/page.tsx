@@ -90,10 +90,11 @@ export default async function AdminOrderDetailPage({
             isEmbedded={isEmbedded}
           />
 
+          <OrderCustomerCard order={order} />
+
           <div className="grid gap-5 xl:grid-cols-[minmax(0,1.65fr)_340px]">
             <div className="space-y-5">
               <OrderProductsCard order={order} items={documentItems} />
-              <OrderTimeline logs={logs} />
             </div>
 
             <aside className="space-y-5">
@@ -105,7 +106,6 @@ export default async function AdminOrderDetailPage({
                 canMarkError={canMarkError}
               />
               {order.tipo_pedido === "retiro" ? <PickupRedeemPanel order={order} /> : null}
-              <OrderCustomerCard order={order} />
               <OrderDeliveryCard
                 order={order}
                 documentNumber={documentNumber}
@@ -113,6 +113,8 @@ export default async function AdminOrderDetailPage({
               />
             </aside>
           </div>
+
+          <OrderTimeline logs={logs} />
         </section>
       </main>
     );

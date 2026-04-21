@@ -1,6 +1,6 @@
 import { Storefront } from "@/components/storefront";
 import { listProducts } from "@/lib/catalog";
-import { getOdooAssets } from "@/lib/odoo";
+import { LOCAL_BRAND_IMAGES, LOCAL_PROMO_TILES } from "@/lib/site-assets";
 import { getPublicStoreSettings } from "@/lib/store-config";
 
 export const dynamic = "force-dynamic";
@@ -10,19 +10,16 @@ export default async function HomePage() {
   const settings = await getPublicStoreSettings();
 
   try {
-    const [products, odooAssets] = await Promise.all([
-      listProducts(),
-      getOdooAssets(),
-    ]);
+    const products = await listProducts();
 
     return (
       <Storefront
         initialProducts={products}
         settings={settings}
-        brandImages={odooAssets.brandImages}
-        logoUrl={odooAssets.logoUrl ?? settings.logoUrl}
-        heroImageUrl={odooAssets.heroImageUrl ?? null}
-        promoTiles={odooAssets.promoTiles ?? []}
+        brandImages={LOCAL_BRAND_IMAGES}
+        logoUrl={settings.logoUrl}
+        heroImageUrl={settings.heroImageUrl}
+        promoTiles={LOCAL_PROMO_TILES}
       />
     );
   } catch (error) {
@@ -35,10 +32,10 @@ export default async function HomePage() {
       <Storefront
         initialProducts={[]}
         settings={settings}
-        brandImages={[]}
+        brandImages={LOCAL_BRAND_IMAGES}
         logoUrl={settings.logoUrl}
-        heroImageUrl={null}
-        promoTiles={[]}
+        heroImageUrl={settings.heroImageUrl}
+        promoTiles={LOCAL_PROMO_TILES}
         loadError={message}
       />
     );
