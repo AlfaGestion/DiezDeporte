@@ -144,13 +144,14 @@ export type PromoTile = {
   filterValue: string;
 };
 
-export type AdminConfigFieldType = "text" | "password" | "boolean";
+export type AdminConfigFieldType = "text" | "password" | "boolean" | "textarea" | "color";
 
 export type AdminConfigField = {
   key: string;
   label: string;
   description: string;
   section: string;
+  group?: string;
   type: AdminConfigFieldType;
   value: string | boolean;
   placeholder?: string;

@@ -49,6 +49,21 @@ export type ServerSettings = {
   validarClasePrecioAlConfirmarPedido: boolean;
   enviarEmailPedidoRecibido: boolean;
   permitirCheckoutSinDireccionEnRetiro: boolean;
+  requerirNombreApellidoAlRetirar: boolean;
+  requerirDniAlRetirar: boolean;
+  permitirFinalizacionManualSinDatosRetiro: boolean;
+  maxReintentosInicioPago: number;
+  enviarEmailSiFallaInicioPago: boolean;
+  permitirRetiroYPagoLocalSiFallaMP: boolean;
+  horasReservaStockPagoPendiente: number;
+  orderReceivedEmailSubject: string;
+  orderReceivedEmailBody: string;
+  paymentInitFailureEmailSubject: string;
+  paymentInitFailureEmailBody: string;
+  invoiceEmailSubject: string;
+  invoiceEmailBody: string;
+  enviarEmailFacturadoRetiro: boolean;
+  enviarEmailFacturadoEnvio: boolean;
 };
 
 function readSetting(
@@ -151,48 +166,124 @@ export async function getServerSettings(): Promise<ServerSettings> {
       ),
       true,
     ),
+    requerirNombreApellidoAlRetirar: parseBoolean(
+      readSetting(storedValues, "APP_REQUIRE_PICKUP_FULL_NAME", "true"),
+      true,
+    ),
+    requerirDniAlRetirar: parseBoolean(
+      readSetting(storedValues, "APP_REQUIRE_PICKUP_DNI", "false"),
+      false,
+    ),
+    permitirFinalizacionManualSinDatosRetiro: parseBoolean(
+      readSetting(storedValues, "APP_ALLOW_MANUAL_PICKUP_FINALIZATION", "false"),
+      false,
+    ),
+    maxReintentosInicioPago: Math.max(
+      1,
+      Number(readSetting(storedValues, "APP_MAX_PAYMENT_INIT_RETRIES", "3") || "3"),
+    ),
+    enviarEmailSiFallaInicioPago: parseBoolean(
+      readSetting(storedValues, "APP_SEND_PAYMENT_INIT_FAILURE_EMAIL", "true"),
+      true,
+    ),
+    permitirRetiroYPagoLocalSiFallaMP: parseBoolean(
+      readSetting(
+        storedValues,
+        "APP_ALLOW_PICKUP_LOCAL_PAYMENT_ON_MP_FAILURE",
+        "true",
+      ),
+      true,
+    ),
+    horasReservaStockPagoPendiente: Math.max(
+      1,
+      Number(readSetting(storedValues, "APP_PENDING_STOCK_RESERVE_HOURS", "24") || "24"),
+    ),
+    orderReceivedEmailSubject: readSetting(
+      storedValues,
+      "APP_ORDER_RECEIVED_EMAIL_SUBJECT",
+    ),
+    orderReceivedEmailBody: readSetting(
+      storedValues,
+      "APP_ORDER_RECEIVED_EMAIL_BODY",
+    ),
+    paymentInitFailureEmailSubject: readSetting(
+      storedValues,
+      "APP_PAYMENT_INIT_FAILURE_EMAIL_SUBJECT",
+    ),
+    paymentInitFailureEmailBody: readSetting(
+      storedValues,
+      "APP_PAYMENT_INIT_FAILURE_EMAIL_BODY",
+    ),
+    invoiceEmailSubject: readSetting(storedValues, "APP_INVOICE_EMAIL_SUBJECT"),
+    invoiceEmailBody: readSetting(storedValues, "APP_INVOICE_EMAIL_BODY"),
+    enviarEmailFacturadoRetiro: parseBoolean(
+      readSetting(storedValues, "APP_SEND_FACTURADO_EMAIL_PICKUP", "false"),
+      false,
+    ),
+    enviarEmailFacturadoEnvio: parseBoolean(
+      readSetting(storedValues, "APP_SEND_FACTURADO_EMAIL_SHIPMENT", "true"),
+      true,
+    ),
   };
 }
 
 export async function getPublicStoreSettings(): Promise<PublicStoreSettings> {
-  const settings = await getServerSettings();
+  const [settings, storedValues] = await Promise.all([
+    getServerSettings(),
+    loadStoredSettingValues(),
+  ]);
   const mercadoPagoEnabled = Boolean(
     settings.mercadoPagoAccessToken && settings.mercadoPagoPublicBaseUrl,
   );
 
   return {
-    storeName: process.env.NEXT_PUBLIC_STORE_NAME?.trim() || "Diez Deportes",
-    logoUrl:
-      process.env.NEXT_PUBLIC_STORE_LOGO_URL?.trim() ||
+    storeName: readSetting(storedValues, "NEXT_PUBLIC_STORE_NAME", "Diez Deportes"),
+    logoUrl: readSetting(
+      storedValues,
+      "NEXT_PUBLIC_STORE_LOGO_URL",
       LOCAL_STORE_LOGO_URL,
-    storeTagline:
-      process.env.NEXT_PUBLIC_STORE_TAGLINE?.trim() ||
+    ),
+    storeTagline: readSetting(
+      storedValues,
+      "NEXT_PUBLIC_STORE_TAGLINE",
       "Equipamiento deportivo con stock real y pedido directo",
+    ),
     allowBackorders: settings.allowBackorders,
     allowPickupCheckoutWithoutAddress:
       settings.permitirCheckoutSinDireccionEnRetiro,
     mercadoPagoEnabled,
     showOutOfStock: settings.showOutOfStock,
-    heroImageUrl:
-      process.env.NEXT_PUBLIC_HERO_IMAGE_URL?.trim() ||
+    heroImageUrl: readSetting(
+      storedValues,
+      "NEXT_PUBLIC_HERO_IMAGE_URL",
       LOCAL_HERO_IMAGE_URL,
-    facebookUrl:
-      process.env.NEXT_PUBLIC_FACEBOOK_URL?.trim() || "",
-    instagramUrl:
-      process.env.NEXT_PUBLIC_INSTAGRAM_URL?.trim() || "",
-    supportWhatsapp:
-      process.env.NEXT_PUBLIC_SUPPORT_WHATSAPP?.trim() ||
+    ),
+    facebookUrl: readSetting(storedValues, "NEXT_PUBLIC_FACEBOOK_URL", ""),
+    instagramUrl: readSetting(storedValues, "NEXT_PUBLIC_INSTAGRAM_URL", ""),
+    supportWhatsapp: readSetting(
+      storedValues,
+      "NEXT_PUBLIC_SUPPORT_WHATSAPP",
       "https://wa.me/message/DMXTLZXT6GVRG1",
-    supportEmail:
-      process.env.NEXT_PUBLIC_SUPPORT_EMAIL?.trim() ||
+    ),
+    supportEmail: readSetting(
+      storedValues,
+      "NEXT_PUBLIC_SUPPORT_EMAIL",
       "deportes10elbolson@yahoo.com.ar",
-    supportPhone:
-      process.env.NEXT_PUBLIC_SUPPORT_PHONE?.trim() || "+54 9 294 467-4525",
-    storeAddress:
-      process.env.NEXT_PUBLIC_STORE_ADDRESS?.trim() ||
+    ),
+    supportPhone: readSetting(
+      storedValues,
+      "NEXT_PUBLIC_SUPPORT_PHONE",
+      "+54 9 294 467-4525",
+    ),
+    storeAddress: readSetting(
+      storedValues,
+      "NEXT_PUBLIC_STORE_ADDRESS",
       "Castelli, Av. Sarmiento esq, R8430 El Bolson, Rio Negro.",
-    supportBlurb:
-      process.env.NEXT_PUBLIC_SUPPORT_BLURB?.trim() ||
+    ),
+    supportBlurb: readSetting(
+      storedValues,
+      "NEXT_PUBLIC_SUPPORT_BLURB",
       "En Diez Deportes trabajamos para ofrecerte atencion personalizada, envios seguros a todo el pais y una experiencia de compra simple.",
+    ),
   };
 }

@@ -206,6 +206,7 @@ export async function buildCheckoutOrderDraft(
     return {
       productId: product.id,
       productName: product.description,
+      selectedSize: product.defaultSize || null,
       quantity: item.quantity,
       unitPrice,
       subtotal: normalizeMoney(unitPrice * item.quantity) || 0,

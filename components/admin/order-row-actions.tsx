@@ -2,6 +2,7 @@
 
 import { AdminOrderActionButton } from "@/components/admin/admin-order-action-button";
 import { AdminOrderDetailFrameTrigger } from "@/components/admin-order-detail-frame-trigger";
+import { InvoiceEmailDialog } from "@/components/admin/invoice-email-dialog";
 import {
   adminPrimaryButtonClass,
   adminSecondaryButtonClass,
@@ -18,6 +19,9 @@ export function OrderRowActions({
 }) {
   const needsApprovedPayment =
     order.nextActionLabel === "Facturar" && order.paymentStatus !== "aprobado";
+  const opensInvoiceDialog =
+    order.nextActionLabel === "Facturar" && order.paymentStatus === "aprobado";
+  const opensPickupRegistration = order.nextActionLabel === "Registrar retiro";
 
   return (
     <div className="flex min-w-[250px] flex-col gap-2">
@@ -28,6 +32,22 @@ export function OrderRowActions({
           returnTo={returnTo}
           label="Aprobar pago"
           pendingLabel="Aprobando..."
+          className={cn(adminPrimaryButtonClass, "w-full")}
+        />
+      ) : opensInvoiceDialog ? (
+        <InvoiceEmailDialog
+          orderId={order.id}
+          customerName={order.customerName}
+          customerEmail={order.customerEmail}
+          orderNumber={order.orderNumber}
+          triggerLabel="Facturar"
+          triggerClassName={cn(adminPrimaryButtonClass, "w-full")}
+        />
+      ) : opensPickupRegistration ? (
+        <AdminOrderDetailFrameTrigger
+          orderId={order.id}
+          returnTo={returnTo}
+          label="Registrar retiro"
           className={cn(adminPrimaryButtonClass, "w-full")}
         />
       ) : order.nextActionLabel ? (

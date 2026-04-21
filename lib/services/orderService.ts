@@ -15,6 +15,7 @@ import {
 import * as orderRepository from "@/lib/repositories/orderRepository";
 import { createOrderNoteDocument } from "@/lib/repositories/commercialDocumentRepository";
 import {
+  sendManualInvoiceEmail,
   sendOrderReceivedEmail,
   sendOrderStatusEmail,
 } from "@/lib/services/emailService";
@@ -22,6 +23,7 @@ import {
   buildCheckoutOrderDraft as buildCheckoutOrderDraftFromPayload,
   type CheckoutOrderDraft,
 } from "@/lib/services/checkoutService";
+import { getOrderStateAutomationConfig } from "@/lib/order-state-config";
 import { getServerSettings } from "@/lib/store-config";
 import type { CreateOrderPayload } from "@/lib/types";
 import { normalizeNumber } from "@/lib/commerce";
@@ -39,6 +41,14 @@ import type {
 
 type OrderTransitionOptions = {
   origin?: OrderChangeOrigin;
+};
+
+type PickupRedeemInput = {
+  codigo: string;
+  nombre: string;
+  apellido: string;
+  dni?: string | null;
+  observacion?: string | null;
 };
 
 const PICKUP_QR_VERSION = 2;
@@ -134,12 +144,29 @@ export async function ensurePickupAssets(order: StoredOrder) {
 
 async function runTransitionSideEffects(order: StoredOrder, nextState: OrderState) {
   let patchedOrder = order;
+  const settings = await getServerSettings();
 
   if (nextState === "LISTO_PARA_RETIRO") {
     patchedOrder = await ensurePickupAssets(patchedOrder);
   }
 
-  if (shouldSendEmailForState(patchedOrder, nextState)) {
+  const automation = await getOrderStateAutomationConfig(nextState);
+  let canSendConfiguredEmail = automation.sendEmailOnEnter;
+
+  if (nextState === "FACTURADO") {
+    canSendConfiguredEmail =
+      canSendConfiguredEmail &&
+      (patchedOrder.tipo_pedido === "retiro"
+        ? settings.enviarEmailFacturadoRetiro
+        : settings.enviarEmailFacturadoEnvio);
+  }
+
+  if (["FACTURADO", "LISTO_PARA_RETIRO", "ENVIADO"].includes(nextState)) {
+    canSendConfiguredEmail =
+      canSendConfiguredEmail && shouldSendEmailForState(patchedOrder, nextState);
+  }
+
+  if (canSendConfiguredEmail) {
     await sendOrderStatusEmail(patchedOrder, nextState);
     const sentAtField = getEmailSentAtField(nextState);
 
@@ -249,6 +276,56 @@ async function ensureOrderNoteDocument(order: StoredOrder) {
 
 function resolveOrigin(input: OrderTransitionOptions | undefined) {
   return input?.origin || "sistema";
+}
+
+function normalizeOptionalText(value: string | null | undefined) {
+  const trimmed = (value || "").trim();
+  return trimmed || null;
+}
+
+function buildPickupRedeemerFullName(input: {
+  nombre?: string | null;
+  apellido?: string | null;
+}) {
+  return [normalizeOptionalText(input.nombre), normalizeOptionalText(input.apellido)]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+}
+
+async function validatePickupRedeemInput(input: PickupRedeemInput) {
+  const settings = await getServerSettings();
+  const nombre = normalizeOptionalText(input.nombre);
+  const apellido = normalizeOptionalText(input.apellido);
+  const dni = normalizeOptionalText(input.dni);
+  const observacion = normalizeOptionalText(input.observacion);
+
+  if (settings.requerirNombreApellidoAlRetirar) {
+    if (!nombre) {
+      throw new OrderValidationError("Ingresa el nombre de quien retira.");
+    }
+
+    if (!apellido) {
+      throw new OrderValidationError("Ingresa el apellido de quien retira.");
+    }
+  }
+
+  if (!nombre && !apellido) {
+    throw new OrderValidationError("Completa al menos nombre o apellido para registrar el retiro.");
+  }
+
+  if (settings.requerirDniAlRetirar && !dni) {
+    throw new OrderValidationError("El DNI es obligatorio para registrar el retiro.");
+  }
+
+  return {
+    codigo: input.codigo,
+    nombre,
+    apellido,
+    dni,
+    observacion,
+    nombreApellido: buildPickupRedeemerFullName({ nombre, apellido }),
+  };
 }
 
 function resolvePickupCodeFromInput(rawValue: string) {
@@ -507,6 +584,7 @@ export async function updateOrderStatus(
   options?: OrderTransitionOptions,
 ) {
   const order = await getOrderById(orderId);
+  const settings = await getServerSettings();
 
   if (order.estado === nextState) {
     return order;
@@ -526,6 +604,17 @@ export async function updateOrderStatus(
 
   if (nextState === "ENVIADO" && order.tipo_pedido !== "envio") {
     throw new InvalidOrderTransitionError(order.estado, nextState);
+  }
+
+  if (
+    order.tipo_pedido === "retiro" &&
+    order.estado === "LISTO_PARA_RETIRO" &&
+    nextState === "ENTREGADO" &&
+    !settings.permitirFinalizacionManualSinDatosRetiro
+  ) {
+    throw new OrderValidationError(
+      "Para cerrar un retiro debes registrar quien retiro el pedido.",
+    );
   }
 
   const updated = await orderRepository.update(order.id, {
@@ -661,6 +750,46 @@ export async function resendPickupReadyEmail(
   return updated || patchedOrder;
 }
 
+export async function facturarPedidoConEmail(input: {
+  orderId: number;
+  to?: string | null;
+  cc?: string | null;
+  subject?: string | null;
+  message?: string | null;
+  attachments?: Array<{
+    filename: string;
+    content: Buffer;
+    contentType?: string | null;
+  }>;
+  marcarFacturado?: boolean;
+  enviarEmail?: boolean;
+}) {
+  let order = await getOrderById(input.orderId);
+
+  if (!["APROBADO", "FACTURADO"].includes(order.estado)) {
+    throw new OrderValidationError(
+      "Solo puedes facturar pedidos que esten aprobados o ya facturados.",
+    );
+  }
+
+  if (input.marcarFacturado && order.estado === "APROBADO") {
+    order = await updateOrderStatus(order.id, "FACTURADO", { origin: "admin" });
+  }
+
+  if (input.enviarEmail) {
+    await sendManualInvoiceEmail({
+      order,
+      to: input.to,
+      cc: input.cc,
+      subject: input.subject,
+      message: input.message,
+      attachments: input.attachments,
+    });
+  }
+
+  return order;
+}
+
 export async function findPickupOrderByCode(rawPickupValue: string) {
   const pickupCode = resolvePickupCodeFromInput(rawPickupValue);
 
@@ -682,19 +811,26 @@ export async function findPickupOrderByCode(rawPickupValue: string) {
 
 export async function lookupPickupOrderByCode(rawPickupValue: string) {
   const { order, pickupCode } = await findPickupOrderByCode(rawPickupValue);
-  const document = await resolveOrderDocument(order);
+  const [document, logs] = await Promise.all([
+    resolveOrderDocument(order),
+    orderRepository.getLogsByOrderId(order.id),
+  ]);
+  const currentStateLog = logs.find((log) => log.estadoNuevo === order.estado) || null;
 
   return {
     order,
     pickupCode,
     documentItems: document.documentItems,
+    currentStateEnteredAt:
+      currentStateLog?.fecha ||
+      (order.estado === "ENTREGADO" ? order.fecha_hora_retiro : null) ||
+      order.fecha_actualizacion,
   };
 }
 
 export async function registrarRetiroPedido(
   orderId: number,
-  rawPickupValue: string,
-  nombreApellido: string,
+  input: PickupRedeemInput,
   options?: OrderTransitionOptions,
 ) {
   const order = await getOrderById(orderId);
@@ -703,14 +839,10 @@ export async function registrarRetiroPedido(
     throw new OrderValidationError("Solo se puede registrar retiro para pedidos de retiro.");
   }
 
-  const pickupCode = resolvePickupCodeFromInput(rawPickupValue);
+  const pickupCode = resolvePickupCodeFromInput(input.codigo);
 
   if (!pickupCode) {
     throw new OrderValidationError("Escanea el QR o ingresa el codigo de retiro.");
-  }
-
-  if (!nombreApellido.trim()) {
-    throw new OrderValidationError("Ingresa NombreApellido para registrar el retiro.");
   }
 
   if (!order.metadata.pickupCode || order.metadata.pickupCode.trim() !== pickupCode) {
@@ -721,7 +853,15 @@ export async function registrarRetiroPedido(
     throw new OrderValidationError("Este pedido ya fue retirado y no puede volver a usarse.");
   }
 
-  const redeemed = await orderRepository.markPickupAsRedeemed(order.id, nombreApellido);
+  const pickupData = await validatePickupRedeemInput(input);
+  const redeemed = await orderRepository.markPickupAsRedeemed({
+    orderId: order.id,
+    nombre: pickupData.nombre,
+    apellido: pickupData.apellido,
+    dni: pickupData.dni,
+    observacion: pickupData.observacion,
+    nombreApellido: pickupData.nombreApellido,
+  });
 
   if (!redeemed) {
     throw new OrderValidationError("Este pedido ya fue retirado y no puede volver a usarse.");
@@ -736,18 +876,28 @@ export async function registrarRetiroPedido(
     );
   }
 
-  await sendOrderStatusEmail(redeemed.order, "ENTREGADO");
+  const deliveredAutomation = await getOrderStateAutomationConfig("ENTREGADO");
+
+  if (deliveredAutomation.sendEmailOnEnter) {
+    await sendOrderStatusEmail(redeemed.order, "ENTREGADO");
+  }
 
   return redeemed.order;
 }
 
 export async function registrarRetiroPedidoPorCodigo(
-  rawPickupValue: string,
-  nombreApellido: string,
+  input: PickupRedeemInput,
   options?: OrderTransitionOptions,
 ) {
-  const { order, pickupCode } = await findPickupOrderByCode(rawPickupValue);
-  return registrarRetiroPedido(order.id, pickupCode, nombreApellido, options);
+  const { order, pickupCode } = await findPickupOrderByCode(input.codigo);
+  return registrarRetiroPedido(
+    order.id,
+    {
+      ...input,
+      codigo: pickupCode,
+    },
+    options,
+  );
 }
 
 function buildSampleMetadata(input: {

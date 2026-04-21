@@ -22,7 +22,8 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { order, pickupCode, documentItems } = await lookupPickupOrderByCode(body.codigo || "");
+    const { order, pickupCode, documentItems, currentStateEnteredAt } =
+      await lookupPickupOrderByCode(body.codigo || "");
     const disponible = order.estado === "LISTO_PARA_RETIRO" && order.retirado !== "SI";
 
     return NextResponse.json({
@@ -32,11 +33,18 @@ export async function POST(request: Request) {
         id: order.id,
         numero_pedido: order.numero_pedido,
         nombre_cliente: order.nombre_cliente,
+        email_cliente: order.email_cliente,
+        dni_cliente: order.metadata.customerDocumentNumber || null,
         estado: order.estado,
+        fecha_entrada_estado: currentStateEnteredAt,
         retirado: order.retirado,
         fecha_creacion: order.fecha_creacion,
         fecha_hora_retiro: order.fecha_hora_retiro,
         nombre_apellido_retiro: order.nombre_apellido_retiro,
+        nombre_retiro: order.nombre_retiro,
+        apellido_retiro: order.apellido_retiro,
+        dni_retiro: order.dni_retiro,
+        observacion_retiro: order.observacion_retiro,
       },
       items: documentItems.map((item) => ({
         articleId: item.articleId,

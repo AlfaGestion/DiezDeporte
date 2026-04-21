@@ -13,7 +13,9 @@ import { PickupRedeemPanel } from "@/components/admin/pickup-redeem-panel";
 import { ErrorState } from "@/components/admin/error-state";
 import { ADMIN_SESSION_COOKIE, getAdminSessionUser } from "@/lib/admin-auth";
 import { getNextActionLabel, OrderNotFoundError } from "@/lib/models/order";
+import { getAdminOrderStateCssVariables } from "@/lib/order-state-config";
 import { getOrderDetailById } from "@/lib/services/orderService";
+import { getServerSettings } from "@/lib/store-config";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -67,20 +69,25 @@ export default async function AdminOrderDetailPage({
   }
 
   try {
-    const { order, logs, documentItems, documentNumber, documentTc } =
-      await getOrderDetailById(orderId);
+    const [{ order, logs, documentItems, documentNumber, documentTc }, stateColorStyle, serverSettings] =
+      await Promise.all([
+        getOrderDetailById(orderId),
+        getAdminOrderStateCssVariables(),
+        getServerSettings(),
+      ]);
     const nextActionLabel = getNextActionLabel(order);
     const canMarkCancelled = !["ENTREGADO", "CANCELADO", "ERROR"].includes(order.estado);
     const canMarkError = !["ENTREGADO", "CANCELADO", "ERROR"].includes(order.estado);
 
     return (
-      <main
-        className={
-          isEmbedded
-            ? "admin-order-document admin-order-document-embedded"
-            : "admin-order-document"
-        }
-      >
+        <main
+          className={
+            isEmbedded
+              ? "admin-order-document admin-order-document-embedded"
+              : "admin-order-document"
+          }
+          style={stateColorStyle}
+        >
         <section className="mx-auto flex max-w-7xl flex-col gap-5">
           <OrderDetailHeader
             order={order}
@@ -104,8 +111,16 @@ export default async function AdminOrderDetailPage({
                 nextActionLabel={nextActionLabel}
                 canMarkCancelled={canMarkCancelled}
                 canMarkError={canMarkError}
+                allowPickupLocalFallback={serverSettings.permitirRetiroYPagoLocalSiFallaMP}
               />
-              {order.tipo_pedido === "retiro" ? <PickupRedeemPanel order={order} /> : null}
+              {order.tipo_pedido === "retiro" ? (
+                <PickupRedeemPanel
+                  order={order}
+                  requirePickupFullName={serverSettings.requerirNombreApellidoAlRetirar}
+                  requirePickupDni={serverSettings.requerirDniAlRetirar}
+                  allowManualFinalize={serverSettings.permitirFinalizacionManualSinDatosRetiro}
+                />
+              ) : null}
               <OrderDeliveryCard
                 order={order}
                 documentNumber={documentNumber}

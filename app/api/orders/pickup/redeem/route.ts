@@ -13,18 +13,35 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "No autorizado." }, { status: 401 });
   }
 
-  let body: { codigo?: string; nombreApellido?: string };
+  let body: {
+    codigo?: string;
+    nombre?: string;
+    apellido?: string;
+    dni?: string;
+    observacion?: string;
+  };
 
   try {
-    body = (await request.json()) as { codigo?: string; nombreApellido?: string };
+    body = (await request.json()) as {
+      codigo?: string;
+      nombre?: string;
+      apellido?: string;
+      dni?: string;
+      observacion?: string;
+    };
   } catch {
     return NextResponse.json({ error: "El cuerpo no es un JSON valido." }, { status: 400 });
   }
 
   try {
     const order = await registrarRetiroPedidoPorCodigo(
-      body.codigo || "",
-      body.nombreApellido || "",
+      {
+        codigo: body.codigo || "",
+        nombre: body.nombre || "",
+        apellido: body.apellido || "",
+        dni: body.dni || null,
+        observacion: body.observacion || null,
+      },
       { origin: "admin" },
     );
 
@@ -33,10 +50,17 @@ export async function POST(request: Request) {
         id: order.id,
         numero_pedido: order.numero_pedido,
         nombre_cliente: order.nombre_cliente,
+        email_cliente: order.email_cliente,
+        dni_cliente: order.metadata.customerDocumentNumber || null,
         estado: order.estado,
+        fecha_entrada_estado: order.fecha_hora_retiro || order.fecha_actualizacion,
         retirado: order.retirado,
         fecha_hora_retiro: order.fecha_hora_retiro,
         nombre_apellido_retiro: order.nombre_apellido_retiro,
+        nombre_retiro: order.nombre_retiro,
+        apellido_retiro: order.apellido_retiro,
+        dni_retiro: order.dni_retiro,
+        observacion_retiro: order.observacion_retiro,
       },
     });
   } catch (error) {

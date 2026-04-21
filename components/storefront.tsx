@@ -52,7 +52,7 @@ const APPAREL_SIZE_ORDER = [
 type SortOption = "featured" | "name-asc" | "price-asc" | "price-desc";
 type ThemeMode = "light" | "dark";
 type AudienceFilter = "all" | "ninez" | "mujeres" | "hombres";
-type CheckoutStep = "cart" | "details";
+type CheckoutStep = "cart" | "delivery" | "details" | "payment";
 
 type StorefrontProps = {
   initialProducts: Product[];
@@ -119,6 +119,38 @@ function buildEmptyCustomer(settings: PublicStoreSettings): CheckoutCustomer {
       ? "Mercado Pago"
       : "Pedido directo",
   };
+}
+
+function getCheckoutValidationMessage(params: {
+  customer: CheckoutCustomer;
+  allowPickupCheckoutWithoutAddress: boolean;
+  mercadoPagoEnabled: boolean;
+}) {
+  const { customer, allowPickupCheckoutWithoutAddress, mercadoPagoEnabled } =
+    params;
+  const pickupOrder = isPickupDeliveryMethod(customer.deliveryMethod);
+  const requiresShippingAddress =
+    !pickupOrder || !allowPickupCheckoutWithoutAddress;
+
+  if (
+    !customer.fullName ||
+    !customer.email ||
+    !customer.phone ||
+    (requiresShippingAddress && !customer.address) ||
+    (requiresShippingAddress && !customer.city)
+  ) {
+    if (mercadoPagoEnabled) {
+      return requiresShippingAddress
+        ? "Completa nombre, email, telefono, direccion y localidad para iniciar el pago."
+        : "Completa nombre, email y telefono para iniciar el pago.";
+    }
+
+    return requiresShippingAddress
+      ? "Completa nombre, email, telefono, direccion y localidad para registrar el pedido."
+      : "Completa nombre, email y telefono para registrar el pedido.";
+  }
+
+  return null;
 }
 
 export function Storefront({
@@ -719,6 +751,7 @@ export function Storefront({
 
   function updateCustomerField(field: keyof CheckoutCustomer, value: string) {
     setSuccessMessage(null);
+    setErrorMessage(null);
     setCustomer((current) => ({ ...current, [field]: value }));
   }
 
@@ -733,7 +766,29 @@ export function Storefront({
       return;
     }
 
-    openCartPanel("details");
+    openCartPanel("delivery");
+  }
+
+  function goToCheckoutStep(step: CheckoutStep) {
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    setCheckoutStep(step);
+  }
+
+  function handleContinueToPayment() {
+    const validationError = getCheckoutValidationMessage({
+      customer,
+      allowPickupCheckoutWithoutAddress: settings.allowPickupCheckoutWithoutAddress,
+      mercadoPagoEnabled: settings.mercadoPagoEnabled,
+    });
+
+    if (validationError) {
+      setErrorMessage(validationError);
+      return;
+    }
+
+    setErrorMessage(null);
+    setCheckoutStep("payment");
   }
 
   function scrollToCatalog() {
@@ -745,8 +800,7 @@ export function Storefront({
     });
   }
 
-  async function handleCheckoutSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function submitCheckout() {
     setErrorMessage(null);
     setSuccessMessage(null);
 
@@ -755,26 +809,14 @@ export function Storefront({
       return;
     }
 
-    const pickupOrder = isPickupDeliveryMethod(customer.deliveryMethod);
-    const requiresShippingAddress =
-      !pickupOrder || !settings.allowPickupCheckoutWithoutAddress;
+    const validationError = getCheckoutValidationMessage({
+      customer,
+      allowPickupCheckoutWithoutAddress: settings.allowPickupCheckoutWithoutAddress,
+      mercadoPagoEnabled: settings.mercadoPagoEnabled,
+    });
 
-    if (
-      !customer.fullName ||
-      !customer.email ||
-      !customer.phone ||
-      (requiresShippingAddress && !customer.address) ||
-      (requiresShippingAddress && !customer.city)
-    ) {
-      setErrorMessage(
-        settings.mercadoPagoEnabled
-          ? requiresShippingAddress
-            ? "Completa nombre, email, telefono, direccion y localidad para iniciar el pago."
-            : "Completa nombre, email y telefono para iniciar el pago."
-          : requiresShippingAddress
-            ? "Completa nombre, email, telefono, direccion y localidad para registrar el pedido."
-            : "Completa nombre, email y telefono para registrar el pedido.",
-      );
+    if (validationError) {
+      setErrorMessage(validationError);
       return;
     }
 
@@ -1765,13 +1807,15 @@ export function Storefront({
           errorMessage={errorMessage}
           itemCount={itemCount}
           mercadoPagoEnabled={settings.mercadoPagoEnabled}
-          onCheckoutStepChange={setCheckoutStep}
-          onCheckoutSubmit={handleCheckoutSubmit}
+          onAdvanceToPayment={handleContinueToPayment}
+          onCheckoutStepChange={goToCheckoutStep}
+          onCheckoutSubmit={submitCheckout}
           onClose={() => setMobileCartOpen(false)}
           onCustomerChange={updateCustomerField}
           onItemQuantityChange={updateItemQuantity}
           onItemRemove={removeFromCart}
           submitting={submitting}
+          storeAddress={settings.storeAddress}
           successMessage={successMessage}
           subtotal={subtotal}
           taxTotal={taxTotal}
@@ -1790,13 +1834,15 @@ type CartContentProps = {
   errorMessage: string | null;
   itemCount: number;
   mercadoPagoEnabled: boolean;
+  onAdvanceToPayment: () => void;
   onCheckoutStepChange: (step: CheckoutStep) => void;
-  onCheckoutSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>;
+  onCheckoutSubmit: () => Promise<void>;
   onClose: () => void;
   onCustomerChange: (field: keyof CheckoutCustomer, value: string) => void;
   onItemQuantityChange: (productId: string, quantity: number) => void;
   onItemRemove: (productId: string) => void;
   submitting: boolean;
+  storeAddress: string;
   successMessage: string | null;
   subtotal: number;
   taxTotal: number;
@@ -1811,6 +1857,7 @@ function CartContent({
   errorMessage,
   itemCount,
   mercadoPagoEnabled,
+  onAdvanceToPayment,
   onCheckoutStepChange,
   onCheckoutSubmit,
   onClose,
@@ -1818,23 +1865,77 @@ function CartContent({
   onItemQuantityChange,
   onItemRemove,
   submitting,
+  storeAddress,
   successMessage,
   subtotal,
   taxTotal,
   total,
 }: CartContentProps) {
   const cartStepActive = checkoutStep === "cart";
+  const deliveryStepActive = checkoutStep === "delivery";
+  const detailsStepActive = checkoutStep === "details";
+  const paymentStepActive = checkoutStep === "payment";
   const pickupOrder = isPickupDeliveryMethod(customer.deliveryMethod);
   const requiresShippingAddress =
     !pickupOrder || !allowPickupCheckoutWithoutAddress;
-  const stepLabel = cartStepActive ? "Paso 1 de 2" : "Paso 2 de 2";
-  const heading = cartStepActive ? "Carrito" : "Tu pedido";
-  const subtitle = cartStepActive
-    ? `${itemCount} unidades`
-    : mercadoPagoEnabled
-      ? "Completa tus datos. Antes de pagar revalidamos stock, precio y disponibilidad."
-      : "Completa tus datos para grabar la NP del pedido.";
+  const checkoutSteps: Array<{
+    id: CheckoutStep;
+    label: string;
+    title: string;
+    subtitle: string;
+    progressTitle: string;
+  }> = [
+    {
+      id: "cart",
+      label: "Paso 1 de 4",
+      title: "Confirma tu pedido",
+      subtitle: "Revisa articulos, cantidades y total antes de avanzar.",
+      progressTitle: "Pedido",
+    },
+    {
+      id: "delivery",
+      label: "Paso 2 de 4",
+      title: "Elige como lo recibes",
+      subtitle: "Define si retiras en el local o si prefieres envio.",
+      progressTitle: "Entrega",
+    },
+    {
+      id: "details",
+      label: "Paso 3 de 4",
+      title: "Completa tus datos",
+      subtitle: pickupOrder
+        ? "Para retiro solo pedimos tus datos de contacto."
+        : "Para envio necesitamos los datos logisticos del destino.",
+      progressTitle: "Datos",
+    },
+    {
+      id: "payment",
+      label: "Paso 4 de 4",
+      title: mercadoPagoEnabled ? "Ir al pago" : "Confirmar pedido",
+      subtitle: mercadoPagoEnabled
+        ? "Verifica todo y te redirigimos a Mercado Pago."
+        : "Verifica todo y grabamos la NP del pedido.",
+      progressTitle: "Pago",
+    },
+  ];
+  const currentStepIndex = checkoutSteps.findIndex(
+    (step) => step.id === checkoutStep,
+  );
+  const currentStep = checkoutSteps[currentStepIndex] ?? checkoutSteps[0];
+  const stepLabel = currentStep.label;
+  const heading = currentStep.title;
+  const subtitle = currentStep.subtitle;
   const orderProductCount = cart.length;
+
+  function handleDetailsSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onAdvanceToPayment();
+  }
+
+  async function handlePaymentSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await onCheckoutSubmit();
+  }
 
   return (
     <>
@@ -1857,9 +1958,33 @@ function CartContent({
         </div>
       </div>
 
-      {cartStepActive ? null : errorMessage ? (
-        <div className="message error">{errorMessage}</div>
-      ) : null}
+      <div className="checkout-progress" aria-label="Etapas del checkout">
+        {checkoutSteps.map((step, index) => {
+          const active = step.id === checkoutStep;
+          const completed = index < currentStepIndex;
+
+          return (
+            <div
+              key={step.id}
+              className={[
+                "checkout-progress-item",
+                active ? "active" : "",
+                completed ? "done" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+            >
+              <span className="checkout-progress-badge">{index + 1}</span>
+              <div className="checkout-progress-copy">
+                <strong>{step.progressTitle}</strong>
+                {active ? <span>Actual</span> : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {errorMessage ? <div className="message error">{errorMessage}</div> : null}
 
       {successMessage ? <div className="message success">{successMessage}</div> : null}
 
@@ -1960,21 +2085,20 @@ function CartContent({
           <button
             type="button"
             className="submit-order-button"
-            onClick={() => onCheckoutStepChange("details")}
+            onClick={() => onCheckoutStepChange("delivery")}
             disabled={cart.length === 0}
           >
-            Continuar compra
+            Confirmar pedido
           </button>
         </div>
-      ) : (
+      ) : deliveryStepActive ? (
         <>
           <div className="checkout-step-summary">
             <div>
-              <strong>{itemCount} unidades listas para confirmar</strong>
+              <strong>Elige el tipo de entrega antes de cargar tus datos</strong>
               <p>
-                {mercadoPagoEnabled
-                  ? "Revisa tus datos y te redirigimos a Mercado Pago."
-                  : "Revisa tus datos y grabamos el pedido en el sistema."}
+                Puedes retirar en el local o pedir envio. Eso define los campos
+                que te vamos a pedir despues.
               </p>
             </div>
             <button
@@ -1982,11 +2106,96 @@ function CartContent({
               className="checkout-secondary-button"
               onClick={() => onCheckoutStepChange("cart")}
             >
-              Editar carrito
+              Volver al pedido
             </button>
           </div>
 
-          <form className="checkout-form" onSubmit={onCheckoutSubmit}>
+          <div className="checkout-delivery-grid">
+            <button
+              type="button"
+              className={[
+                "checkout-delivery-option",
+                pickupOrder ? "selected" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              onClick={() => onCustomerChange("deliveryMethod", "Retiro en local")}
+            >
+              <span className="checkout-delivery-kicker">Retiro</span>
+              <strong>Retiro en local</strong>
+              <p>
+                Pasas a buscarlo por el local. Solo te pedimos nombre, email y
+                telefono.
+              </p>
+              {storeAddress ? (
+                <small>Retiras en {storeAddress}</small>
+              ) : (
+                <small>Te avisamos cuando el pedido este listo para retirar.</small>
+              )}
+            </button>
+
+            <button
+              type="button"
+              className={[
+                "checkout-delivery-option",
+                pickupOrder ? "" : "selected",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              onClick={() =>
+                onCustomerChange("deliveryMethod", "Envio a domicilio")
+              }
+            >
+              <span className="checkout-delivery-kicker">Envio</span>
+              <strong>Envio a domicilio</strong>
+              <p>
+                Cargamos direccion y localidad para preparar la entrega
+                correctamente.
+              </p>
+              <small>Te pediremos direccion, ciudad y datos logisticos.</small>
+            </button>
+          </div>
+
+          <div className="checkout-actions">
+            <button
+              type="button"
+              className="checkout-secondary-button"
+              onClick={() => onCheckoutStepChange("cart")}
+            >
+              Volver al pedido
+            </button>
+            <button
+              type="button"
+              className="submit-order-button"
+              onClick={() => onCheckoutStepChange("details")}
+            >
+              Continuar con mis datos
+            </button>
+          </div>
+        </>
+      ) : detailsStepActive ? (
+        <>
+          <div className="checkout-step-summary">
+            <div>
+              <strong>
+                {pickupOrder ? "Retiro en local" : "Envio a domicilio"}
+              </strong>
+              <p>
+                {pickupOrder
+                  ? "Carga tus datos de contacto para registrar la NP y avisarte cuando este listo."
+                  : "Carga los datos del destinatario y la direccion de entrega."}
+              </p>
+            </div>
+            <button
+              type="button"
+              className="checkout-secondary-button"
+              onClick={() => onCheckoutStepChange("delivery")}
+            >
+              Cambiar entrega
+            </button>
+          </div>
+
+          <form className="checkout-form" onSubmit={handleDetailsSubmit}>
             <div className="checkout-grid">
               <div className="field span-2">
                 <label htmlFor="fullName">Nombre y apellido</label>
@@ -2038,38 +2247,6 @@ function CartContent({
                   }
                   placeholder="DNI / CUIT"
                 />
-              </div>
-
-              <div className="field">
-                <label htmlFor="deliveryMethod">Entrega</label>
-                <select
-                  id="deliveryMethod"
-                  value={customer.deliveryMethod}
-                  onChange={(event) =>
-                    onCustomerChange("deliveryMethod", event.target.value)
-                  }
-                >
-                  <option>Retiro en local</option>
-                  <option>Envio a domicilio</option>
-                </select>
-                <small className="panel-note">
-                  {pickupOrder
-                    ? "Para retiro solo pedimos tus datos de contacto."
-                    : "Para envio necesitamos los datos logisticos del destino."}
-                </small>
-              </div>
-
-              <div className="field">
-                <label htmlFor="paymentMethod">Pago</label>
-                <select
-                  id="paymentMethod"
-                  value={customer.paymentMethod}
-                  disabled
-                >
-                  <option>
-                    {mercadoPagoEnabled ? "Mercado Pago" : "Pedido directo"}
-                  </option>
-                </select>
               </div>
 
               {requiresShippingAddress ? (
@@ -2144,9 +2321,105 @@ function CartContent({
               <button
                 type="button"
                 className="checkout-secondary-button"
-                onClick={() => onCheckoutStepChange("cart")}
+                onClick={() => onCheckoutStepChange("delivery")}
               >
-                Volver al carrito
+                Volver a entrega
+              </button>
+              <button
+                type="submit"
+                className="submit-order-button"
+                disabled={cart.length === 0}
+              >
+                Revisar y continuar
+              </button>
+            </div>
+          </form>
+        </>
+      ) : paymentStepActive ? (
+        <>
+          <div className="checkout-step-summary">
+            <div>
+              <strong>Ultima revision antes de avanzar</strong>
+              <p>
+                Confirmas el pedido, el tipo de entrega y los datos del cliente.
+                Despues sigues al pago.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="checkout-secondary-button"
+              onClick={() => onCheckoutStepChange("details")}
+            >
+              Editar datos
+            </button>
+          </div>
+
+          <div className="checkout-review-grid">
+            <div className="checkout-review-card">
+              <span className="checkout-review-label">Resumen final</span>
+              <div className="checkout-review-list">
+                <div className="checkout-review-row">
+                  <span>Entrega</span>
+                  <strong>{customer.deliveryMethod}</strong>
+                  <p>
+                    {pickupOrder
+                      ? storeAddress || "Retiras en el local."
+                      : customer.address
+                        ? `${customer.address}, ${customer.city || "Sin localidad"}`
+                        : "Envio a domicilio"}
+                  </p>
+                </div>
+
+                <div className="checkout-review-row">
+                  <span>Cliente</span>
+                  <strong>{customer.fullName || "Sin nombre cargado"}</strong>
+                  <p>{customer.email || "Sin email cargado"}</p>
+                  <p>{customer.phone || "Sin telefono cargado"}</p>
+                  {customer.documentNumber ? (
+                    <p>Documento: {customer.documentNumber}</p>
+                  ) : null}
+                </div>
+
+                {requiresShippingAddress ? (
+                  <div className="checkout-review-row">
+                    <span>Destino</span>
+                    <strong>{customer.city || "Sin localidad"}</strong>
+                    <p>{customer.address || "Sin direccion"}</p>
+                    {customer.province ? <p>{customer.province}</p> : null}
+                    {customer.postalCode ? <p>CP {customer.postalCode}</p> : null}
+                  </div>
+                ) : null}
+
+                <div className="checkout-review-row">
+                  <span>Pago</span>
+                  <strong>
+                    {mercadoPagoEnabled ? "Mercado Pago" : "Pedido directo"}
+                  </strong>
+                  <p>
+                    {mercadoPagoEnabled
+                      ? "Al confirmar te redirigimos para completar el pago."
+                      : "Al confirmar dejamos registrado el pedido web."}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {customer.notes ? (
+            <div className="checkout-inline-note">
+              <strong>Notas del pedido</strong>
+              <p>{customer.notes}</p>
+            </div>
+          ) : null}
+
+          <form className="checkout-form" onSubmit={handlePaymentSubmit}>
+            <div className="checkout-actions">
+              <button
+                type="button"
+                className="checkout-secondary-button"
+                onClick={() => onCheckoutStepChange("details")}
+              >
+                Volver a datos
               </button>
               <button
                 type="submit"
@@ -2164,7 +2437,7 @@ function CartContent({
             </div>
           </form>
         </>
-      )}
+      ) : null}
     </>
   );
 }

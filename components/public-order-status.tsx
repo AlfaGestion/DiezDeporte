@@ -136,6 +136,20 @@ export function PublicOrderStatus({
               {getNextStepMessage(status)}
             </div>
 
+            {status.finalizationError ? (
+              <div className="mt-4 rounded-[18px] border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-400/20 dark:bg-amber-500/10 dark:text-amber-200">
+                {status.finalizationError}
+              </div>
+            ) : null}
+
+            {status.checkoutUrl && status.paymentStatus === "pendiente" ? (
+              <div className="mt-4">
+                <a href={status.checkoutUrl} className="submit-order-button">
+                  Reintentar o continuar pago
+                </a>
+              </div>
+            ) : null}
+
             {status.qrCode ? (
               <div className="mt-5 rounded-[20px] border border-[color:var(--line)] bg-[color:var(--surface)] p-5">
                 <div className="text-center">

@@ -1,4 +1,6 @@
 import "server-only";
+import { getProductsByIds } from "@/lib/catalog";
+import { getOrderStateAutomationConfig, renderOrderTemplate } from "@/lib/order-state-config";
 import { getServerSettings } from "@/lib/store-config";
 import { formatSqlServerLocalDateTime } from "@/lib/store-datetime";
 import type { OrderState, StoredOrder } from "@/lib/types/order";
@@ -7,9 +9,15 @@ type MailTransport = {
   sendMail: (message: {
     from?: string;
     to: string;
+    cc?: string | null;
     subject: string;
     text: string;
     html: string;
+    attachments?: Array<{
+      filename: string;
+      content: Buffer;
+      contentType?: string | null;
+    }>;
   }) => Promise<unknown>;
 };
 
@@ -42,6 +50,26 @@ function escapeHtml(value: string | null | undefined) {
     .replace(/'/g, "&#39;");
 }
 
+function formatPlainTextAsHtml(value: string) {
+  return escapeHtml(value).replace(/\r?\n/g, "<br />");
+}
+
+function buildPlainTemplateHtml(title: string, body: string) {
+  return `
+    <div style="margin:0;padding:24px;background:#f1f5f9;font-family:Arial,sans-serif;color:#0f172a;">
+      <div style="max-width:720px;margin:0 auto;background:#ffffff;border:1px solid #dbe3ee;border-radius:24px;overflow:hidden;">
+        <div style="padding:28px 32px;background:linear-gradient(135deg,#0f172a 0%,#1d4ed8 100%);color:#ffffff;">
+          <div style="font-size:12px;letter-spacing:.18em;text-transform:uppercase;opacity:.78;">Diez Deportes</div>
+          <h1 style="margin:10px 0 8px;font-size:28px;line-height:1.2;">${escapeHtml(title)}</h1>
+        </div>
+        <div style="padding:28px 32px;font-size:15px;line-height:1.8;color:#334155;">
+          ${formatPlainTextAsHtml(body)}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("es-AR", {
     style: "currency",
@@ -63,6 +91,88 @@ function buildDeliveryAddress(order: StoredOrder) {
 
 function getOrderItems(order: StoredOrder) {
   return order.metadata.items || [];
+}
+
+function buildFallbackSizeLabel(value: string | null | undefined) {
+  const normalized = normalizeOptionalString(value);
+
+  if (normalized) {
+    return normalized;
+  }
+
+  return null;
+}
+
+function buildSizeLabelFromProductId(productId: string) {
+  const variantSegments = String(productId || "")
+    .split("|")
+    .slice(1)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment && segment !== "-");
+
+  return variantSegments.length > 0 ? variantSegments.join(" / ") : null;
+}
+
+function buildEmailItemLabel(item: NonNullable<StoredOrder["metadata"]["items"]>[number]) {
+  const baseName = normalizeOptionalString(item.productName) || item.productId;
+  const selectedSize =
+    buildFallbackSizeLabel(item.selectedSize) || buildSizeLabelFromProductId(item.productId);
+
+  return selectedSize ? `${baseName} - Talle ${selectedSize}` : baseName;
+}
+
+async function hydrateOrderItemsForEmail(order: StoredOrder) {
+  const items = getOrderItems(order);
+
+  if (items.length === 0) {
+    return order;
+  }
+
+  const productIds = Array.from(new Set(items.map((item) => item.productId.trim()).filter(Boolean)));
+
+  if (productIds.length === 0) {
+    return order;
+  }
+
+  const products = await getProductsByIds(productIds).catch(() => []);
+  const productMap = new Map(products.map((product) => [product.id.trim(), product]));
+  let didChange = false;
+
+  const nextItems = items.map((item) => {
+    const product = productMap.get(item.productId.trim());
+    const currentName = normalizeOptionalString(item.productName);
+    const currentSize = buildFallbackSizeLabel(item.selectedSize);
+    const resolvedName =
+      currentName && currentName !== item.productId
+        ? currentName
+        : product?.description?.trim() || currentName || item.productId;
+    const resolvedSize =
+      currentSize ||
+      buildFallbackSizeLabel(product?.defaultSize) ||
+      buildSizeLabelFromProductId(item.productId);
+
+    if (resolvedName !== (item.productName || item.productId) || resolvedSize !== (item.selectedSize || null)) {
+      didChange = true;
+    }
+
+    return {
+      ...item,
+      productName: resolvedName,
+      selectedSize: resolvedSize,
+    };
+  });
+
+  if (!didChange) {
+    return order;
+  }
+
+  return {
+    ...order,
+    metadata: {
+      ...order.metadata,
+      items: nextItems,
+    },
+  } satisfies StoredOrder;
 }
 
 function buildOrderDeliveryLabel(order: StoredOrder) {
@@ -110,7 +220,7 @@ function buildItemsText(order: StoredOrder) {
   }
 
   return items.map((item) => {
-    const itemName = item.productName || item.productId;
+    const itemName = buildEmailItemLabel(item);
     const subtotal =
       Number(item.subtotal || 0) > 0
         ? ` - ${formatCurrency(Number(item.subtotal || 0))}`
@@ -146,7 +256,7 @@ function buildItemsHtml(order: StoredOrder) {
             (item) => `
               <tr>
                 <td style="padding:12px;border-bottom:1px solid #eef2f7;color:#0f172a;font-size:14px;">
-                  ${escapeHtml(item.productName || item.productId)}
+                  ${escapeHtml(buildEmailItemLabel(item))}
                 </td>
                 <td align="right" style="padding:12px;border-bottom:1px solid #eef2f7;color:#0f172a;font-size:14px;font-weight:600;">
                   ${escapeHtml(String(item.quantity || 0))}
@@ -169,6 +279,7 @@ function buildItemsHtml(order: StoredOrder) {
 
 async function buildOrderReceivedEmail(order: StoredOrder) {
   const publicOrderUrl = await buildPublicOrderUrl(order);
+  const settings = await getServerSettings();
   const deliveryLabel = buildOrderDeliveryLabel(order);
   const isMercadoPago = (order.metadata.paymentMethod || "")
     .toLowerCase()
@@ -190,12 +301,15 @@ async function buildOrderReceivedEmail(order: StoredOrder) {
     publicOrderUrl ? `Sigue tu pedido aqui: ${publicOrderUrl}` : null,
   ].filter(Boolean);
 
-  return {
-    subject: isMercadoPago
-      ? "Recibimos tu pedido / estamos procesando tu pago"
-      : "Recibimos tu pedido",
-    text: textLines.join("\n"),
-    html: `
+  return applyOrderTemplateOverrides(
+    order,
+    order.estado,
+    {
+      subject: isMercadoPago
+        ? "Recibimos tu pedido / estamos procesando tu pago"
+        : "Recibimos tu pedido",
+      text: textLines.join("\n"),
+      html: `
       <div style="margin:0;padding:24px;background:#f1f5f9;font-family:Arial,sans-serif;color:#0f172a;">
         <div style="max-width:720px;margin:0 auto;background:#ffffff;border:1px solid #dbe3ee;border-radius:24px;overflow:hidden;">
           <div style="padding:28px 32px;background:linear-gradient(135deg,#0f172a 0%,#1d4ed8 100%);color:#ffffff;">
@@ -261,7 +375,12 @@ async function buildOrderReceivedEmail(order: StoredOrder) {
         </div>
       </div>
     `,
-  };
+    },
+    {
+      subject: settings.orderReceivedEmailSubject,
+      body: settings.orderReceivedEmailBody,
+    },
+  );
 }
 
 function buildDispatchedEmail(order: StoredOrder) {
@@ -358,6 +477,42 @@ function buildDispatchedEmail(order: StoredOrder) {
   };
 }
 
+async function buildPaymentInitFailureEmail(order: StoredOrder) {
+  const settings = await getServerSettings();
+  const publicOrderUrl = await buildPublicOrderUrl(order);
+  const fallbackAvailable = settings.permitirRetiroYPagoLocalSiFallaMP;
+  const reserveHours = Math.max(1, settings.horasReservaStockPagoPendiente);
+  const defaultBody = [
+    `Hola ${order.nombre_cliente},`,
+    "",
+    "Tuvimos un inconveniente tecnico al iniciar tu pago online.",
+    "Tu pedido ya fue recibido y sigue registrado en nuestro sistema.",
+    publicOrderUrl ? `Puedes seguirlo desde aqui: ${publicOrderUrl}` : null,
+    "Si quieres, puedes reintentar el pago en unos minutos.",
+    fallbackAvailable
+      ? `Tambien podemos pasarlo a retiro y pago en local, reservando el stock por ${reserveHours} horas.`
+      : null,
+    "",
+    "Si necesitas ayuda, responde este email y lo resolvemos.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return applyOrderTemplateOverrides(
+    order,
+    order.estado,
+    {
+      subject: "Tuvimos un inconveniente al iniciar tu pago",
+      text: defaultBody,
+      html: buildPlainTemplateHtml("Tuvimos un inconveniente al iniciar tu pago", defaultBody),
+    },
+    {
+      subject: settings.paymentInitFailureEmailSubject,
+      body: settings.paymentInitFailureEmailBody,
+    },
+  );
+}
+
 function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/, "");
 }
@@ -376,6 +531,41 @@ async function buildPublicOrderUrl(order: StoredOrder) {
 function normalizeOptionalString(value: string | undefined | null) {
   const normalized = value?.trim() || "";
   return normalized || null;
+}
+
+async function applyOrderTemplateOverrides(
+  order: StoredOrder,
+  state: OrderState,
+  baseContent: {
+    subject: string;
+    text: string;
+    html: string;
+  },
+  override?: {
+    subject?: string | null;
+    body?: string | null;
+  },
+) {
+  const trackingUrl = await buildPublicOrderUrl(order);
+  const subjectTemplate = normalizeOptionalString(override?.subject);
+  const bodyTemplate = normalizeOptionalString(override?.body);
+
+  if (!subjectTemplate && !bodyTemplate) {
+    return baseContent;
+  }
+
+  const subject = subjectTemplate
+    ? renderOrderTemplate(subjectTemplate, order, state, trackingUrl)
+    : baseContent.subject;
+  const text = bodyTemplate
+    ? renderOrderTemplate(bodyTemplate, order, state, trackingUrl)
+    : baseContent.text;
+
+  return {
+    subject,
+    text,
+    html: bodyTemplate ? buildPlainTemplateHtml(subject, text) : baseContent.html,
+  };
 }
 
 function buildSmtpAccount(input: {
@@ -627,7 +817,69 @@ async function buildEmailContent(
     };
   }
 
-  return buildDispatchedEmail(order);
+  if (state === "ENVIADO") {
+    return buildDispatchedEmail(order);
+  }
+
+  const genericText = [
+    `Hola ${order.nombre_cliente},`,
+    "",
+    `Tu pedido ${order.numero_pedido} paso al estado ${state}.`,
+    buildOrderNextStep(order),
+  ].join("\n");
+
+  return {
+    subject: `Actualizacion de tu pedido: ${state}`,
+    text: genericText,
+    html: buildPlainTemplateHtml(`Actualizacion de tu pedido: ${state}`, genericText),
+  };
+}
+
+export async function sendManualInvoiceEmail(input: {
+  order: StoredOrder;
+  to?: string | null;
+  cc?: string | null;
+  subject?: string | null;
+  message?: string | null;
+  attachments?: Array<{
+    filename: string;
+    content: Buffer;
+    contentType?: string | null;
+  }>;
+}) {
+  const settings = await getServerSettings();
+  const order = await hydrateOrderItemsForEmail(input.order);
+  const publicOrderUrl = await buildPublicOrderUrl(order);
+  const fallbackSubject =
+    normalizeOptionalString(settings.invoiceEmailSubject) ||
+    `Factura de tu pedido NP ${order.numero_pedido}`;
+  const fallbackBody =
+    normalizeOptionalString(settings.invoiceEmailBody) ||
+    `Hola ${order.nombre_cliente},\n\nTe enviamos la factura correspondiente a tu pedido NP ${order.numero_pedido}.\nAdjuntamos el comprobante en este email.\n\nGracias por comprar en Diez Deportes.`;
+  const subject = renderOrderTemplate(
+    normalizeOptionalString(input.subject) || fallbackSubject,
+    order,
+    order.estado,
+    publicOrderUrl,
+  );
+  const text = renderOrderTemplate(
+    normalizeOptionalString(input.message) || fallbackBody,
+    order,
+    order.estado,
+    publicOrderUrl,
+  );
+
+  return sendEmail(
+    order,
+    {
+      to: normalizeOptionalString(input.to) || order.email_cliente,
+      cc: normalizeOptionalString(input.cc),
+      subject,
+      text,
+      html: buildPlainTemplateHtml(subject, text),
+      attachments: input.attachments || [],
+    },
+  );
 }
 
 function createTransport(config: SmtpConfig, account: SmtpAccount): MailTransport {
@@ -658,9 +910,16 @@ function createTransport(config: SmtpConfig, account: SmtpAccount): MailTranspor
 async function sendEmail(
   order: StoredOrder,
   content: {
+    to?: string | null;
+    cc?: string | null;
     subject: string;
     text: string;
     html: string;
+    attachments?: Array<{
+      filename: string;
+      content: Buffer;
+      contentType?: string | null;
+    }>;
   },
 ) {
   const config = getSmtpConfig();
@@ -668,7 +927,7 @@ async function sendEmail(
   if (!config.host || config.accounts.length === 0) {
     console.info("Email skipped because SMTP is not configured", {
       orderId: order.id,
-      to: order.email_cliente,
+      to: content.to || order.email_cliente,
       subject: content.subject,
     });
     return;
@@ -682,10 +941,12 @@ async function sendEmail(
 
       await transport.sendMail({
         from: `"${account.fromName}" <${account.from}>`,
-        to: order.email_cliente,
+        to: content.to || order.email_cliente,
+        cc: content.cc || undefined,
         subject: content.subject,
         text: content.text,
         html: content.html,
+        attachments: content.attachments,
       });
 
       return;
@@ -693,7 +954,7 @@ async function sendEmail(
       lastError = error;
       console.error("SMTP send attempt failed", {
         orderId: order.id,
-        to: order.email_cliente,
+        to: content.to || order.email_cliente,
         from: account.from,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -710,11 +971,24 @@ export async function sendOrderStatusEmail(
   state: OrderState,
   options?: EmailContentOptions,
 ) {
-  const content = await buildEmailContent(order, state, options);
-  return sendEmail(order, content);
+  const hydratedOrder = await hydrateOrderItemsForEmail(order);
+  const baseContent = await buildEmailContent(hydratedOrder, state, options);
+  const stateConfig = await getOrderStateAutomationConfig(state);
+  const content = await applyOrderTemplateOverrides(hydratedOrder, state, baseContent, {
+    subject: stateConfig.emailSubject,
+    body: stateConfig.emailBody,
+  });
+  return sendEmail(hydratedOrder, content);
 }
 
 export async function sendOrderReceivedEmail(order: StoredOrder) {
-  const content = await buildOrderReceivedEmail(order);
-  return sendEmail(order, content);
+  const hydratedOrder = await hydrateOrderItemsForEmail(order);
+  const content = await buildOrderReceivedEmail(hydratedOrder);
+  return sendEmail(hydratedOrder, content);
+}
+
+export async function sendPaymentInitFailureEmail(order: StoredOrder) {
+  const hydratedOrder = await hydrateOrderItemsForEmail(order);
+  const content = await buildPaymentInitFailureEmail(hydratedOrder);
+  return sendEmail(hydratedOrder, content);
 }

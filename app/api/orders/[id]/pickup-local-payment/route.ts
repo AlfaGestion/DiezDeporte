@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { getCurrentAdminSessionUser } from "@/lib/admin-auth";
 import { OrderNotFoundError, OrderValidationError } from "@/lib/models/order";
-import { registrarRetiroPedido } from "@/lib/services/orderService";
+import { enablePickupLocalPaymentFallback } from "@/lib/services/paymentService";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function POST(
-  request: Request,
+  _request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
   const sessionUser = await getCurrentAdminSessionUser();
@@ -23,40 +23,8 @@ export async function POST(
     return NextResponse.json({ error: "El id del pedido es invalido." }, { status: 400 });
   }
 
-  let body: {
-    codigo?: string;
-    nombre?: string;
-    apellido?: string;
-    dni?: string;
-    observacion?: string;
-  };
-
   try {
-    body = (await request.json()) as {
-      codigo?: string;
-      nombre?: string;
-      apellido?: string;
-      dni?: string;
-      observacion?: string;
-    };
-  } catch {
-    return NextResponse.json({ error: "El cuerpo no es un JSON valido." }, { status: 400 });
-  }
-
-  try {
-    const order = await registrarRetiroPedido(
-      orderId,
-      {
-        codigo: body.codigo || "",
-        nombre: body.nombre || "",
-        apellido: body.apellido || "",
-        dni: body.dni || null,
-        observacion: body.observacion || null,
-      },
-      {
-        origin: "admin",
-      },
-    );
+    const order = await enablePickupLocalPaymentFallback(orderId);
     return NextResponse.json({ order });
   } catch (error) {
     if (error instanceof OrderNotFoundError) {
@@ -67,7 +35,10 @@ export async function POST(
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    console.error("Order registrar retiro API error", error);
-    return NextResponse.json({ error: "No se pudo registrar el retiro." }, { status: 500 });
+    console.error("Pickup local payment fallback API error", error);
+    return NextResponse.json(
+      { error: "No se pudo activar retiro y pago local." },
+      { status: 500 },
+    );
   }
 }

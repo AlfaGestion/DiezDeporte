@@ -1,6 +1,8 @@
 "use client";
 
 import { AdminOrderActionButton } from "@/components/admin/admin-order-action-button";
+import { InvoiceEmailDialog } from "@/components/admin/invoice-email-dialog";
+import { OrderPaymentRecoveryActions } from "@/components/admin/order-payment-recovery-actions";
 import { PickupEmailComposer } from "@/components/admin/pickup-email-composer";
 import {
   adminCardClass,
@@ -17,20 +19,29 @@ export function OrderActionsPanel({
   nextActionLabel,
   canMarkCancelled,
   canMarkError,
+  allowPickupLocalFallback,
 }: {
   order: StoredOrder;
   returnTo: string;
   nextActionLabel: string | null;
   canMarkCancelled: boolean;
   canMarkError: boolean;
+  allowPickupLocalFallback: boolean;
 }) {
   const needsApprovedPayment =
     nextActionLabel === "Facturar" && order.estado_pago !== "aprobado";
+  const opensInvoiceDialog =
+    nextActionLabel === "Facturar" && order.estado_pago === "aprobado";
+  const needsPickupRegistration = nextActionLabel === "Registrar retiro";
   const canResendPickupEmail =
     order.tipo_pedido === "retiro" &&
     order.estado === "LISTO_PARA_RETIRO" &&
     order.retirado !== "SI";
   const pickupEmailOnlyMode = canResendPickupEmail;
+  const canRecoverPayment =
+    order.metadata.paymentInitStatus === "failed" &&
+    order.estado === "PENDIENTE" &&
+    order.estado_pago === "pendiente";
 
   return (
     <section className={cn(adminCardClass, "space-y-4 p-5")}>
@@ -58,6 +69,18 @@ export function OrderActionsPanel({
               pendingLabel="Aprobando..."
               className={cn(adminPrimaryButtonClass, "w-full")}
             />
+          ) : opensInvoiceDialog ? (
+            <InvoiceEmailDialog
+              orderId={order.id}
+              customerName={order.nombre_cliente}
+              customerEmail={order.email_cliente}
+              orderNumber={order.numero_pedido}
+              triggerClassName={cn(adminPrimaryButtonClass, "w-full")}
+            />
+          ) : needsPickupRegistration ? (
+            <a href="#pickup-panel" className={cn(adminPrimaryButtonClass, "w-full")}>
+              Registrar retiro
+            </a>
           ) : nextActionLabel ? (
             <AdminOrderActionButton
               action="advance"
@@ -81,6 +104,19 @@ export function OrderActionsPanel({
             pendingLabel="Actualizando..."
             className={cn(adminSecondaryButtonClass, "w-full")}
           />
+
+          {canRecoverPayment ? (
+            <div className="space-y-2 rounded-[16px] border border-amber-200 bg-amber-50/80 px-4 py-4 text-sm text-amber-900 dark:border-amber-400/20 dark:bg-amber-500/10 dark:text-amber-100">
+              <div className="font-semibold">Hubo un fallo tecnico al iniciar Mercado Pago.</div>
+              <div>
+                {order.metadata.paymentInitErrorMessage || "El pedido sigue vigente y puedes reintentar el pago o pasar a retiro y pago local."}
+              </div>
+              <OrderPaymentRecoveryActions
+                orderId={order.id}
+                allowPickupLocalFallback={allowPickupLocalFallback}
+              />
+            </div>
+          ) : null}
 
           {canMarkCancelled ? (
             <AdminOrderActionButton

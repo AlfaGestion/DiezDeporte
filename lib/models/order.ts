@@ -199,7 +199,7 @@ export function getNextActionLabel(order: Pick<Order, "estado" | "tipo_pedido">)
     case "PREPARANDO":
       return order.tipo_pedido === "retiro" ? "Listo para retirar" : "Enviar";
     case "LISTO_PARA_RETIRO":
-      return null;
+      return "Registrar retiro";
     case "ENVIADO":
       return "Finalizar";
     default:
@@ -255,7 +255,7 @@ export function buildQrPayload(
 
 export function shouldSendEmailForState(order: StoredOrder, state: OrderState) {
   if (state === "FACTURADO") {
-    return order.tipo_pedido !== "retiro" && !order.email_facturado_enviado_at;
+    return !order.email_facturado_enviado_at;
   }
 
   if (state === "LISTO_PARA_RETIRO") {

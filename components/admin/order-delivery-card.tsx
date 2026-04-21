@@ -107,6 +107,22 @@ export function OrderDeliveryCard({
                     {order.nombre_apellido_retiro || "Sin registrar"}
                   </dd>
                 </div>
+                <div className="rounded-[16px] border border-[color:var(--admin-card-line)] bg-[color:var(--admin-card-bg)] px-4 py-3">
+                  <dt className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--admin-text)]">
+                    DNI
+                  </dt>
+                  <dd className="mt-1 text-sm text-[color:var(--admin-title)]">
+                    {order.dni_retiro || "Sin registrar"}
+                  </dd>
+                </div>
+                <div className="rounded-[16px] border border-[color:var(--admin-card-line)] bg-[color:var(--admin-card-bg)] px-4 py-3 sm:col-span-2">
+                  <dt className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--admin-text)]">
+                    Observacion
+                  </dt>
+                  <dd className="mt-1 text-sm text-[color:var(--admin-title)]">
+                    {order.observacion_retiro || "Sin observaciones"}
+                  </dd>
+                </div>
               </>
             ) : null}
           </dl>

@@ -35,9 +35,10 @@ import {
   getAdminOrderViewLabel,
   normalizeAdminOrderView,
 } from "@/lib/order-admin";
+import { getAdminOrderStateCssVariables } from "@/lib/order-state-config";
 import { normalizeOrderFilters } from "@/lib/models/order";
 import { getOrders } from "@/lib/services/orderService";
-import { getPublicStoreSettings } from "@/lib/store-config";
+import { getPublicStoreSettings, getServerSettings } from "@/lib/store-config";
 import type {
   AdminConfigField,
   AdminOrderBucket,
@@ -384,6 +385,22 @@ function FlashMessages({
   }
 
   return null;
+}
+
+function groupConfigFields(fields: AdminConfigField[]) {
+  const groups = new Map<string, AdminConfigField[]>();
+
+  for (const field of fields) {
+    const groupName = field.group || "General";
+    const items = groups.get(groupName) || [];
+    items.push(field);
+    groups.set(groupName, items);
+  }
+
+  return Array.from(groups.entries()).map(([name, items]) => ({
+    name,
+    fields: items,
+  }));
 }
 
 function OrdersPane(props: {
@@ -752,11 +769,11 @@ function ConfigPane(props: {
     <section className="admin-pane">
       <div className="admin-pane-header">
         <div>
-          <span className="admin-pane-kicker">Parametros</span>
-          <h2>Configuracion del checkout</h2>
+          <span className="admin-pane-kicker">Negocio</span>
+          <h2>Configuracion general</h2>
           <p>
-            Los cambios impactan <code>TA_CONFIGURACION</code> y se aplican sobre el
-            runtime actual.
+            Todo se guarda en <code>TA_CONFIGURACION</code> y se aplica sobre el runtime actual.
+            Los bloques estan ordenados por operacion, no por criterio tecnico.
           </p>
         </div>
 
@@ -824,6 +841,7 @@ function ConfigPane(props: {
           {sections.map((section) => {
             const sectionSlug = slugify(section.name);
             const isActive = sectionSlug === activeConfigSlug;
+            const groups = groupConfigFields(section.fields);
 
             return (
               <section
@@ -841,41 +859,70 @@ function ConfigPane(props: {
                   </div>
                 </div>
 
-                <div className="admin-config-grid">
-                  {section.fields.map((field) => (
-                    <label
-                      key={field.key}
-                      className={
-                        field.type === "boolean"
-                          ? "admin-boolean-field"
-                          : "admin-config-field"
-                      }
+                <div className="space-y-5">
+                  {groups.map((group) => (
+                    <section
+                      key={`${section.name}-${group.name}`}
+                      className="rounded-[20px] border border-[color:var(--admin-card-line)] bg-[color:var(--admin-card-bg)] px-4 py-4"
                     >
-                      {field.type === "boolean" ? (
-                        <>
-                          <span className="admin-boolean-control">
-                            <input
-                              type="checkbox"
-                              name={field.key}
-                              defaultChecked={Boolean(field.value)}
-                            />
-                            <strong>{field.label}</strong>
-                          </span>
-                          <small>{field.description}</small>
-                        </>
-                      ) : (
-                        <>
-                          <span>{field.label}</span>
-                          <input
-                            type={field.type}
-                            name={field.key}
-                            defaultValue={String(field.value || "")}
-                            placeholder={field.placeholder}
-                          />
-                          <small>{field.description}</small>
-                        </>
-                      )}
-                    </label>
+                      <div className="mb-4">
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--admin-text)]">
+                          Grupo
+                        </div>
+                        <h4 className="mt-1 text-base font-semibold text-[color:var(--admin-title)]">
+                          {group.name}
+                        </h4>
+                      </div>
+
+                      <div className="admin-config-grid">
+                        {group.fields.map((field) => (
+                          <label
+                            key={field.key}
+                            className={
+                              field.type === "boolean"
+                                ? "admin-boolean-field"
+                                : "admin-config-field"
+                            }
+                          >
+                            {field.type === "boolean" ? (
+                              <>
+                                <span className="admin-boolean-control">
+                                  <input
+                                    type="checkbox"
+                                    name={field.key}
+                                    defaultChecked={Boolean(field.value)}
+                                  />
+                                  <strong>{field.label}</strong>
+                                </span>
+                                <small>{field.description}</small>
+                              </>
+                            ) : field.type === "textarea" ? (
+                              <>
+                                <span>{field.label}</span>
+                                <textarea
+                                  name={field.key}
+                                  defaultValue={String(field.value || "")}
+                                  placeholder={field.placeholder}
+                                  className="min-h-[140px] resize-y"
+                                />
+                                <small>{field.description}</small>
+                              </>
+                            ) : (
+                              <>
+                                <span>{field.label}</span>
+                                <input
+                                  type={field.type}
+                                  name={field.key}
+                                  defaultValue={String(field.value || "")}
+                                  placeholder={field.placeholder}
+                                />
+                                <small>{field.description}</small>
+                              </>
+                            )}
+                          </label>
+                        ))}
+                      </div>
+                    </section>
                   ))}
                 </div>
               </section>
@@ -931,9 +978,10 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     fecha_hasta,
     limit: null,
   });
-  const [settings, configFields, filteredOrders, summaryOrders, adminUsers] =
+  const [settings, serverSettings, configFields, filteredOrders, summaryOrders, adminUsers, stateColorStyle] =
     await Promise.all([
       getPublicStoreSettings(),
+      getServerSettings(),
       getAdminConfigFields(),
       getOrders({
         ...baseOrderFilters,
@@ -946,6 +994,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         limit: null,
       }),
       listAdminUsers(),
+      getAdminOrderStateCssVariables(),
     ]);
   const ordersSnapshot = buildAdminOrdersSnapshot({
     orders: filteredOrders,
@@ -997,7 +1046,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
   });
 
   return (
-    <main className="admin-page">
+    <main className="admin-page" style={stateColorStyle}>
       <section className="mx-auto flex max-w-[1480px] flex-col gap-4 px-4 py-4 lg:px-6">
         <header className="flex flex-col gap-4 rounded-[22px] border border-[color:var(--admin-pane-line)] bg-[color:var(--admin-pane-bg)] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-1">
@@ -1101,7 +1150,10 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             currentOrdersHref={currentOrdersHref}
           />
         ) : activeView === "pickups" ? (
-          <PickupDeskPane />
+          <PickupDeskPane
+            requirePickupFullName={serverSettings.requerirNombreApellidoAlRetirar}
+            requirePickupDni={serverSettings.requerirDniAlRetirar}
+          />
         ) : activeView === "users" ? (
           <UsersPane
             sessionUser={sessionUser}

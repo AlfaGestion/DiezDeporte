@@ -15,18 +15,66 @@ import type { StoredOrder } from "@/lib/types";
 
 export function PickupRedeemPanel({
   order,
+  requirePickupFullName,
+  requirePickupDni,
+  allowManualFinalize,
 }: {
   order: StoredOrder;
+  requirePickupFullName: boolean;
+  requirePickupDni: boolean;
+  allowManualFinalize: boolean;
 }) {
   const router = useRouter();
   const [codigo, setCodigo] = useState("");
-  const [nombreApellido, setNombreApellido] = useState("");
+  const [nombre, setNombre] = useState("");
+  const [apellido, setApellido] = useState("");
+  const [dni, setDni] = useState("");
+  const [observacion, setObservacion] = useState("");
   const [feedback, setFeedback] = useState<string | null>(null);
   const [feedbackTone, setFeedbackTone] = useState<"success" | "error">("success");
   const [isPending, startTransition] = useTransition();
   const isLocked = order.retirado === "SI";
   const canSubmit =
-    !isLocked && !isPending && codigo.trim().length > 0 && nombreApellido.trim().length > 0;
+    !isLocked &&
+    !isPending &&
+    codigo.trim().length > 0 &&
+    (!requirePickupFullName || (nombre.trim().length > 0 && apellido.trim().length > 0)) &&
+    (requirePickupFullName || nombre.trim().length > 0 || apellido.trim().length > 0) &&
+    (!requirePickupDni || dni.trim().length > 0);
+
+  const handleManualFinalize = () => {
+    setFeedback(null);
+
+    startTransition(async () => {
+      try {
+        const response = await fetch(`/api/orders/${order.id}/estado`, {
+          method: "PATCH",
+          credentials: "same-origin",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            estado: "ENTREGADO",
+          }),
+        });
+
+        const result = (await response.json().catch(() => null)) as { error?: string } | null;
+
+        if (!response.ok) {
+          setFeedbackTone("error");
+          setFeedback(result?.error || "No se pudo finalizar el retiro.");
+          return;
+        }
+
+        setFeedbackTone("success");
+        setFeedback("Pedido marcado como entregado.");
+        router.refresh();
+      } catch (error) {
+        setFeedbackTone("error");
+        setFeedback(error instanceof Error ? error.message : "No se pudo finalizar el retiro.");
+      }
+    });
+  };
 
   const handleSubmit = () => {
     setFeedback(null);
@@ -41,7 +89,10 @@ export function PickupRedeemPanel({
           },
           body: JSON.stringify({
             codigo,
-            nombreApellido,
+            nombre,
+            apellido,
+            dni,
+            observacion,
           }),
         });
 
@@ -56,7 +107,10 @@ export function PickupRedeemPanel({
         setFeedbackTone("success");
         setFeedback("Retiro registrado correctamente. Este codigo ya no puede volver a usarse.");
         setCodigo("");
-        setNombreApellido("");
+        setNombre("");
+        setApellido("");
+        setDni("");
+        setObservacion("");
         router.refresh();
       } catch (error) {
         setFeedbackTone("error");
@@ -66,7 +120,7 @@ export function PickupRedeemPanel({
   };
 
   return (
-    <section className={cn(adminCardClass, "space-y-4 p-5")}>
+    <section id="pickup-panel" className={cn(adminCardClass, "space-y-4 p-5")}>
       <div>
         <h2 className="text-sm font-semibold text-[color:var(--admin-title)]">Retiro en local</h2>
         <p className="mt-1 text-sm text-[color:var(--admin-text)]">
@@ -78,13 +132,39 @@ export function PickupRedeemPanel({
 
       {!isLocked ? (
         <div className="space-y-3">
-          <input
-            value={nombreApellido}
-            onChange={(event) => setNombreApellido(event.target.value)}
-            placeholder="NombreApellido de quien retira"
-            className={adminInputClass}
-            disabled={isPending}
-          />
+          <div className="grid gap-2 sm:grid-cols-2">
+            <input
+              value={nombre}
+              onChange={(event) => setNombre(event.target.value)}
+              placeholder={requirePickupFullName ? "Nombre de quien retira" : "Nombre"}
+              className={adminInputClass}
+              disabled={isPending}
+            />
+            <input
+              value={apellido}
+              onChange={(event) => setApellido(event.target.value)}
+              placeholder={requirePickupFullName ? "Apellido de quien retira" : "Apellido"}
+              className={adminInputClass}
+              disabled={isPending}
+            />
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2">
+            <input
+              value={dni}
+              onChange={(event) => setDni(event.target.value)}
+              placeholder={requirePickupDni ? "DNI obligatorio" : "DNI"}
+              className={adminInputClass}
+              disabled={isPending}
+            />
+            <input
+              value={observacion}
+              onChange={(event) => setObservacion(event.target.value)}
+              placeholder="Observacion opcional"
+              className={adminInputClass}
+              disabled={isPending}
+            />
+          </div>
 
           <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_220px]">
             <input
@@ -112,6 +192,17 @@ export function PickupRedeemPanel({
           >
             {isPending ? "Registrando..." : "Registrar retiro"}
           </button>
+
+          {allowManualFinalize ? (
+            <button
+              type="button"
+              onClick={handleManualFinalize}
+              className={cn("w-full", adminPrimaryButtonClass)}
+              disabled={isPending}
+            >
+              {isPending ? "Actualizando..." : "Finalizar sin datos de retiro"}
+            </button>
+          ) : null}
         </div>
       ) : (
         <div className="rounded-[16px] border border-[color:var(--admin-pane-line)] bg-[color:var(--admin-pane-bg)] px-4 py-4">
@@ -121,6 +212,16 @@ export function PickupRedeemPanel({
           <div className="mt-2 text-base font-semibold text-[color:var(--admin-title)]">
             {order.nombre_apellido_retiro || "Sin registrar"}
           </div>
+          {order.dni_retiro ? (
+            <div className="mt-2 text-sm text-[color:var(--admin-text)]">
+              DNI: {order.dni_retiro}
+            </div>
+          ) : null}
+          {order.observacion_retiro ? (
+            <div className="mt-2 text-sm text-[color:var(--admin-text)]">
+              Obs.: {order.observacion_retiro}
+            </div>
+          ) : null}
           <div className="mt-2 text-sm text-[color:var(--admin-text)]">
             {order.fecha_hora_retiro
               ? `Retiro registrado el ${formatAdminDateTime(order.fecha_hora_retiro)}.`
@@ -146,6 +247,12 @@ export function PickupRedeemPanel({
           <span className="text-[color:var(--admin-text)]">Retirado por</span>
           <strong className="text-right text-[color:var(--admin-title)]">
             {order.nombre_apellido_retiro || "Sin registrar"}
+          </strong>
+        </div>
+        <div className="mt-2 flex items-center justify-between gap-3">
+          <span className="text-[color:var(--admin-text)]">DNI</span>
+          <strong className="text-right text-[color:var(--admin-title)]">
+            {order.dni_retiro || "Sin registrar"}
           </strong>
         </div>
       </div>

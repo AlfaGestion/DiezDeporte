@@ -12,9 +12,12 @@ import type {
 
 const ORDERS_TABLE = "dbo.WEB_V_MV_PEDIDOS";
 const ORDER_LOGS_TABLE = "dbo.WEB_V_MV_PEDIDOS_LOGS";
+const ORDER_SCHEMA_VERSION = 2;
 
 declare global {
-  var __diezDeportesOrderSchemaReady: Promise<void> | undefined;
+  var __diezDeportesOrderSchemaReady:
+    | { version: number; promise: Promise<void> }
+    | undefined;
 }
 
 type OrderRow = {
@@ -34,6 +37,10 @@ type OrderRow = {
   RETIRADO: string | null;
   FECHA_HORA_RETIRO: Date | null;
   NOMBRE_APELLIDO: string | null;
+  NOMBRE_RETIRO: string | null;
+  APELLIDO_RETIRO: string | null;
+  DNI_RETIRO: string | null;
+  OBSERVACION_RETIRO: string | null;
   DETALLE_JSON: string | null;
   EMAIL_FACTURADO_ENVIADO_AT: Date | null;
   EMAIL_LISTO_ENVIADO_AT: Date | null;
@@ -108,6 +115,10 @@ function mapOrderRow(row: OrderRow): StoredOrder {
     retirado: row.RETIRADO === "SI" ? "SI" : "NO",
     fecha_hora_retiro: toIsoString(row.FECHA_HORA_RETIRO),
     nombre_apellido_retiro: row.NOMBRE_APELLIDO?.trim() || null,
+    nombre_retiro: row.NOMBRE_RETIRO?.trim() || null,
+    apellido_retiro: row.APELLIDO_RETIRO?.trim() || null,
+    dni_retiro: row.DNI_RETIRO?.trim() || null,
+    observacion_retiro: row.OBSERVACION_RETIRO?.trim() || null,
     fecha_creacion: new Date(row.FECHA_CREACION).toISOString(),
     fecha_actualizacion: new Date(row.FECHA_ACTUALIZACION).toISOString(),
     metadata: parseMetadata(row.DETALLE_JSON),
@@ -167,11 +178,14 @@ function buildDateEndExclusive(value: string) {
 }
 
 async function ensureSchema() {
-  if (global.__diezDeportesOrderSchemaReady) {
-    return global.__diezDeportesOrderSchemaReady;
+  if (
+    global.__diezDeportesOrderSchemaReady &&
+    global.__diezDeportesOrderSchemaReady.version === ORDER_SCHEMA_VERSION
+  ) {
+    return global.__diezDeportesOrderSchemaReady.promise;
   }
 
-  global.__diezDeportesOrderSchemaReady = (async () => {
+  const promise = (async () => {
   const pool = await getConnection();
 
     await pool.request().query(`
@@ -194,6 +208,10 @@ async function ensureSchema() {
           RETIRADO nvarchar(2) NOT NULL CONSTRAINT DF_WEB_V_MV_PEDIDOS_RETIRADO DEFAULT 'NO',
           FECHA_HORA_RETIRO datetime2 NULL,
           NOMBRE_APELLIDO nvarchar(160) NULL,
+          NOMBRE_RETIRO nvarchar(80) NULL,
+          APELLIDO_RETIRO nvarchar(80) NULL,
+          DNI_RETIRO nvarchar(40) NULL,
+          OBSERVACION_RETIRO nvarchar(250) NULL,
           DETALLE_JSON nvarchar(max) NULL,
           EMAIL_FACTURADO_ENVIADO_AT datetime2 NULL,
           EMAIL_LISTO_ENVIADO_AT datetime2 NULL,
@@ -234,6 +252,26 @@ async function ensureSchema() {
       IF COL_LENGTH('${ORDERS_TABLE}', 'NOMBRE_APELLIDO') IS NULL
       BEGIN
         ALTER TABLE ${ORDERS_TABLE} ADD NOMBRE_APELLIDO nvarchar(160) NULL;
+      END;
+
+      IF COL_LENGTH('${ORDERS_TABLE}', 'NOMBRE_RETIRO') IS NULL
+      BEGIN
+        ALTER TABLE ${ORDERS_TABLE} ADD NOMBRE_RETIRO nvarchar(80) NULL;
+      END;
+
+      IF COL_LENGTH('${ORDERS_TABLE}', 'APELLIDO_RETIRO') IS NULL
+      BEGIN
+        ALTER TABLE ${ORDERS_TABLE} ADD APELLIDO_RETIRO nvarchar(80) NULL;
+      END;
+
+      IF COL_LENGTH('${ORDERS_TABLE}', 'DNI_RETIRO') IS NULL
+      BEGIN
+        ALTER TABLE ${ORDERS_TABLE} ADD DNI_RETIRO nvarchar(40) NULL;
+      END;
+
+      IF COL_LENGTH('${ORDERS_TABLE}', 'OBSERVACION_RETIRO') IS NULL
+      BEGIN
+        ALTER TABLE ${ORDERS_TABLE} ADD OBSERVACION_RETIRO nvarchar(250) NULL;
       END;
 
       IF COL_LENGTH('${ORDERS_TABLE}', 'EMAIL_FACTURADO_ENVIADO_AT') IS NULL
@@ -310,7 +348,12 @@ async function ensureSchema() {
     throw error;
   });
 
-  return global.__diezDeportesOrderSchemaReady;
+  global.__diezDeportesOrderSchemaReady = {
+    version: ORDER_SCHEMA_VERSION,
+    promise,
+  };
+
+  return promise;
 }
 
 export async function getById(id: number) {
@@ -575,6 +618,18 @@ export async function update(id: number, input: UpdateOrderInput) {
   if (input.nombre_apellido_retiro !== undefined) {
     entries.push(["NOMBRE_APELLIDO", input.nombre_apellido_retiro?.trim() || null]);
   }
+  if (input.nombre_retiro !== undefined) {
+    entries.push(["NOMBRE_RETIRO", input.nombre_retiro?.trim() || null]);
+  }
+  if (input.apellido_retiro !== undefined) {
+    entries.push(["APELLIDO_RETIRO", input.apellido_retiro?.trim() || null]);
+  }
+  if (input.dni_retiro !== undefined) {
+    entries.push(["DNI_RETIRO", input.dni_retiro?.trim() || null]);
+  }
+  if (input.observacion_retiro !== undefined) {
+    entries.push(["OBSERVACION_RETIRO", input.observacion_retiro?.trim() || null]);
+  }
   if (input.metadata !== undefined) {
     entries.push(["DETALLE_JSON", JSON.stringify(input.metadata || {})]);
   }
@@ -823,17 +878,32 @@ export async function getDocumentItemStatsByOrderNumbers(orderNumbers: string[])
   );
 }
 
-export async function markPickupAsRedeemed(orderId: number, nombreApellido: string) {
+export async function markPickupAsRedeemed(input: {
+  orderId: number;
+  nombre: string | null;
+  apellido: string | null;
+  dni: string | null;
+  observacion: string | null;
+  nombreApellido: string | null;
+}) {
   await ensureSchema();
   const pool = await getConnection();
   const request = pool.request();
-  request.input("id", orderId);
-  request.input("nombreApellido", nombreApellido.trim());
+  request.input("id", input.orderId);
+  request.input("nombre", input.nombre?.trim() || null);
+  request.input("apellido", input.apellido?.trim() || null);
+  request.input("dni", input.dni?.trim() || null);
+  request.input("observacion", input.observacion?.trim() || null);
+  request.input("nombreApellido", input.nombreApellido?.trim() || null);
   const result = await request.query<RedeemOrderRow>(`
     UPDATE ${ORDERS_TABLE}
     SET
       RETIRADO = 'SI',
       FECHA_HORA_RETIRO = SYSDATETIME(),
+      NOMBRE_RETIRO = @nombre,
+      APELLIDO_RETIRO = @apellido,
+      DNI_RETIRO = @dni,
+      OBSERVACION_RETIRO = @observacion,
       NOMBRE_APELLIDO = @nombreApellido,
       ESTADO = 'ENTREGADO',
       FECHA_ACTUALIZACION = SYSDATETIME()

@@ -1600,6 +1600,78 @@ svg {
   text-transform: uppercase;
 }
 
+.checkout-progress {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.checkout-progress-item {
+  display: inline-flex;
+  align-items: center;
+  flex: 1 1 calc(50% - 10px);
+  min-width: 0;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-soft);
+}
+
+.checkout-progress-item.active {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary-soft) 74%, transparent);
+}
+
+.checkout-progress-item.done {
+  border-color: color-mix(in srgb, var(--primary) 28%, var(--line));
+  background: color-mix(in srgb, var(--surface-soft) 82%, var(--primary-soft));
+}
+
+.checkout-progress-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--text-soft);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.checkout-progress-item.active .checkout-progress-badge,
+.checkout-progress-item.done .checkout-progress-badge {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+.checkout-progress-copy {
+  min-width: 0;
+}
+
+.checkout-progress-copy strong {
+  display: block;
+  color: var(--text);
+  font-size: 0.92rem;
+  line-height: 1.1;
+}
+
+.checkout-progress-copy span {
+  display: block;
+  margin-top: 3px;
+  color: var(--primary);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .checkout-header-actions {
   display: flex;
   align-items: center;
@@ -1722,6 +1794,95 @@ svg {
 
 .checkout-form {
   margin-top: 16px;
+}
+
+.checkout-delivery-grid,
+.checkout-review-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.checkout-delivery-option,
+.checkout-review-card,
+.checkout-inline-note {
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: var(--surface-soft);
+}
+
+.checkout-delivery-option {
+  display: grid;
+  gap: 8px;
+  text-align: left;
+}
+
+.checkout-delivery-option.selected {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary-soft) 70%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary) 22%, transparent);
+}
+
+.checkout-delivery-kicker,
+.checkout-review-label {
+  color: var(--text-soft);
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.checkout-delivery-option strong,
+.checkout-review-card strong,
+.checkout-inline-note strong {
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.checkout-review-card,
+.checkout-inline-note {
+  display: grid;
+  gap: 14px;
+}
+
+.checkout-review-list {
+  display: grid;
+  gap: 12px;
+}
+
+.checkout-review-row {
+  display: grid;
+  gap: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.checkout-review-row:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.checkout-review-row > span {
+  color: var(--text-soft);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.checkout-review-row > strong {
+  font-size: 1.08rem;
+}
+
+.checkout-delivery-option p,
+.checkout-delivery-option small,
+.checkout-review-card p,
+.checkout-inline-note p {
+  margin: 0;
+  color: var(--text-soft);
+  line-height: 1.5;
 }
 
 .checkout-step-summary {
@@ -2041,9 +2202,15 @@ html[data-theme="dark"] .site-logo {
 
   .catalog-grid,
   .checkout-grid,
+  .checkout-delivery-grid,
+  .checkout-review-grid,
   .brand-strip,
   .promo-grid {
     grid-template-columns: 1fr;
+  }
+
+  .checkout-progress-item {
+    flex-basis: 100%;
   }
 
   .catalog-card-variant-preview {
@@ -2807,6 +2974,7 @@ html[data-theme="dark"] .admin-header-actions .submit-order-button {
 }
 
 .admin-config-field input,
+.admin-config-field textarea,
 .admin-login-panel .field input,
 .admin-login-panel .field select,
 .admin-login-panel .field textarea {
@@ -2826,12 +2994,18 @@ html[data-theme="dark"] .admin-header-actions .submit-order-button {
 }
 
 .admin-config-field input:focus,
+.admin-config-field textarea:focus,
 .admin-login-panel .field input:focus,
 .admin-login-panel .field select:focus,
 .admin-login-panel .field textarea:focus {
   border-color: rgba(13, 109, 216, 0.4);
   box-shadow: 0 0 0 4px rgba(13, 109, 216, 0.12);
   background: var(--surface);
+}
+
+.admin-config-field input[type="color"] {
+  padding: 0.35rem;
+  min-height: 52px;
 }
 
 .admin-login-panel .submit-order-button {

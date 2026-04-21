@@ -42,6 +42,7 @@ export type OrderItem = {
   productId: string;
   quantity: number;
   productName?: string | null;
+  selectedSize?: string | null;
   unitPrice?: number | null;
   subtotal?: number | null;
   currency?: string | null;
@@ -62,6 +63,14 @@ export type OrderDocumentItem = {
 export type OrderMetadata = {
   items?: OrderItem[];
   preferenceId?: string | null;
+  paymentInitStatus?: "pending" | "ok" | "failed" | null;
+  paymentInitErrorMessage?: string | null;
+  paymentRetryCount?: number | null;
+  lastPaymentInitAttemptAt?: string | null;
+  lastCheckoutUrl?: string | null;
+  fallbackPickupLocalPaymentEligible?: boolean | null;
+  fallbackPickupLocalPaymentActivatedAt?: string | null;
+  fallbackPickupLocalPaymentReservedUntil?: string | null;
   externalReference?: string | null;
   customerDocumentNumber?: string | null;
   customerAddress?: string | null;
@@ -106,6 +115,10 @@ export type Order = {
   retirado: "SI" | "NO";
   fecha_hora_retiro: string | null;
   nombre_apellido_retiro: string | null;
+  nombre_retiro: string | null;
+  apellido_retiro: string | null;
+  dni_retiro: string | null;
+  observacion_retiro: string | null;
   fecha_creacion: string;
   fecha_actualizacion: string;
 };
@@ -161,6 +174,10 @@ export type UpdateOrderInput = Partial<
     | "retirado"
     | "fecha_hora_retiro"
     | "nombre_apellido_retiro"
+    | "nombre_retiro"
+    | "apellido_retiro"
+    | "dni_retiro"
+    | "observacion_retiro"
     | "metadata"
     | "email_facturado_enviado_at"
     | "email_listo_enviado_at"
