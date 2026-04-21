@@ -1977,7 +1977,7 @@ function CartContent({
               <span className="checkout-progress-badge">{index + 1}</span>
               <div className="checkout-progress-copy">
                 <strong>{step.progressTitle}</strong>
-                {active ? <span>Actual</span> : null}
+                {active ? <span>Actual</span> : completed ? <span>Listo</span> : null}
               </div>
             </div>
           );

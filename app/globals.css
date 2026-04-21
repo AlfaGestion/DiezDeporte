@@ -1625,8 +1625,8 @@ svg {
 }
 
 .checkout-progress-item.done {
-  border-color: color-mix(in srgb, var(--primary) 28%, var(--line));
-  background: color-mix(in srgb, var(--surface-soft) 82%, var(--primary-soft));
+  border-color: color-mix(in srgb, #16a34a 42%, var(--line));
+  background: color-mix(in srgb, #dcfce7 78%, var(--surface-soft));
 }
 
 .checkout-progress-badge {
@@ -1644,11 +1644,34 @@ svg {
   font-weight: 800;
 }
 
-.checkout-progress-item.active .checkout-progress-badge,
-.checkout-progress-item.done .checkout-progress-badge {
+.checkout-progress-item.active .checkout-progress-badge {
   background: var(--primary);
   border-color: var(--primary);
   color: #fff;
+}
+
+.checkout-progress-item.done .checkout-progress-badge {
+  background: #16a34a;
+  border-color: #16a34a;
+  color: #fff;
+}
+
+.checkout-progress-item.done .checkout-progress-copy span {
+  color: #15803d;
+}
+
+html[data-theme="dark"] .checkout-progress-item.done {
+  border-color: rgba(34, 197, 94, 0.38);
+  background: color-mix(in srgb, #052e16 72%, var(--surface-soft));
+}
+
+html[data-theme="dark"] .checkout-progress-item.done .checkout-progress-badge {
+  background: #15803d;
+  border-color: #15803d;
+}
+
+html[data-theme="dark"] .checkout-progress-item.done .checkout-progress-copy span {
+  color: #86efac;
 }
 
 .checkout-progress-copy {
