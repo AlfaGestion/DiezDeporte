@@ -127,6 +127,26 @@ function trimTrailingSlash(value: string) {
   return value.endsWith("/") ? value.slice(0, -1) : value;
 }
 
+function normalizeAbsoluteHttpUrl(value: string | null | undefined) {
+  const rawValue = (value || "").trim();
+
+  if (!rawValue) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(rawValue);
+
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+
+    return trimTrailingSlash(parsed.origin + parsed.pathname).replace(/\/+$/, "");
+  } catch {
+    return null;
+  }
+}
+
 async function readMercadoPagoJson(response: Response) {
   const text = await response.text();
   if (!text) return null;
@@ -195,8 +215,10 @@ async function mercadoPagoFetch<T>(
 
 export async function resolveMercadoPagoBaseUrl(requestUrl?: string) {
   const configuredBaseUrl = (await getServerSettings()).mercadoPagoPublicBaseUrl;
-  if (configuredBaseUrl) {
-    return trimTrailingSlash(configuredBaseUrl);
+  const normalizedConfiguredBaseUrl = normalizeAbsoluteHttpUrl(configuredBaseUrl);
+
+  if (normalizedConfiguredBaseUrl) {
+    return normalizedConfiguredBaseUrl;
   }
 
   if (requestUrl) {
@@ -208,7 +230,7 @@ export async function resolveMercadoPagoBaseUrl(requestUrl?: string) {
   }
 
   throw new Error(
-    "Falta APP_PUBLIC_BASE_URL para construir los callbacks de Mercado Pago.",
+    "Configura una URL publica valida para Mercado Pago en el admin. Ejemplo: https://tu-dominio.com",
   );
 }
 

@@ -115,6 +115,8 @@ export type PublicStoreSettings = {
   storeName: string;
   logoUrl: string;
   storeTagline: string;
+  welcomeMessage: string;
+  storeHours: string;
   allowBackorders: boolean;
   allowPickupCheckoutWithoutAddress: boolean;
   mercadoPagoEnabled: boolean;
@@ -127,6 +129,13 @@ export type PublicStoreSettings = {
   supportPhone: string;
   storeAddress: string;
   supportBlurb: string;
+};
+
+export type PaymentCollectionAccount = {
+  code: string;
+  label: string;
+  optionalCode: string | null;
+  mediumCode: string | null;
 };
 
 export type BrandImage = {
@@ -196,6 +205,7 @@ export type AdminOrderRecord = {
   nextActionLabel: string | null;
   bucket: AdminOrderBucket;
   requiresAttention: boolean;
+  paymentMethod: string | null;
   paymentMethodId: string | null;
   paymentTypeId: string | null;
 };

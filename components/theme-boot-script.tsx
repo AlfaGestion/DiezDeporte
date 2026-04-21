@@ -1,3 +1,5 @@
+import Script from "next/script";
+
 const THEME_BOOTSTRAP_SCRIPT = `
   (() => {
     try {
@@ -22,5 +24,11 @@ const THEME_BOOTSTRAP_SCRIPT = `
 `;
 
 export function ThemeBootScript() {
-  return <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }} />;
+  return (
+    <Script
+      id="theme-boot-script"
+      strategy="beforeInteractive"
+      dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }}
+    />
+  );
 }

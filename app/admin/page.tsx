@@ -9,6 +9,7 @@ import {
   updateAdminUserAction,
 } from "@/app/admin/actions";
 import { AdminPageHeader } from "@/components/admin/admin-page-header";
+import { AdminConfigWorkspace } from "@/components/admin/admin-config-workspace";
 import { AdminThemeToggle } from "@/components/admin-theme-toggle";
 import { cn } from "@/components/admin/admin-ui";
 import { EmptyState } from "@/components/admin/empty-state";
@@ -22,7 +23,6 @@ import {
 } from "@/lib/admin-auth";
 import {
   getAdminConfigFields,
-  getAdminConfigSections,
 } from "@/lib/admin-config";
 import {
   ADMIN_PASSWORD_PATTERN,
@@ -40,7 +40,6 @@ import { normalizeOrderFilters } from "@/lib/models/order";
 import { getOrders } from "@/lib/services/orderService";
 import { getPublicStoreSettings, getServerSettings } from "@/lib/store-config";
 import type {
-  AdminConfigField,
   AdminOrderBucket,
   AdminOrdersSnapshot,
   OrderListView,
@@ -83,15 +82,6 @@ type AdminHrefInput = {
   create?: boolean;
   editUser?: number;
 };
-
-function slugify(value: string) {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
 
 function normalizeView(rawValue: string | undefined): AdminView {
   if (rawValue === "users") {
@@ -182,20 +172,6 @@ function buildAdminHref(input: AdminHrefInput) {
 
   const query = params.toString();
   return query ? `/admin?${query}` : "/admin";
-}
-
-function getActiveConfigSlug(
-  rawValue: string | undefined,
-  sections: Array<{ name: string; fields: AdminConfigField[] }>,
-) {
-  const availableSlugs = new Set(sections.map((section) => slugify(section.name)));
-  const fallback = sections[0] ? slugify(sections[0].name) : "";
-
-  if (rawValue && availableSlugs.has(rawValue)) {
-    return rawValue;
-  }
-
-  return fallback;
 }
 
 function getViewMeta(view: AdminView) {
@@ -385,22 +361,6 @@ function FlashMessages({
   }
 
   return null;
-}
-
-function groupConfigFields(fields: AdminConfigField[]) {
-  const groups = new Map<string, AdminConfigField[]>();
-
-  for (const field of fields) {
-    const groupName = field.group || "General";
-    const items = groups.get(groupName) || [];
-    items.push(field);
-    groups.set(groupName, items);
-  }
-
-  return Array.from(groups.entries()).map(([name, items]) => ({
-    name,
-    fields: items,
-  }));
 }
 
 function OrdersPane(props: {
@@ -756,186 +716,18 @@ function UsersPane(props: {
 }
 
 function ConfigPane(props: {
-  settings: Awaited<ReturnType<typeof getPublicStoreSettings>>;
   configFields: Awaited<ReturnType<typeof getAdminConfigFields>>;
-  sections: Array<{ name: string; fields: AdminConfigField[] }>;
   activeConfigSlug: string;
 }) {
-  const { settings, configFields, sections, activeConfigSlug } = props;
-  const activeSection =
-    sections.find((section) => slugify(section.name) === activeConfigSlug) || null;
+  const { configFields, activeConfigSlug } = props;
 
   return (
     <section className="admin-pane">
-      <div className="admin-pane-header">
-        <div>
-          <span className="admin-pane-kicker">Negocio</span>
-          <h2>Configuracion general</h2>
-          <p>
-            Todo se guarda en <code>TA_CONFIGURACION</code> y se aplica sobre el runtime actual.
-            Los bloques estan ordenados por operacion, no por criterio tecnico.
-          </p>
-        </div>
-
-        <div className="admin-pane-actions">
-          <span className="admin-inline-badge">
-            Bloque activo: {activeSection?.name || "Sin bloque"}
-          </span>
-          <span className="admin-inline-badge">
-            {activeSection ? `${activeSection.fields.length} campos` : "0 campos"}
-          </span>
-        </div>
-      </div>
-
-      <div className="admin-overview-grid">
-        <article className="admin-overview-card">
-          <span>Bloques</span>
-          <strong>{sections.length}</strong>
-          <small>Secciones editables del panel.</small>
-        </article>
-        <article className="admin-overview-card tone-accent">
-          <span>Campos</span>
-          <strong>{configFields.length}</strong>
-          <small>Parametros administrables.</small>
-        </article>
-        <article className="admin-overview-card tone-success">
-          <span>Mercado Pago</span>
-          <strong>{settings.mercadoPagoEnabled ? "Listo" : "Pendiente"}</strong>
-          <small>Estado actual del checkout.</small>
-        </article>
-        <article className="admin-overview-card tone-warning">
-          <span>Backorders</span>
-          <strong>{settings.allowBackorders ? "Permitidos" : "Bloqueados"}</strong>
-          <small>Comportamiento comercial actual.</small>
-        </article>
-      </div>
-
-      <div className="admin-config-layout">
-        <nav className="admin-config-nav" aria-label="Bloques de configuracion">
-          {sections.map((section) => {
-            const sectionSlug = slugify(section.name);
-
-            return (
-              <Link
-                key={section.name}
-                href={buildAdminHref({
-                  view: "config",
-                  config: sectionSlug,
-                })}
-                className={
-                  sectionSlug === activeConfigSlug
-                    ? "admin-config-nav-link active"
-                    : "admin-config-nav-link"
-                }
-              >
-                <span>{section.name}</span>
-                <small>{section.fields.length} campos</small>
-              </Link>
-            );
-          })}
-        </nav>
-
-        <form action={saveAdminSettingsAction} className="admin-config-form">
-          <input type="hidden" name="activeConfig" value={activeConfigSlug} />
-
-          {sections.map((section) => {
-            const sectionSlug = slugify(section.name);
-            const isActive = sectionSlug === activeConfigSlug;
-            const groups = groupConfigFields(section.fields);
-
-            return (
-              <section
-                key={section.name}
-                className={
-                  isActive
-                    ? "admin-section-card"
-                    : "admin-section-card admin-section-card-hidden"
-                }
-              >
-                <div className="admin-section-heading">
-                  <div>
-                    <span className="admin-pane-kicker">Bloque</span>
-                    <h3>{section.name}</h3>
-                  </div>
-                </div>
-
-                <div className="space-y-5">
-                  {groups.map((group) => (
-                    <section
-                      key={`${section.name}-${group.name}`}
-                      className="rounded-[20px] border border-[color:var(--admin-card-line)] bg-[color:var(--admin-card-bg)] px-4 py-4"
-                    >
-                      <div className="mb-4">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--admin-text)]">
-                          Grupo
-                        </div>
-                        <h4 className="mt-1 text-base font-semibold text-[color:var(--admin-title)]">
-                          {group.name}
-                        </h4>
-                      </div>
-
-                      <div className="admin-config-grid">
-                        {group.fields.map((field) => (
-                          <label
-                            key={field.key}
-                            className={
-                              field.type === "boolean"
-                                ? "admin-boolean-field"
-                                : "admin-config-field"
-                            }
-                          >
-                            {field.type === "boolean" ? (
-                              <>
-                                <span className="admin-boolean-control">
-                                  <input
-                                    type="checkbox"
-                                    name={field.key}
-                                    defaultChecked={Boolean(field.value)}
-                                  />
-                                  <strong>{field.label}</strong>
-                                </span>
-                                <small>{field.description}</small>
-                              </>
-                            ) : field.type === "textarea" ? (
-                              <>
-                                <span>{field.label}</span>
-                                <textarea
-                                  name={field.key}
-                                  defaultValue={String(field.value || "")}
-                                  placeholder={field.placeholder}
-                                  className="min-h-[140px] resize-y"
-                                />
-                                <small>{field.description}</small>
-                              </>
-                            ) : (
-                              <>
-                                <span>{field.label}</span>
-                                <input
-                                  type={field.type}
-                                  name={field.key}
-                                  defaultValue={String(field.value || "")}
-                                  placeholder={field.placeholder}
-                                />
-                                <small>{field.description}</small>
-                              </>
-                            )}
-                          </label>
-                        ))}
-                      </div>
-                    </section>
-                  ))}
-                </div>
-              </section>
-            );
-          })}
-
-          <div className="admin-form-actions">
-            <button type="submit" className="submit-order-button">
-              Guardar configuracion
-            </button>
-          </div>
-        </form>
-      </div>
+      <AdminConfigWorkspace
+        fields={configFields}
+        activeSection={activeConfigSlug}
+        saveAction={saveAdminSettingsAction}
+      />
     </section>
   );
 }
@@ -1000,8 +792,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     orders: filteredOrders,
     allOrders: summaryOrders,
   });
-  const sections = getAdminConfigSections(configFields);
-  const activeConfigSlug = getActiveConfigSlug(config, sections);
+  const activeConfigSlug = config || "negocio";
   const viewMeta = getViewMeta(activeView);
   const userCreateErrors = new Set([
     "user-create",
@@ -1137,7 +928,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           >
             <span>Configuracion</span>
             <small className={activeView === "config" ? "text-white/80" : "text-[color:var(--admin-text)]"}>
-              {sections.length}
+              8
             </small>
           </Link>
         </nav>
@@ -1163,12 +954,10 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             editingUser={editingUser}
           />
         ) : (
-          <ConfigPane
-            settings={settings}
-            configFields={configFields}
-            sections={sections}
-            activeConfigSlug={activeConfigSlug}
-          />
+            <ConfigPane
+              configFields={configFields}
+              activeConfigSlug={activeConfigSlug}
+            />
         )}
       </section>
     </main>

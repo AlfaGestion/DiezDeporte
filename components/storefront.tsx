@@ -752,7 +752,24 @@ export function Storefront({
   function updateCustomerField(field: keyof CheckoutCustomer, value: string) {
     setSuccessMessage(null);
     setErrorMessage(null);
-    setCustomer((current) => ({ ...current, [field]: value }));
+    setCustomer((current) => {
+      if (field === "deliveryMethod") {
+        const pickupSelected = isPickupDeliveryMethod(value);
+
+        return {
+          ...current,
+          [field]: value,
+          paymentMethod:
+            pickupSelected
+              ? "Pago en local"
+              : settings.mercadoPagoEnabled
+                ? "Mercado Pago"
+                : "Pedido directo",
+        };
+      }
+
+      return { ...current, [field]: value };
+    });
   }
 
   function openCartPanel(step: CheckoutStep = "cart") {
@@ -832,7 +849,12 @@ export function Storefront({
     setSubmitting(true);
 
     try {
-      if (settings.mercadoPagoEnabled) {
+      const pickupOrder = isPickupDeliveryMethod(customer.deliveryMethod);
+      const shouldUseMercadoPago =
+        settings.mercadoPagoEnabled &&
+        (!pickupOrder || customer.paymentMethod.trim() === "Mercado Pago");
+
+      if (shouldUseMercadoPago) {
         const response = await fetch("/api/payments/preference", {
           method: "POST",
           headers: {
@@ -874,6 +896,7 @@ export function Storefront({
       setCart([]);
       setCustomer(buildEmptyCustomer(settings));
       setCheckoutStep("cart");
+      setMobileCartOpen(false);
       setSuccessMessage(
         `Pedido ${result.order.tc} ${result.order.idComprobante} grabado correctamente.`,
       );
@@ -882,7 +905,8 @@ export function Storefront({
       setErrorMessage(
         error instanceof Error
           ? error.message
-          : settings.mercadoPagoEnabled
+          : settings.mercadoPagoEnabled &&
+              !isPickupDeliveryMethod(customer.deliveryMethod)
             ? "No se pudo iniciar el pago."
             : "No se pudo registrar el pedido.",
       );
@@ -979,8 +1003,8 @@ export function Storefront({
         <section className="shop-hero hero-immersive" style={heroStyle}>
           <div className="shop-hero-copy">
             <span className="shop-kicker">Store online</span>
-            <h1>La casa del deporte</h1>
-            <p>{settings.storeTagline}</p>
+            <h1>{settings.storeName}</h1>
+            <p>{settings.welcomeMessage || settings.storeTagline}</p>
 
             <div className="hero-actions">
               <a className="hero-primary" href="#catalogo">
@@ -1451,6 +1475,7 @@ export function Storefront({
               <span className="section-kicker">Atencion personalizada</span>
               <h2>Comprometidos con tu satisfaccion</h2>
               <p>{settings.supportBlurb}</p>
+              {settings.storeHours ? <p>{settings.storeHours}</p> : null}
             </div>
 
             <div className="support-band-actions">
@@ -1473,6 +1498,7 @@ export function Storefront({
               <span className="section-kicker">Donde estamos</span>
               <h2>Visitanos en el local</h2>
               <p>{settings.storeAddress}</p>
+              {settings.storeHours ? <p>{settings.storeHours}</p> : null}
             </div>
 
             <div className="map-frame">
@@ -1507,6 +1533,7 @@ export function Storefront({
                 )}
               </a>
               <p>{settings.storeAddress}</p>
+              {settings.storeHours ? <p>{settings.storeHours}</p> : null}
             </div>
 
             <div className="site-footer-links">
@@ -1876,6 +1903,9 @@ function CartContent({
   const detailsStepActive = checkoutStep === "details";
   const paymentStepActive = checkoutStep === "payment";
   const pickupOrder = isPickupDeliveryMethod(customer.deliveryMethod);
+  const shouldUseMercadoPago =
+    mercadoPagoEnabled &&
+    (!pickupOrder || customer.paymentMethod.trim() === "Mercado Pago");
   const requiresShippingAddress =
     !pickupOrder || !allowPickupCheckoutWithoutAddress;
   const checkoutSteps: Array<{
@@ -1911,11 +1941,11 @@ function CartContent({
     {
       id: "payment",
       label: "Paso 4 de 4",
-      title: mercadoPagoEnabled ? "Ir al pago" : "Confirmar pedido",
-      subtitle: mercadoPagoEnabled
+      title: shouldUseMercadoPago ? "Ir al pago" : "Confirmar pedido",
+      subtitle: shouldUseMercadoPago
         ? "Verifica todo y te redirigimos a Mercado Pago."
-        : "Verifica todo y grabamos la NP del pedido.",
-      progressTitle: "Pago",
+        : "Verifica todo y grabamos la NP del pedido para pagar en el local.",
+      progressTitle: shouldUseMercadoPago ? "Pago" : "Confirmacion",
     },
   ];
   const currentStepIndex = checkoutSteps.findIndex(
@@ -2341,8 +2371,9 @@ function CartContent({
             <div>
               <strong>Ultima revision antes de avanzar</strong>
               <p>
-                Confirmas el pedido, el tipo de entrega y los datos del cliente.
-                Despues sigues al pago.
+                {shouldUseMercadoPago
+                  ? "Confirmas el pedido, el tipo de entrega y los datos del cliente. Despues sigues al pago."
+                  : "Confirmas el pedido, el tipo de entrega y los datos del cliente para pagarlo al retirar."}
               </p>
             </div>
             <button
@@ -2353,6 +2384,42 @@ function CartContent({
               Editar datos
             </button>
           </div>
+
+          {pickupOrder && mercadoPagoEnabled ? (
+            <div className="checkout-delivery-grid">
+              <button
+                type="button"
+                className={[
+                  "checkout-delivery-option",
+                  customer.paymentMethod.trim() === "Mercado Pago" ? "selected" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                onClick={() => onCustomerChange("paymentMethod", "Mercado Pago")}
+              >
+                <span className="checkout-delivery-kicker">Pago online</span>
+                <strong>Mercado Pago</strong>
+                <p>Pagas ahora y te redirigimos para completar la operacion.</p>
+                <small>El pedido queda abonado antes del retiro.</small>
+              </button>
+
+              <button
+                type="button"
+                className={[
+                  "checkout-delivery-option",
+                  customer.paymentMethod.trim() === "Pago en local" ? "selected" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                onClick={() => onCustomerChange("paymentMethod", "Pago en local")}
+              >
+                <span className="checkout-delivery-kicker">Pago en local</span>
+                <strong>Pagar al retirar</strong>
+                <p>Confirmas el pedido ahora y abonas cuando pases por el local.</p>
+                <small>Lo dejamos registrado para que lo retires despues.</small>
+              </button>
+            </div>
+          ) : null}
 
           <div className="checkout-review-grid">
             <div className="checkout-review-card">
@@ -2393,12 +2460,12 @@ function CartContent({
                 <div className="checkout-review-row">
                   <span>Pago</span>
                   <strong>
-                    {mercadoPagoEnabled ? "Mercado Pago" : "Pedido directo"}
+                    {shouldUseMercadoPago ? "Mercado Pago" : "Pago en local"}
                   </strong>
                   <p>
-                    {mercadoPagoEnabled
+                    {shouldUseMercadoPago
                       ? "Al confirmar te redirigimos para completar el pago."
-                      : "Al confirmar dejamos registrado el pedido web."}
+                      : "Al confirmar dejamos registrado el pedido para abonar al retirar."}
                   </p>
                 </div>
               </div>
@@ -2427,10 +2494,10 @@ function CartContent({
                 disabled={submitting || cart.length === 0}
               >
                 {submitting
-                  ? mercadoPagoEnabled
+                  ? shouldUseMercadoPago
                     ? "Redirigiendo a Mercado Pago..."
                     : "Grabando pedido..."
-                  : mercadoPagoEnabled
+                  : shouldUseMercadoPago
                     ? "Ir a pagar"
                     : "Confirmar pedido"}
               </button>

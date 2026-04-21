@@ -54,16 +54,41 @@ function formatPlainTextAsHtml(value: string) {
   return escapeHtml(value).replace(/\r?\n/g, "<br />");
 }
 
+function getEmailBranding() {
+  return {
+    storeName: process.env.NEXT_PUBLIC_STORE_NAME?.trim() || "Tu tienda",
+    supportEmail: process.env.NEXT_PUBLIC_SUPPORT_EMAIL?.trim() || "",
+    supportPhone: process.env.NEXT_PUBLIC_SUPPORT_PHONE?.trim() || "",
+  };
+}
+
 function buildPlainTemplateHtml(title: string, body: string) {
+  const branding = getEmailBranding();
+
   return `
-    <div style="margin:0;padding:24px;background:#f1f5f9;font-family:Arial,sans-serif;color:#0f172a;">
-      <div style="max-width:720px;margin:0 auto;background:#ffffff;border:1px solid #dbe3ee;border-radius:24px;overflow:hidden;">
-        <div style="padding:28px 32px;background:linear-gradient(135deg,#0f172a 0%,#1d4ed8 100%);color:#ffffff;">
-          <div style="font-size:12px;letter-spacing:.18em;text-transform:uppercase;opacity:.78;">Diez Deportes</div>
-          <h1 style="margin:10px 0 8px;font-size:28px;line-height:1.2;">${escapeHtml(title)}</h1>
+    <div style="margin:0;padding:28px;background:#eef3f8;font-family:Arial,sans-serif;color:#0f172a;">
+      <div style="max-width:720px;margin:0 auto;background:#ffffff;border:1px solid #d8e1ec;border-radius:28px;overflow:hidden;box-shadow:0 18px 40px rgba(15,23,42,.08);">
+        <div style="padding:30px 34px;background:linear-gradient(135deg,#0f172a 0%,#1e3a8a 100%);color:#ffffff;">
+          <div style="font-size:12px;letter-spacing:.18em;text-transform:uppercase;opacity:.8;">${escapeHtml(branding.storeName)}</div>
+          <h1 style="margin:10px 0 0;font-size:30px;line-height:1.15;">${escapeHtml(title)}</h1>
         </div>
-        <div style="padding:28px 32px;font-size:15px;line-height:1.8;color:#334155;">
-          ${formatPlainTextAsHtml(body)}
+        <div style="padding:30px 34px;">
+          <div style="padding:20px 22px;border:1px solid #e2e8f0;border-radius:20px;background:#f8fafc;font-size:15px;line-height:1.8;color:#334155;">
+            ${formatPlainTextAsHtml(body)}
+          </div>
+          <div style="margin-top:24px;padding-top:18px;border-top:1px solid #e2e8f0;font-size:13px;line-height:1.7;color:#64748b;">
+            <strong style="color:#0f172a;">${escapeHtml(branding.storeName)}</strong><br />
+            ${
+              branding.supportEmail
+                ? `Email: <a href="mailto:${escapeHtml(branding.supportEmail)}" style="color:#0f172a;text-decoration:none;">${escapeHtml(branding.supportEmail)}</a><br />`
+                : ""
+            }
+            ${
+              branding.supportPhone
+                ? `Telefono: <span style="color:#0f172a;">${escapeHtml(branding.supportPhone)}</span>`
+                : ""
+            }
+          </div>
         </div>
       </div>
     </div>
@@ -182,16 +207,25 @@ function buildOrderDeliveryLabel(order: StoredOrder) {
   );
 }
 
+function isLocalPickupPayment(order: StoredOrder) {
+  return (order.metadata.paymentMethod || "").trim().toLowerCase() === "pago en local";
+}
+
 function buildOrderNextStep(order: StoredOrder) {
   const isMercadoPago = (order.metadata.paymentMethod || "")
     .toLowerCase()
     .includes("mercado pago");
+  const isLocalPayment = isLocalPickupPayment(order);
 
   if (order.estado_pago === "aprobado" && order.estado === "APROBADO") {
     return "Tu pago fue aprobado. Ahora el pedido queda en control administrativo antes de facturarse.";
   }
 
   if (order.estado_pago === "pendiente") {
+    if (isLocalPayment) {
+      return "Elegiste pagar en el local al retirar. Te vamos a avisar cuando tu pedido este listo.";
+    }
+
     return isMercadoPago
       ? "Tu pedido ya fue recibido. Mercado Pago todavia esta procesando o esperando la confirmacion del pago."
       : "Tu pedido ya fue recibido y quedo pendiente de gestion comercial.";
@@ -284,11 +318,14 @@ async function buildOrderReceivedEmail(order: StoredOrder) {
   const isMercadoPago = (order.metadata.paymentMethod || "")
     .toLowerCase()
     .includes("mercado pago");
+  const isLocalPayment = isLocalPickupPayment(order);
   const textLines = [
     `Hola ${order.nombre_cliente},`,
     "",
     isMercadoPago
       ? `Recibimos tu pedido / NP ${order.numero_pedido} y ya iniciamos el proceso de pago.`
+      : isLocalPayment
+        ? `Recibimos tu pedido / NP ${order.numero_pedido} y quedo registrado para pagar en el local.`
       : `Recibimos tu pedido / NP ${order.numero_pedido}.`,
     buildOrderNextStep(order),
     "",
@@ -307,6 +344,8 @@ async function buildOrderReceivedEmail(order: StoredOrder) {
     {
       subject: isMercadoPago
         ? "Recibimos tu pedido / estamos procesando tu pago"
+        : isLocalPayment
+          ? "Recibimos tu pedido / pagas al retirar"
         : "Recibimos tu pedido",
       text: textLines.join("\n"),
       html: `
@@ -577,7 +616,10 @@ function buildSmtpAccount(input: {
   const user = normalizeOptionalString(input.user);
   const pass = normalizeOptionalString(input.pass);
   const from = normalizeOptionalString(input.from) || user;
-  const fromName = normalizeOptionalString(input.fromName) || "Diez Deportes";
+  const fromName =
+    normalizeOptionalString(input.fromName) ||
+    normalizeOptionalString(process.env.NEXT_PUBLIC_STORE_NAME) ||
+    "Diez Deportes";
 
   if (!from || !user || !pass) {
     return null;
@@ -595,7 +637,9 @@ function getSmtpConfig() {
   const host = normalizeOptionalString(process.env.SMTP_HOST);
   const port = Number(process.env.SMTP_PORT || "587");
   const fromName =
-    normalizeOptionalString(process.env.SMTP_FROM_NAME) || "Diez Deportes";
+    normalizeOptionalString(process.env.SMTP_FROM_NAME) ||
+    normalizeOptionalString(process.env.NEXT_PUBLIC_STORE_NAME) ||
+    "Diez Deportes";
   const fallbackFromName =
     normalizeOptionalString(process.env.SMTP_FALLBACK_FROM_NAME) || fromName;
   const primaryAccount = buildSmtpAccount({

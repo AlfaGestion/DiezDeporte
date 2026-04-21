@@ -52,6 +52,11 @@ export type ServerSettings = {
   requerirNombreApellidoAlRetirar: boolean;
   requerirDniAlRetirar: boolean;
   permitirFinalizacionManualSinDatosRetiro: boolean;
+  generarQrRetiro: boolean;
+  stockReservationHours: number;
+  aprobacionManualPedidos: boolean;
+  facturacionManualPedidos: boolean;
+  descripcionFlujoPedidos: string;
   maxReintentosInicioPago: number;
   enviarEmailSiFallaInicioPago: boolean;
   permitirRetiroYPagoLocalSiFallaMP: boolean;
@@ -178,6 +183,27 @@ export async function getServerSettings(): Promise<ServerSettings> {
       readSetting(storedValues, "APP_ALLOW_MANUAL_PICKUP_FINALIZATION", "false"),
       false,
     ),
+    generarQrRetiro: parseBoolean(
+      readSetting(storedValues, "APP_GENERATE_PICKUP_QR", "true"),
+      true,
+    ),
+    stockReservationHours: Math.max(
+      1,
+      Number(readSetting(storedValues, "APP_STOCK_RESERVATION_HOURS", "24") || "24"),
+    ),
+    aprobacionManualPedidos: parseBoolean(
+      readSetting(storedValues, "APP_ORDER_MANUAL_APPROVAL", "true"),
+      true,
+    ),
+    facturacionManualPedidos: parseBoolean(
+      readSetting(storedValues, "APP_ORDER_MANUAL_INVOICING", "true"),
+      true,
+    ),
+    descripcionFlujoPedidos: readSetting(
+      storedValues,
+      "APP_ORDER_FLOW_DESCRIPTION",
+      "Revisamos el pedido, confirmamos pago o stock si hace falta y luego avanzamos a facturacion y preparacion.",
+    ),
     maxReintentosInicioPago: Math.max(
       1,
       Number(readSetting(storedValues, "APP_MAX_PAYMENT_INIT_RETRIES", "3") || "3"),
@@ -247,6 +273,16 @@ export async function getPublicStoreSettings(): Promise<PublicStoreSettings> {
       storedValues,
       "NEXT_PUBLIC_STORE_TAGLINE",
       "Equipamiento deportivo con stock real y pedido directo",
+    ),
+    welcomeMessage: readSetting(
+      storedValues,
+      "NEXT_PUBLIC_STORE_WELCOME_MESSAGE",
+      "Bienvenido a nuestra tienda online. Compra facil, segura y con atencion personalizada.",
+    ),
+    storeHours: readSetting(
+      storedValues,
+      "NEXT_PUBLIC_STORE_HOURS",
+      "Lunes a sabados de 9 a 13 hs y de 16 a 20 hs.",
     ),
     allowBackorders: settings.allowBackorders,
     allowPickupCheckoutWithoutAddress:

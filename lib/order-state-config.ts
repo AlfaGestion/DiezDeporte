@@ -151,10 +151,15 @@ export async function getAdminOrderStateCssVariables() {
 }
 
 export function buildOrderTemplateVariables(order: StoredOrder, state: OrderState, trackingUrl: string | null) {
+  const retryUrl = order.metadata.lastCheckoutUrl || trackingUrl || "";
+  const stateLabel =
+    process.env[`APP_STATE_${state}_LABEL`]?.trim() ||
+    state;
+
   return {
     nombre_cliente: order.nombre_cliente,
     numero_pedido: order.numero_pedido,
-    estado: state,
+    estado: stateLabel,
     monto_total: new Intl.NumberFormat("es-AR", {
       style: "currency",
       currency: "ARS",
@@ -164,6 +169,7 @@ export function buildOrderTemplateVariables(order: StoredOrder, state: OrderStat
       order.metadata.deliveryMethod ||
       (order.tipo_pedido === "envio" ? "Envio a domicilio" : "Retiro en local"),
     link_seguimiento: trackingUrl || "",
+    link_reintento: retryUrl,
     codigo_retiro: order.metadata.pickupCode || "",
   };
 }

@@ -13,8 +13,8 @@ type PublicOrderStatusProps = {
 function resolveTitle(status: PaymentStatusResult | null, error?: string | null) {
   if (error) {
     return {
-      title: "No pudimos cargar tu pedido",
-      description: error,
+      title: "Tuvimos un inconveniente",
+      description: "No pudimos mostrar el estado del pedido en este momento.",
     };
   }
 
@@ -99,7 +99,11 @@ export function PublicOrderStatus({
         <h1>{heading.title}</h1>
         <p>{heading.description}</p>
 
-        {error ? <div className="message error">{error}</div> : null}
+        {error ? (
+          <div className="mt-4 rounded-[18px] border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-400/20 dark:bg-amber-500/10 dark:text-amber-200">
+            {error}
+          </div>
+        ) : null}
 
         {status ? (
           <>
@@ -138,7 +142,7 @@ export function PublicOrderStatus({
 
             {status.finalizationError ? (
               <div className="mt-4 rounded-[18px] border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-400/20 dark:bg-amber-500/10 dark:text-amber-200">
-                {status.finalizationError}
+                Estamos terminando de actualizar tu pedido. Si no ves cambios en unos minutos, vuelve a intentarlo.
               </div>
             ) : null}
 

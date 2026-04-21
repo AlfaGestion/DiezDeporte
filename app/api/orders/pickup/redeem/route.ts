@@ -19,6 +19,7 @@ export async function POST(request: Request) {
     apellido?: string;
     dni?: string;
     observacion?: string;
+    paymentAccountCode?: string;
   };
 
   try {
@@ -28,6 +29,7 @@ export async function POST(request: Request) {
       apellido?: string;
       dni?: string;
       observacion?: string;
+      paymentAccountCode?: string;
     };
   } catch {
     return NextResponse.json({ error: "El cuerpo no es un JSON valido." }, { status: 400 });
@@ -41,6 +43,7 @@ export async function POST(request: Request) {
         apellido: body.apellido || "",
         dni: body.dni || null,
         observacion: body.observacion || null,
+        paymentAccountCode: body.paymentAccountCode || null,
       },
       { origin: "admin" },
     );
@@ -53,6 +56,8 @@ export async function POST(request: Request) {
         email_cliente: order.email_cliente,
         dni_cliente: order.metadata.customerDocumentNumber || null,
         estado: order.estado,
+        paymentMethod: order.metadata.paymentMethod || null,
+        paymentStatus: order.estado_pago,
         fecha_entrada_estado: order.fecha_hora_retiro || order.fecha_actualizacion,
         retirado: order.retirado,
         fecha_hora_retiro: order.fecha_hora_retiro,
@@ -73,6 +78,12 @@ export async function POST(request: Request) {
     }
 
     console.error("Pickup redeem API error", error);
-    return NextResponse.json({ error: "No se pudo registrar el retiro." }, { status: 500 });
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error ? error.message : "No se pudo registrar el retiro.",
+      },
+      { status: 500 },
+    );
   }
 }

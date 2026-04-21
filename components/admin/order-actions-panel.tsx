@@ -28,8 +28,13 @@ export function OrderActionsPanel({
   canMarkError: boolean;
   allowPickupLocalFallback: boolean;
 }) {
+  const isLocalPickupPayment =
+    order.tipo_pedido === "retiro" &&
+    (order.metadata.paymentMethod || "").trim().toLowerCase() === "pago en local";
   const needsApprovedPayment =
-    nextActionLabel === "Facturar" && order.estado_pago !== "aprobado";
+    nextActionLabel === "Facturar" &&
+    order.estado_pago !== "aprobado" &&
+    !isLocalPickupPayment;
   const opensInvoiceDialog =
     nextActionLabel === "Facturar" && order.estado_pago === "aprobado";
   const needsPickupRegistration = nextActionLabel === "Registrar retiro";

@@ -20,7 +20,10 @@ export default async function PaymentReturnPage() {
         </main>
       }
     >
-      <PaymentReturnStatus storeName={settings.storeName} />
+      <PaymentReturnStatus
+        storeName={settings.storeName}
+        supportWhatsapp={settings.supportWhatsapp}
+      />
     </Suspense>
   );
 }

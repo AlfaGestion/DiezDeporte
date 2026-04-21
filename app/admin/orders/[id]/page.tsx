@@ -12,6 +12,7 @@ import { OrderTimeline } from "@/components/admin/order-timeline";
 import { PickupRedeemPanel } from "@/components/admin/pickup-redeem-panel";
 import { ErrorState } from "@/components/admin/error-state";
 import { ADMIN_SESSION_COOKIE, getAdminSessionUser } from "@/lib/admin-auth";
+import { logServerError } from "@/lib/error-monitor";
 import { getNextActionLabel, OrderNotFoundError } from "@/lib/models/order";
 import { getAdminOrderStateCssVariables } from "@/lib/order-state-config";
 import { getOrderDetailById } from "@/lib/services/orderService";
@@ -135,6 +136,15 @@ export default async function AdminOrderDetailPage({
     );
   } catch (error) {
     if (error instanceof OrderNotFoundError) {
+      logServerError({
+        code: "ADMIN_ORDER_NOT_FOUND",
+        scope: "admin",
+        route: `/admin/orders/${orderId}`,
+        error,
+        orderId,
+        user: sessionUser.username,
+      });
+
       return (
         <main className="admin-order-document">
           <section className="mx-auto max-w-6xl">
@@ -151,6 +161,15 @@ export default async function AdminOrderDetailPage({
         </main>
       );
     }
+
+    logServerError({
+      code: "ADMIN_ORDER_DETAIL_ERROR",
+      scope: "admin",
+      route: `/admin/orders/${orderId}`,
+      error,
+      orderId,
+      user: sessionUser.username,
+    });
 
     return (
       <main className="admin-order-document">

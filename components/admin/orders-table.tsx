@@ -158,7 +158,7 @@ export function OrdersTable({
                     <div className="space-y-2">
                       <PaymentStatusBadge status={order.paymentStatus} />
                       <div className="text-xs text-[color:var(--admin-text)]">
-                        {order.paymentMethodId || "Metodo no informado"}
+                        {order.paymentMethod || order.paymentMethodId || "Metodo no informado"}
                         {order.paymentTypeId ? ` | ${order.paymentTypeId}` : ""}
                       </div>
                       <div className="text-xs text-[color:var(--admin-text)]">

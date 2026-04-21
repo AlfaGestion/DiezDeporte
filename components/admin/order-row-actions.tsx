@@ -17,8 +17,14 @@ export function OrderRowActions({
   order: AdminOrderRecord;
   returnTo: string;
 }) {
+  const isLocalPickupPayment =
+    order.orderType === "retiro" &&
+    (order.paymentMethod || order.paymentMethodId || "").trim().toLowerCase() ===
+      "pago en local";
   const needsApprovedPayment =
-    order.nextActionLabel === "Facturar" && order.paymentStatus !== "aprobado";
+    order.nextActionLabel === "Facturar" &&
+    order.paymentStatus !== "aprobado" &&
+    !isLocalPickupPayment;
   const opensInvoiceDialog =
     order.nextActionLabel === "Facturar" && order.paymentStatus === "aprobado";
   const opensPickupRegistration = order.nextActionLabel === "Registrar retiro";

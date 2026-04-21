@@ -1,4 +1,6 @@
+import { OrderNotFoundState } from "@/components/order-not-found-state";
 import { PublicOrderStatus } from "@/components/public-order-status";
+import { logServerError } from "@/lib/error-monitor";
 import { getPublicStoreSettings } from "@/lib/store-config";
 import { resolvePendingPaymentStatus } from "@/lib/web-payments";
 
@@ -22,10 +24,10 @@ export default async function PublicOrderPage({
   const externalReference =
     params.externalReference?.trim() || params.external_reference?.trim() || "";
   let status = null;
-  let error: string | null = null;
+  let mode: "missing" | "not-found" | "error" | null = null;
 
   if (!externalReference) {
-    error = "Falta el identificador del pedido.";
+    mode = "not-found";
   } else {
     try {
       status = await resolvePendingPaymentStatus({
@@ -33,14 +35,22 @@ export default async function PublicOrderPage({
       });
 
       if (!status) {
-        error = "No se encontro un pedido para ese enlace.";
+        mode = "not-found";
       }
     } catch (pageError) {
-      error =
-        pageError instanceof Error
-          ? pageError.message
-          : "No se pudo consultar el estado del pedido.";
+      logServerError({
+        code: "PUBLIC_ORDER_LOOKUP_ERROR",
+        scope: "order",
+        route: "/pedido",
+        error: pageError,
+        externalReference,
+      });
+      mode = "error";
     }
+  }
+
+  if (mode === "not-found") {
+    return <OrderNotFoundState supportHref={settings.supportWhatsapp} />;
   }
 
   return (
@@ -48,7 +58,7 @@ export default async function PublicOrderPage({
       storeName={settings.storeName}
       supportWhatsapp={settings.supportWhatsapp}
       status={status}
-      error={error}
+      error={mode === "error" ? "No pudimos consultar el estado del pedido en este momento." : null}
     />
   );
 }

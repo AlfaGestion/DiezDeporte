@@ -4,12 +4,15 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { formatCurrency } from "@/lib/commerce";
+import { PaymentErrorState } from "@/components/payment-error-state";
+import { logClientError } from "@/lib/error-monitor-client";
 import type { PaymentStatusResult } from "@/lib/types";
 
 const LOCAL_STORAGE_CART_KEY = "diezdeportes-cart";
 
 type PaymentReturnStatusProps = {
   storeName: string;
+  supportWhatsapp: string;
 };
 
 function shouldPoll(status: PaymentStatusResult | null) {
@@ -81,6 +84,7 @@ function resolveHeadline(status: PaymentStatusResult | null) {
 
 export function PaymentReturnStatus({
   storeName,
+  supportWhatsapp,
 }: PaymentReturnStatusProps) {
   const searchParams = useSearchParams();
   const [status, setStatus] = useState<PaymentStatusResult | null>(null);
@@ -98,7 +102,7 @@ export function PaymentReturnStatus({
     if (!orderId && !paymentId && !preferenceId && !externalReference) {
       setStatus(null);
       setLoading(false);
-      setError("No llegaron identificadores de pago en el retorno.");
+      setError("No pudimos validar el retorno del pago.");
       return;
     }
 
@@ -146,11 +150,15 @@ export function PaymentReturnStatus({
       } catch (fetchError) {
         if (!active) return;
 
-        setError(
-          fetchError instanceof Error
-            ? fetchError.message
-            : "No se pudo consultar el estado del pago.",
-        );
+        logClientError({
+          code: "PAYMENT_RETURN_STATUS_ERROR",
+          scope: "payment",
+          route: window.location.pathname,
+          error: fetchError,
+          externalReference,
+        });
+
+        setError("No pudimos consultar el estado del pago en este momento.");
       } finally {
         firstLoad = false;
 
@@ -180,6 +188,10 @@ export function PaymentReturnStatus({
 
   const headline = resolveHeadline(status);
 
+  if (error && !loading && !status) {
+    return <PaymentErrorState retryHref={null} supportHref={supportWhatsapp} />;
+  }
+
   return (
     <main className="payment-return-page">
       <section className="payment-return-card">
@@ -191,7 +203,11 @@ export function PaymentReturnStatus({
           <div className="message">Consultando informacion del pago...</div>
         ) : null}
 
-        {error ? <div className="message error">{error}</div> : null}
+        {error ? (
+          <div className="mt-4 rounded-[18px] border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-400/20 dark:bg-amber-500/10 dark:text-amber-200">
+            {error}
+          </div>
+        ) : null}
 
         {status ? (
           <div className="payment-return-summary">
@@ -232,7 +248,7 @@ export function PaymentReturnStatus({
 
         {status?.finalizationError ? (
           <div className="payment-return-note">
-            {status.finalizationError}
+            Recibimos la respuesta del pago, pero todavia estamos terminando de registrar el pedido.
           </div>
         ) : null}
 
@@ -240,6 +256,11 @@ export function PaymentReturnStatus({
           <Link href="/" className="submit-order-button">
             Volver a la tienda
           </Link>
+          {status?.checkoutUrl && status.paymentStatus !== "aprobado" ? (
+            <a href={status.checkoutUrl} className="hero-secondary">
+              Reintentar pago
+            </a>
+          ) : null}
         </div>
       </section>
     </main>

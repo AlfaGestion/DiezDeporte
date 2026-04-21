@@ -117,6 +117,40 @@ function buildStateEnvKey(state: OrderState, suffix: string) {
   return `APP_STATE_${state}_${suffix}`;
 }
 
+function getStateEmailSubjectDefault(state: OrderState) {
+  switch (state) {
+    case "FACTURADO":
+      return "Tu pedido fue confirmado";
+    case "LISTO_PARA_RETIRO":
+      return "Tu pedido esta listo para retirar";
+    case "ENVIADO":
+      return "Tu pedido ya fue enviado";
+    case "ENTREGADO":
+      return "Tu pedido fue entregado";
+    case "ERROR":
+      return "Tuvimos un problema con tu pedido";
+    default:
+      return "";
+  }
+}
+
+function getStateEmailBodyDefault(state: OrderState) {
+  switch (state) {
+    case "FACTURADO":
+      return "Hola {{nombre_cliente}},\n\nTu pedido {{numero_pedido}} fue confirmado correctamente.\n\nEn breve comenzamos a prepararlo.\n\nTe vamos a avisar cuando este listo o en camino.";
+    case "LISTO_PARA_RETIRO":
+      return "Hola {{nombre_cliente}},\n\nTu pedido ya esta listo para retirar en el local.\n\nCodigo de retiro:\n{{codigo_retiro}}\n\nPresenta este codigo o el QR al momento de retirar.";
+    case "ENVIADO":
+      return "Hola {{nombre_cliente}},\n\nTu pedido ya fue despachado.\n\nPronto lo vas a recibir en la direccion indicada.";
+    case "ENTREGADO":
+      return "Hola {{nombre_cliente}},\n\nTe confirmamos que tu pedido {{numero_pedido}} ya fue entregado.\n\nGracias por confiar en nosotros.";
+    case "ERROR":
+      return "Hola {{nombre_cliente}},\n\nTuvimos un inconveniente con tu pedido.\n\nNuestro equipo ya lo esta revisando y te vamos a mantener informado.";
+    default:
+      return "";
+  }
+}
+
 const WEB_SETTING_DEFINITIONS: StoreSettingDefinition[] = [
   {
     key: "NEXT_PUBLIC_STORE_NAME",
@@ -137,6 +171,17 @@ const WEB_SETTING_DEFINITIONS: StoreSettingDefinition[] = [
     group: "Identidad",
     type: "text",
     fallback: "Equipamiento deportivo con stock real y pedido directo",
+  },
+  {
+    key: "NEXT_PUBLIC_STORE_WELCOME_MESSAGE",
+    configKey: "StoreWelcomeMessage",
+    label: "Texto de bienvenida",
+    description: "Mensaje principal que presenta la tienda al cliente.",
+    section: "Configuracion web",
+    group: "Identidad",
+    type: "textarea",
+    fallback:
+      "Bienvenido a nuestra tienda online. Compra facil, segura y con atencion personalizada.",
   },
   {
     key: "NEXT_PUBLIC_STORE_LOGO_URL",
@@ -177,6 +222,16 @@ const WEB_SETTING_DEFINITIONS: StoreSettingDefinition[] = [
     group: "Contacto",
     type: "text",
     fallback: "+54 9 294 467-4525",
+  },
+  {
+    key: "NEXT_PUBLIC_STORE_HOURS",
+    configKey: "StoreHours",
+    label: "Horarios del local",
+    description: "Horarios visibles para atencion, retiro y consultas.",
+    section: "Configuracion web",
+    group: "Contacto",
+    type: "textarea",
+    fallback: "Lunes a sabados de 9 a 13 hs y de 16 a 20 hs.",
   },
   {
     key: "NEXT_PUBLIC_SUPPORT_EMAIL",
@@ -271,6 +326,17 @@ const CHECKOUT_SETTING_DEFINITIONS: StoreSettingDefinition[] = [
     fallback: "true",
   },
   {
+    key: "APP_STOCK_RESERVATION_HOURS",
+    configKey: "HorasReservaStockCheckout",
+    label: "Horas de reserva de stock",
+    description: "Tiempo sugerido para mantener reservado el stock del pedido mientras se procesa.",
+    section: "Checkout",
+    group: "Operativa",
+    type: "text",
+    fallback: "24",
+    placeholder: "24",
+  },
+  {
     key: "APP_SEND_ORDER_RECEIVED_EMAIL",
     configKey: "EnviarEmailPedidoRecibido",
     label: "Enviar email de pedido recibido",
@@ -288,7 +354,7 @@ const CHECKOUT_SETTING_DEFINITIONS: StoreSettingDefinition[] = [
     section: "Checkout",
     group: "Emails",
     type: "text",
-    fallback: "",
+    fallback: "Recibimos tu pedido 😊",
   },
   {
     key: "APP_ORDER_RECEIVED_EMAIL_BODY",
@@ -298,7 +364,8 @@ const CHECKOUT_SETTING_DEFINITIONS: StoreSettingDefinition[] = [
     section: "Checkout",
     group: "Emails",
     type: "textarea",
-    fallback: "",
+    fallback:
+      "Hola {{nombre_cliente}},\n\nRecibimos tu pedido correctamente.\n\nNumero de pedido: {{numero_pedido}}\n\nEstamos procesando el pago. Te vamos a avisar cuando este confirmado.\n\nPodes seguir el estado de tu pedido aca:\n{{link_seguimiento}}\n\nGracias por tu compra.",
   },
   {
     key: "APP_WRITE_STOCK_MOVEMENTS",
@@ -402,17 +469,18 @@ const PAYMENT_SETTING_DEFINITIONS: StoreSettingDefinition[] = [
     section: "Pagos",
     group: "Fallos y reintentos",
     type: "text",
-    fallback: "",
+    fallback: "Tuvimos un problema con tu pago",
   },
   {
     key: "APP_PAYMENT_INIT_FAILURE_EMAIL_BODY",
     configKey: "FalloInicioPagoBody",
     label: "Cuerpo fallo de pago",
-    description: "Variables disponibles: {{nombre_cliente}}, {{numero_pedido}}, {{link_seguimiento}}, {{tipo_entrega}}.",
+    description: "Variables disponibles: {{nombre_cliente}}, {{numero_pedido}}, {{link_seguimiento}}, {{tipo_entrega}}, {{link_reintento}}.",
     section: "Pagos",
     group: "Fallos y reintentos",
     type: "textarea",
-    fallback: "",
+    fallback:
+      "Hola {{nombre_cliente}},\n\nTuvimos un inconveniente al procesar tu pago.\n\nNo te preocupes, tu pedido sigue registrado.\n\nPodes intentar nuevamente desde este link:\n{{link_reintento}}\n\nSi lo preferis, tambien podes elegir retirar en el local y pagar alli.",
   },
   {
     key: "APP_ALLOW_PICKUP_LOCAL_PAYMENT_ON_MP_FAILURE",
@@ -438,6 +506,37 @@ const PAYMENT_SETTING_DEFINITIONS: StoreSettingDefinition[] = [
 ];
 
 const ORDER_SETTING_DEFINITIONS: StoreSettingDefinition[] = [
+  {
+    key: "APP_ORDER_MANUAL_APPROVAL",
+    configKey: "AprobacionManualPedidos",
+    label: "Aprobacion manual",
+    description: "Si esta activo, el negocio revisa y aprueba los pedidos antes de seguir.",
+    section: "Pedidos",
+    group: "Workflow",
+    type: "boolean",
+    fallback: "true",
+  },
+  {
+    key: "APP_ORDER_MANUAL_INVOICING",
+    configKey: "FacturacionManualPedidos",
+    label: "Facturacion manual",
+    description: "Si esta activo, la facturacion queda a cargo del equipo del local.",
+    section: "Pedidos",
+    group: "Workflow",
+    type: "boolean",
+    fallback: "true",
+  },
+  {
+    key: "APP_ORDER_FLOW_DESCRIPTION",
+    configKey: "DescripcionFlujoPedidos",
+    label: "Como quieres trabajar los pedidos",
+    description: "Resumen interno para recordar como usa el negocio el flujo del admin.",
+    section: "Pedidos",
+    group: "Workflow",
+    type: "textarea",
+    fallback:
+      "Revisamos el pedido, confirmamos pago o stock si hace falta y luego avanzamos a facturacion y preparacion.",
+  },
   {
     key: "APP_ORDER_TC",
     configKey: "TcPedido",
@@ -514,6 +613,16 @@ const ORDER_SETTING_DEFINITIONS: StoreSettingDefinition[] = [
 
 const PICKUP_SETTING_DEFINITIONS: StoreSettingDefinition[] = [
   {
+    key: "APP_GENERATE_PICKUP_QR",
+    configKey: "GenerarQrRetiro",
+    label: "Generar QR",
+    description: "Crea automaticamente un QR para mostrar al retirar en el local.",
+    section: "Retiro en local",
+    group: "Trazabilidad",
+    type: "boolean",
+    fallback: "true",
+  },
+  {
     key: "APP_REQUIRE_PICKUP_FULL_NAME",
     configKey: "RequerirNombreApellidoRetiro",
     label: "Requerir nombre y apellido",
@@ -574,7 +683,7 @@ const EMAIL_AND_DOCUMENT_SETTING_DEFINITIONS: StoreSettingDefinition[] = [
     section: "Facturacion y documentos",
     group: "Factura manual",
     type: "text",
-    fallback: "Factura de tu pedido NP {{numero_pedido}}",
+    fallback: "Factura de tu compra",
   },
   {
     key: "APP_INVOICE_EMAIL_BODY",
@@ -585,7 +694,7 @@ const EMAIL_AND_DOCUMENT_SETTING_DEFINITIONS: StoreSettingDefinition[] = [
     group: "Factura manual",
     type: "textarea",
     fallback:
-      "Hola {{nombre_cliente}},\n\nTe enviamos la factura correspondiente a tu pedido NP {{numero_pedido}}.\nAdjuntamos el comprobante en este email.\n\nGracias por comprar en Diez Deportes.",
+      "Hola {{nombre_cliente}},\n\nTe enviamos la factura correspondiente a tu pedido.\n\nAnte cualquier duda, estamos a disposicion.",
   },
 ];
 
@@ -595,6 +704,16 @@ const ORDER_STATE_SETTING_DEFINITIONS: StoreSettingDefinition[] = ORDER_STATES.f
     const group = ORDER_STATE_LABELS[state];
 
     return [
+      {
+        key: buildStateEnvKey(state, "LABEL"),
+        configKey: buildStateConfigKey(state, "Label"),
+        label: "Nombre visible",
+        description: "Nombre opcional para mostrar este estado con un texto mas cercano al negocio.",
+        section: "Estados",
+        group,
+        type: "text" as const,
+        fallback: "",
+      },
       {
         key: buildStateEnvKey(state, "COLOR_BG"),
         configKey: buildStateConfigKey(state, "ColorBg"),
@@ -653,17 +772,17 @@ const ORDER_STATE_SETTING_DEFINITIONS: StoreSettingDefinition[] = ORDER_STATES.f
         section: "Emails",
         group,
         type: "text" as const,
-        fallback: "",
+        fallback: getStateEmailSubjectDefault(state),
       },
       {
         key: buildStateEnvKey(state, "EMAIL_BODY"),
         configKey: buildStateConfigKey(state, "EmailBody"),
         label: "Cuerpo",
-        description: "Variables disponibles: {{nombre_cliente}}, {{numero_pedido}}, {{estado}}, {{monto_total}}, {{tipo_entrega}}, {{link_seguimiento}}, {{codigo_retiro}}.",
+        description: "Variables disponibles: {{nombre_cliente}}, {{numero_pedido}}, {{estado}}, {{monto_total}}, {{tipo_entrega}}, {{link_seguimiento}}, {{codigo_retiro}}, {{link_reintento}}.",
         section: "Emails",
         group,
         type: "textarea" as const,
-        fallback: "",
+        fallback: getStateEmailBodyDefault(state),
       },
     ] satisfies StoreSettingDefinition[];
   },
@@ -772,18 +891,25 @@ export function getStoreConfigSections(fields: AdminConfigField[]) {
 
 export async function saveStoreConfig(formData: FormData) {
   const pool = await getConnection();
+  const existingRows = await readStoreConfigRows();
 
   for (const definition of STORE_SETTING_DEFINITIONS) {
-    const rawValue =
-      definition.type === "boolean"
+    const fieldWasRendered = formData.has(`__present__${definition.key}`);
+    const rawValue = fieldWasRendered
+      ? definition.type === "boolean"
         ? formData.get(definition.key) === "on"
           ? "true"
           : "false"
         : typeof formData.get(definition.key) === "string"
           ? String(formData.get(definition.key)).trim()
-          : "";
+          : ""
+      : resolveRawValue(definition, existingRows);
 
     process.env[definition.key] = rawValue;
+
+    if (!fieldWasRendered) {
+      continue;
+    }
 
     const request = pool.request();
     setInput(request, "group", STORE_CONFIG_GROUP);

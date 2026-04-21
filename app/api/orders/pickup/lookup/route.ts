@@ -36,6 +36,8 @@ export async function POST(request: Request) {
         email_cliente: order.email_cliente,
         dni_cliente: order.metadata.customerDocumentNumber || null,
         estado: order.estado,
+        paymentMethod: order.metadata.paymentMethod || null,
+        paymentStatus: order.estado_pago,
         fecha_entrada_estado: currentStateEnteredAt,
         retirado: order.retirado,
         fecha_creacion: order.fecha_creacion,

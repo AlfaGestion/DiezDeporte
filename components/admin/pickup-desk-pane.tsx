@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { AdminQrCameraScanner } from "@/components/admin/admin-qr-camera-scanner";
 import { OrderStatusBadge } from "@/components/admin/order-status-badge";
 import {
@@ -13,7 +13,7 @@ import {
   cn,
   formatAdminDateTime,
 } from "@/components/admin/admin-ui";
-import type { OrderState } from "@/lib/types";
+import type { OrderState, PaymentCollectionAccount } from "@/lib/types";
 
 type PickupLookupOrder = {
   id: number;
@@ -27,6 +27,8 @@ type PickupLookupOrder = {
   fecha_creacion: string | null;
   fecha_hora_retiro: string | null;
   nombre_apellido_retiro: string | null;
+  paymentMethod?: string | null;
+  paymentStatus?: string | null;
   nombre_retiro?: string | null;
   apellido_retiro?: string | null;
   dni_retiro?: string | null;
@@ -71,11 +73,17 @@ export function PickupDeskPane({
   const [apellido, setApellido] = useState("");
   const [dni, setDni] = useState("");
   const [observacion, setObservacion] = useState("");
+  const [paymentAccountCode, setPaymentAccountCode] = useState("");
+  const [paymentAccounts, setPaymentAccounts] = useState<PaymentCollectionAccount[]>([]);
+  const [accountsLoading, setAccountsLoading] = useState(false);
+  const [accountsError, setAccountsError] = useState<string | null>(null);
   const [lookup, setLookup] = useState<PickupLookupResult | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [feedbackTone, setFeedbackTone] = useState<"success" | "error" | "warning">("warning");
   const [isLookingUp, startLookupTransition] = useTransition();
   const [isRedeeming, startRedeemTransition] = useTransition();
+  const requiresLocalPaymentAccount =
+    lookup?.order.paymentMethod === "Pago en local" && lookup.order.paymentStatus !== "aprobado";
 
   const resetResolvedState = () => {
     setLookup(null);
@@ -83,7 +91,55 @@ export function PickupDeskPane({
     setApellido("");
     setDni("");
     setObservacion("");
+    setPaymentAccountCode("");
+    setAccountsError(null);
   };
+
+  useEffect(() => {
+    if (!requiresLocalPaymentAccount) {
+      return;
+    }
+
+    let cancelled = false;
+    setAccountsLoading(true);
+    setAccountsError(null);
+
+    fetch("/api/admin/payment-accounts", {
+      credentials: "same-origin",
+    })
+      .then(async (response) => {
+        const result = (await response.json().catch(() => null)) as
+          | { accounts?: PaymentCollectionAccount[]; error?: string }
+          | null;
+
+        if (!response.ok || !result?.accounts) {
+          throw new Error(result?.error || "No se pudieron cargar los metodos de pago.");
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        setPaymentAccounts(result.accounts);
+        setPaymentAccountCode((current) => current || result.accounts[0]?.code || "");
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setAccountsError(
+            error instanceof Error ? error.message : "No se pudieron cargar los metodos de pago.",
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setAccountsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [requiresLocalPaymentAccount]);
 
   const runLookup = (pickupCode: string) => {
     setFeedback(null);
@@ -150,6 +206,7 @@ export function PickupDeskPane({
             apellido,
             dni,
             observacion,
+            paymentAccountCode: paymentAccountCode || null,
           }),
         });
 
@@ -192,6 +249,7 @@ export function PickupDeskPane({
         setApellido("");
         setDni("");
         setObservacion("");
+        setPaymentAccountCode("");
       } catch (error) {
         setFeedbackTone("error");
         setFeedback(error instanceof Error ? error.message : "No se pudo registrar el retiro.");
@@ -207,7 +265,8 @@ export function PickupDeskPane({
     (!requirePickupFullName ||
       (nombre.trim().length > 0 && apellido.trim().length > 0)) &&
     (requirePickupFullName || nombre.trim().length > 0 || apellido.trim().length > 0) &&
-    (!requirePickupDni || dni.trim().length > 0);
+    (!requirePickupDni || dni.trim().length > 0) &&
+    (!requiresLocalPaymentAccount || paymentAccountCode.trim().length > 0);
 
   return (
     <section className="space-y-4">
@@ -274,6 +333,36 @@ export function PickupDeskPane({
                 disabled={isLookingUp || isRedeeming}
               />
             </div>
+
+            {requiresLocalPaymentAccount ? (
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-[color:var(--admin-title)]">
+                  Metodo de pago
+                </label>
+                <select
+                  value={paymentAccountCode}
+                  onChange={(event) => setPaymentAccountCode(event.target.value)}
+                  className={adminInputClass}
+                  disabled={isLookingUp || isRedeeming || accountsLoading}
+                >
+                  <option value="">
+                    {accountsLoading ? "Cargando metodos..." : "Selecciona un metodo de pago"}
+                  </option>
+                  {paymentAccounts.map((account) => (
+                    <option key={account.code} value={account.code}>
+                      {account.label}
+                    </option>
+                  ))}
+                </select>
+                {accountsError ? (
+                  <p className="text-sm text-rose-700 dark:text-rose-300">{accountsError}</p>
+                ) : (
+                  <p className="text-xs text-[color:var(--admin-text)]">
+                    Se registra el pago del retiro con el metodo elegido.
+                  </p>
+                )}
+              </div>
+            ) : null}
 
             <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
               <input

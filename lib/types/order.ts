@@ -83,6 +83,9 @@ export type OrderMetadata = {
   paymentStatusDetail?: string | null;
   paymentTypeId?: string | null;
   paymentMethodId?: string | null;
+  pickupPaymentAccountCode?: string | null;
+  pickupPaymentAccountLabel?: string | null;
+  pickupPaymentOptionalCode?: string | null;
   lastPaymentPayload?: string | null;
   pickupCode?: string | null;
   pickupQrVersion?: number | null;

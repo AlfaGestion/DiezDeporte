@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { AdminQrCameraScanner } from "@/components/admin/admin-qr-camera-scanner";
 import {
   adminCardClass,
@@ -11,7 +11,7 @@ import {
   formatAdminDateTime,
 } from "@/components/admin/admin-ui";
 import { PickupStatusBadge } from "@/components/admin/pickup-status-badge";
-import type { StoredOrder } from "@/lib/types";
+import type { PaymentCollectionAccount, StoredOrder } from "@/lib/types";
 
 export function PickupRedeemPanel({
   order,
@@ -30,17 +30,70 @@ export function PickupRedeemPanel({
   const [apellido, setApellido] = useState("");
   const [dni, setDni] = useState("");
   const [observacion, setObservacion] = useState("");
+  const [paymentAccountCode, setPaymentAccountCode] = useState("");
+  const [paymentAccounts, setPaymentAccounts] = useState<PaymentCollectionAccount[]>([]);
+  const [accountsLoading, setAccountsLoading] = useState(false);
+  const [accountsError, setAccountsError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [feedbackTone, setFeedbackTone] = useState<"success" | "error">("success");
   const [isPending, startTransition] = useTransition();
   const isLocked = order.retirado === "SI";
+  const requiresLocalPaymentAccount =
+    order.metadata.paymentMethod === "Pago en local" && order.estado_pago !== "aprobado";
   const canSubmit =
     !isLocked &&
     !isPending &&
     codigo.trim().length > 0 &&
     (!requirePickupFullName || (nombre.trim().length > 0 && apellido.trim().length > 0)) &&
     (requirePickupFullName || nombre.trim().length > 0 || apellido.trim().length > 0) &&
-    (!requirePickupDni || dni.trim().length > 0);
+    (!requirePickupDni || dni.trim().length > 0) &&
+    (!requiresLocalPaymentAccount || paymentAccountCode.trim().length > 0);
+
+  useEffect(() => {
+    if (!requiresLocalPaymentAccount || isLocked) {
+      return;
+    }
+
+    let cancelled = false;
+    setAccountsLoading(true);
+    setAccountsError(null);
+
+    fetch("/api/admin/payment-accounts", {
+      credentials: "same-origin",
+    })
+      .then(async (response) => {
+        const result = (await response.json().catch(() => null)) as
+          | { accounts?: PaymentCollectionAccount[]; error?: string }
+          | null;
+
+        if (!response.ok || !result?.accounts) {
+          throw new Error(result?.error || "No se pudieron cargar los metodos de pago.");
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        setPaymentAccounts(result.accounts);
+        setPaymentAccountCode((current) => current || result.accounts[0]?.code || "");
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setAccountsError(
+            error instanceof Error ? error.message : "No se pudieron cargar los metodos de pago.",
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setAccountsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isLocked, requiresLocalPaymentAccount]);
 
   const handleManualFinalize = () => {
     setFeedback(null);
@@ -93,6 +146,7 @@ export function PickupRedeemPanel({
             apellido,
             dni,
             observacion,
+            paymentAccountCode: paymentAccountCode || null,
           }),
         });
 
@@ -111,6 +165,7 @@ export function PickupRedeemPanel({
         setApellido("");
         setDni("");
         setObservacion("");
+        setPaymentAccountCode("");
         router.refresh();
       } catch (error) {
         setFeedbackTone("error");
@@ -128,6 +183,16 @@ export function PickupRedeemPanel({
             ? "El retiro ya fue registrado. Solo se muestra la informacion final."
             : "Escanea el QR o pega el codigo de retiro para validarlo una sola vez."}
         </p>
+        {!isLocked && order.metadata.paymentMethod === "Pago en local" ? (
+          <p className="mt-2 text-sm text-[color:var(--admin-text)]">
+            Al registrar el retiro tambien dejamos informado el pago realizado en el local.
+          </p>
+        ) : null}
+        {!isLocked && requiresLocalPaymentAccount ? (
+          <p className="mt-2 text-xs text-[color:var(--admin-text)]">
+            Para cerrar este retiro hace falta elegir el metodo de pago.
+          </p>
+        ) : null}
       </div>
 
       {!isLocked ? (
@@ -166,6 +231,36 @@ export function PickupRedeemPanel({
             />
           </div>
 
+          {requiresLocalPaymentAccount ? (
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-[color:var(--admin-title)]">
+                Metodo de pago
+              </label>
+              <select
+                value={paymentAccountCode}
+                onChange={(event) => setPaymentAccountCode(event.target.value)}
+                className={adminInputClass}
+                disabled={isPending || accountsLoading}
+              >
+                <option value="">
+                  {accountsLoading ? "Cargando metodos..." : "Selecciona un metodo de pago"}
+                </option>
+                {paymentAccounts.map((account) => (
+                  <option key={account.code} value={account.code}>
+                    {account.label}
+                  </option>
+                ))}
+              </select>
+              {accountsError ? (
+                <p className="text-sm text-rose-700 dark:text-rose-300">{accountsError}</p>
+              ) : (
+                <p className="text-xs text-[color:var(--admin-text)]">
+                  Este dato se guarda junto con el pago informado al momento del retiro.
+                </p>
+              )}
+            </div>
+          ) : null}
+
           <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_220px]">
             <input
               value={codigo}
@@ -193,7 +288,7 @@ export function PickupRedeemPanel({
             {isPending ? "Registrando..." : "Registrar retiro"}
           </button>
 
-          {allowManualFinalize ? (
+          {allowManualFinalize && !requiresLocalPaymentAccount ? (
             <button
               type="button"
               onClick={handleManualFinalize}
@@ -220,6 +315,11 @@ export function PickupRedeemPanel({
           {order.observacion_retiro ? (
             <div className="mt-2 text-sm text-[color:var(--admin-text)]">
               Obs.: {order.observacion_retiro}
+            </div>
+          ) : null}
+          {order.metadata.pickupPaymentAccountLabel ? (
+            <div className="mt-2 text-sm text-[color:var(--admin-text)]">
+              Cobrado en: {order.metadata.pickupPaymentAccountLabel}
             </div>
           ) : null}
           <div className="mt-2 text-sm text-[color:var(--admin-text)]">

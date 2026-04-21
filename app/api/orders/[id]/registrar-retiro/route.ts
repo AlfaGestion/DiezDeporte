@@ -29,6 +29,7 @@ export async function POST(
     apellido?: string;
     dni?: string;
     observacion?: string;
+    paymentAccountCode?: string;
   };
 
   try {
@@ -38,6 +39,7 @@ export async function POST(
       apellido?: string;
       dni?: string;
       observacion?: string;
+      paymentAccountCode?: string;
     };
   } catch {
     return NextResponse.json({ error: "El cuerpo no es un JSON valido." }, { status: 400 });
@@ -52,6 +54,7 @@ export async function POST(
         apellido: body.apellido || "",
         dni: body.dni || null,
         observacion: body.observacion || null,
+        paymentAccountCode: body.paymentAccountCode || null,
       },
       {
         origin: "admin",
@@ -68,6 +71,12 @@ export async function POST(
     }
 
     console.error("Order registrar retiro API error", error);
-    return NextResponse.json({ error: "No se pudo registrar el retiro." }, { status: 500 });
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error ? error.message : "No se pudo registrar el retiro.",
+      },
+      { status: 500 },
+    );
   }
 }

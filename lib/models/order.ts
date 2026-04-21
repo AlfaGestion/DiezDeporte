@@ -17,7 +17,7 @@ import type {
 
 export const ORDER_TRANSITIONS: Record<OrderState, OrderState[]> = {
   PENDIENTE: ["APROBADO", "CANCELADO", "ERROR"],
-  APROBADO: ["FACTURADO", "CANCELADO", "ERROR"],
+  APROBADO: ["FACTURADO", "LISTO_PARA_RETIRO", "CANCELADO", "ERROR"],
   FACTURADO: ["PREPARANDO", "CANCELADO", "ERROR"],
   PREPARANDO: ["LISTO_PARA_RETIRO", "ENVIADO", "CANCELADO", "ERROR"],
   LISTO_PARA_RETIRO: ["ENTREGADO", "CANCELADO", "ERROR"],
@@ -140,12 +140,25 @@ export function canTransitionOrder(from: OrderState, to: OrderState) {
   return ORDER_TRANSITIONS[from]?.includes(to) ?? false;
 }
 
-export function deriveNextOrderState(order: Pick<Order, "estado" | "tipo_pedido">) {
+export function isPickupLocalPaymentOrder(
+  order: Pick<Order, "tipo_pedido"> & { metadata?: Pick<StoredOrder["metadata"], "paymentMethod"> },
+) {
+  return (
+    order.tipo_pedido === "retiro" &&
+    (order.metadata?.paymentMethod || "").trim().toLowerCase() === "pago en local"
+  );
+}
+
+export function deriveNextOrderState(
+  order: Pick<Order, "estado" | "tipo_pedido"> & {
+    metadata?: Pick<StoredOrder["metadata"], "paymentMethod">;
+  },
+) {
   switch (order.estado) {
     case "PENDIENTE":
       return "APROBADO";
     case "APROBADO":
-      return "FACTURADO";
+      return isPickupLocalPaymentOrder(order) ? "LISTO_PARA_RETIRO" : "FACTURADO";
     case "FACTURADO":
       return "PREPARANDO";
     case "PREPARANDO":
@@ -188,12 +201,16 @@ export function getOrderViewBucket(state: OrderState) {
   }
 }
 
-export function getNextActionLabel(order: Pick<Order, "estado" | "tipo_pedido">) {
+export function getNextActionLabel(
+  order: Pick<Order, "estado" | "tipo_pedido"> & {
+    metadata?: Pick<StoredOrder["metadata"], "paymentMethod">;
+  },
+) {
   switch (order.estado) {
     case "PENDIENTE":
       return "Aprobar";
     case "APROBADO":
-      return "Facturar";
+      return isPickupLocalPaymentOrder(order) ? "Listo para retirar" : "Facturar";
     case "FACTURADO":
       return "Preparar";
     case "PREPARANDO":

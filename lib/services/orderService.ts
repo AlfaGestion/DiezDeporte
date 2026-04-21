@@ -7,6 +7,7 @@ import {
   canTransitionOrder,
   deriveNextOrderState,
   getEmailSentAtField,
+  isPickupLocalPaymentOrder,
   InvalidOrderTransitionError,
   OrderNotFoundError,
   OrderValidationError,
@@ -19,6 +20,7 @@ import {
   sendOrderReceivedEmail,
   sendOrderStatusEmail,
 } from "@/lib/services/emailService";
+import { getPaymentCollectionAccountByCode } from "@/lib/services/paymentAccountService";
 import {
   buildCheckoutOrderDraft as buildCheckoutOrderDraftFromPayload,
   type CheckoutOrderDraft,
@@ -49,6 +51,7 @@ type PickupRedeemInput = {
   apellido: string;
   dni?: string | null;
   observacion?: string | null;
+  paymentAccountCode?: string | null;
 };
 
 const PICKUP_QR_VERSION = 2;
@@ -102,6 +105,8 @@ export async function ensurePickupAssets(order: StoredOrder) {
     return order;
   }
 
+  const settings = await getServerSettings();
+
   const documentNumber =
     order.metadata.documentNumber ||
     buildOrderDocumentNumber(order.id);
@@ -117,7 +122,9 @@ export async function ensurePickupAssets(order: StoredOrder) {
   const needsNewPickupCode = !hasValidPickupCode;
   const needsQrRefresh = currentQrVersion !== PICKUP_QR_VERSION;
   const qrCode =
-    order.codigo_qr && !needsNewPickupCode && !needsQrRefresh
+    !settings.generarQrRetiro
+      ? null
+      : order.codigo_qr && !needsNewPickupCode && !needsQrRefresh
       ? order.codigo_qr
       : await buildQrCode(order, pickupCode);
   const nextMetadata =
@@ -182,6 +189,61 @@ async function runTransitionSideEffects(order: StoredOrder, nextState: OrderStat
   }
 
   return patchedOrder;
+}
+
+async function resolvePickupLocalPaymentMetadata(
+  order: StoredOrder,
+  paymentAccountCode?: string | null,
+) {
+  const normalizedCode = (paymentAccountCode || "").trim();
+
+  if (!isPickupLocalPaymentOrder(order) || order.estado_pago === "aprobado") {
+    return null;
+  }
+
+  if (!normalizedCode) {
+      throw new OrderValidationError(
+      "Selecciona el metodo de pago con el que se cobro el pedido en el local.",
+    );
+  }
+
+  const account = await getPaymentCollectionAccountByCode(normalizedCode);
+
+  if (!account) {
+    throw new OrderValidationError(
+      "El metodo de pago seleccionado no esta disponible para registrar este cobro.",
+    );
+  }
+
+  const detailParts = [
+    "Pago registrado en el local al retirar.",
+    account.label ? `Metodo de pago: ${account.label}.` : null,
+  ].filter(Boolean);
+
+  return {
+    paymentStatusDetail: detailParts.join(" "),
+    pickupPaymentAccountCode: account.code,
+    pickupPaymentAccountLabel: account.label,
+    pickupPaymentOptionalCode: account.optionalCode,
+  } satisfies Partial<StoredOrder["metadata"]>;
+}
+
+async function markPickupLocalPaymentAsPaidIfNeeded(
+  order: StoredOrder,
+  metadataPatch?: Partial<StoredOrder["metadata"]> | null,
+) {
+  if (!isPickupLocalPaymentOrder(order) || order.estado_pago === "aprobado") {
+    return order;
+  }
+
+  return markOrderPaymentStatus(order.id, "aprobado", order.id_pago, {
+    ...order.metadata,
+    ...metadataPatch,
+    paymentStatusDetail:
+      metadataPatch?.paymentStatusDetail ||
+      order.metadata.paymentStatusDetail ||
+      "Pago registrado en el local al retirar.",
+  });
 }
 
 export async function sendOrderReceivedEmailIfNeeded(orderId: number) {
@@ -594,6 +656,12 @@ export async function updateOrderStatus(
     throw new InvalidOrderTransitionError(order.estado, nextState);
   }
 
+  if (nextState === "FACTURADO" && isPickupLocalPaymentOrder(order)) {
+    throw new OrderValidationError(
+      "Los retiros con pago en local no se facturan antes de entregar el pedido.",
+    );
+  }
+
   if (nextState === "FACTURADO" && order.estado_pago !== "aprobado") {
     throw new OrderValidationError("No se puede facturar un pedido con pago no aprobado.");
   }
@@ -617,6 +685,16 @@ export async function updateOrderStatus(
     );
   }
 
+  if (
+    nextState === "ENTREGADO" &&
+    isPickupLocalPaymentOrder(order) &&
+    order.estado_pago !== "aprobado"
+  ) {
+    throw new OrderValidationError(
+      "Para cerrar un retiro con pago en local registra el retiro e informa el metodo de pago.",
+    );
+  }
+
   const updated = await orderRepository.update(order.id, {
     estado: nextState,
   });
@@ -631,7 +709,9 @@ export async function updateOrderStatus(
     nextState,
     resolveOrigin(options),
   );
-  return runTransitionSideEffects(updated, nextState);
+  const orderWithPayment =
+    nextState === "ENTREGADO" ? await markPickupLocalPaymentAsPaidIfNeeded(updated) : updated;
+  return runTransitionSideEffects(orderWithPayment, nextState);
 }
 
 export async function updateOrderState(
@@ -854,6 +934,10 @@ export async function registrarRetiroPedido(
   }
 
   const pickupData = await validatePickupRedeemInput(input);
+  const localPaymentMetadata = await resolvePickupLocalPaymentMetadata(
+    order,
+    input.paymentAccountCode,
+  );
   const redeemed = await orderRepository.markPickupAsRedeemed({
     orderId: order.id,
     nombre: pickupData.nombre,
@@ -876,13 +960,24 @@ export async function registrarRetiroPedido(
     );
   }
 
+  const paidOrder = await markPickupLocalPaymentAsPaidIfNeeded(
+    redeemed.order,
+    localPaymentMetadata,
+  );
   const deliveredAutomation = await getOrderStateAutomationConfig("ENTREGADO");
 
   if (deliveredAutomation.sendEmailOnEnter) {
-    await sendOrderStatusEmail(redeemed.order, "ENTREGADO");
+    try {
+      await sendOrderStatusEmail(paidOrder, "ENTREGADO");
+    } catch (error) {
+      console.error("No se pudo enviar el email de retiro entregado", {
+        orderId: paidOrder.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
-  return redeemed.order;
+  return paidOrder;
 }
 
 export async function registrarRetiroPedidoPorCodigo(

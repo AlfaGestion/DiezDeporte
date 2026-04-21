@@ -222,6 +222,7 @@ export function toAdminOrderRecord(order: StoredOrder): AdminOrderRecord {
       order.estado === "APROBADO" ||
       order.estado === "ERROR" ||
       order.estado_pago === "rechazado",
+    paymentMethod: order.metadata.paymentMethod || null,
     paymentMethodId: order.metadata.paymentMethodId || null,
     paymentTypeId: order.metadata.paymentTypeId || null,
   };
