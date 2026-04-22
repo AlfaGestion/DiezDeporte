@@ -21,6 +21,10 @@ export type Product = {
   unitId: string;
   familyId: string;
   typeId: string;
+  categoryId: string;
+  categoryName: string;
+  brandId: string;
+  brandName: string;
   defaultSize: string;
   presentation: string;
   supplierAccount: string;

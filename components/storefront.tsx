@@ -33,6 +33,9 @@ const VARIANT_LABEL_COLLATOR = new Intl.Collator("es", {
   numeric: true,
   sensitivity: "base",
 });
+const FILTER_LABEL_COLLATOR = new Intl.Collator("es", {
+  sensitivity: "base",
+});
 const AUDIENCE_DISPLAY_ORDER: AudienceFilter[] = [
   "mujeres",
   "hombres",
@@ -84,6 +87,15 @@ type ProductGroup = {
 type GroupCartSummary = {
   quantity: number;
   total: number;
+};
+
+type FilterSectionHeaderProps = {
+  label: string;
+  expanded: boolean;
+  onToggle: () => void;
+  activeLabel?: string | null;
+  onClear?: () => void;
+  clearLabel?: string;
 };
 
 async function readJsonResponse<T>(response: Response): Promise<T | null> {
@@ -288,13 +300,13 @@ export function Storefront({
 
   const resolvedInitialProducts = initialProducts.map(resolveProductImage);
   const productGroups = buildProductGroups(resolvedInitialProducts);
-  const families = Array.from(
+  const categories = Array.from(
     new Set(
       productGroups
-        .map((group) => group.catalogProduct.familyId.trim())
+        .map((group) => getProductCategoryLabel(group.catalogProduct))
         .filter(Boolean),
     ),
-  ).sort((left, right) => left.localeCompare(right));
+  ).sort(FILTER_LABEL_COLLATOR.compare);
 
   const prices = productGroups.map((group) => group.catalogProduct.price);
   const minPrice = prices.length > 0 ? Math.min(...prices) : 0;
@@ -315,24 +327,55 @@ export function Storefront({
     setSelectedMaxPrice(maxPrice);
   }, [minPrice, maxPrice]);
 
-  const normalizedBrandImages = brandImages.slice(0, 6).map((brand, index) => {
-    const label =
+  const catalogBrandOptions = Array.from(
+    new Set(
+      productGroups
+        .map((group) => getProductBrandLabel(group.catalogProduct))
+        .filter(Boolean),
+    ),
+  ).sort(FILTER_LABEL_COLLATOR.compare);
+  const normalizedBrandImages = brandImages.map((brand, index) => {
+    const fallbackLabel =
       brand.label ||
       ["Puma", "Reebok", "Topper", "Salomon", "Montagne", "Merrell"][index] ||
       brand.alt;
+    const aliases = Array.from(
+      new Set(
+        (brand.aliases?.length ? brand.aliases : [fallbackLabel.toUpperCase()])
+          .concat(fallbackLabel)
+          .filter(Boolean),
+      ),
+    );
+    const matchedBrandLabel =
+      catalogBrandOptions.find((option) =>
+        aliases.some(
+          (alias) =>
+            normalizeFilterValue(alias) === normalizeFilterValue(option),
+        ),
+      ) || null;
+
     return {
       ...brand,
-      label,
-      aliases: brand.aliases?.length ? brand.aliases : [label.toUpperCase()],
+      label: fallbackLabel,
+      actualLabel: matchedBrandLabel || fallbackLabel,
+      aliases,
     };
   });
-  const brandOptions = normalizedBrandImages.filter((brand) =>
-    Boolean(brand.label),
-  );
+  const featuredBrandImages = normalizedBrandImages;
+  const brandOptions =
+    catalogBrandOptions.length > 0
+      ? catalogBrandOptions
+      : Array.from(
+          new Set(
+            normalizedBrandImages
+              .map((brand) => brand.actualLabel.trim())
+              .filter(Boolean),
+          ),
+        );
   const activeBrand =
     selectedBrand === "all"
-      ? null
-      : brandOptions.find((brand) => brand.label === selectedBrand) || null;
+      ? ""
+      : brandOptions.find((brand) => brand === selectedBrand) || "";
   const normalizedSearch = normalizeFilterValue(search);
   const filteredProductGroups = productGroups
     .filter((group) => {
@@ -343,17 +386,23 @@ export function Storefront({
             product.description,
           );
           const normalizedCode = normalizeFilterValue(product.code);
+          const normalizedBrand = normalizeFilterValue(product.brandName);
+          const normalizedCategory = normalizeFilterValue(
+            getProductCategoryLabel(product),
+          );
 
           return (
             normalizedDescription.includes(normalizedSearch) ||
-            normalizedCode.includes(normalizedSearch)
+            normalizedCode.includes(normalizedSearch) ||
+            normalizedBrand.includes(normalizedSearch) ||
+            normalizedCategory.includes(normalizedSearch)
           );
         });
 
-      const matchesFamily =
+      const matchesCategory =
         selectedFamily === "all" ||
         group.members.some(
-          (product) => product.familyId.trim() === selectedFamily,
+          (product) => getProductCategoryLabel(product) === selectedFamily,
         );
 
       const matchesAudience = group.members.some((product) =>
@@ -363,11 +412,7 @@ export function Storefront({
         ),
       );
       const matchesBrand = group.members.some((product) =>
-        matchesBrandFilter(
-          normalizeFilterValue(product.description),
-          normalizeFilterValue(product.code),
-          activeBrand?.aliases || [],
-        ),
+        matchesBrandFilter(product, activeBrand),
       );
       const matchesPrice =
         group.catalogProduct.price >= effectiveMinPrice &&
@@ -375,7 +420,7 @@ export function Storefront({
 
       if (
         !matchesSearch ||
-        !matchesFamily ||
+        !matchesCategory ||
         !matchesAudience ||
         !matchesBrand ||
         !matchesPrice
@@ -482,6 +527,14 @@ export function Storefront({
   const activeAudienceLabel =
     audienceOptions.find((option) => option.value === selectedAudience)
       ?.label || "Todo";
+  const activeCategoryLabel = selectedFamily === "all" ? null : selectedFamily;
+  const activeAudienceFilterLabel =
+    selectedAudience === "all" ? null : activeAudienceLabel;
+  const activeBrandLabel = selectedBrand === "all" ? null : selectedBrand;
+  const activePriceLabel =
+    effectiveMinPrice > minPrice || effectiveMaxPrice < maxPrice
+      ? `${formatCurrency(effectiveMinPrice)} - ${formatCurrency(effectiveMaxPrice)}`
+      : null;
   const selectedProductGroup = selectedProduct
     ? productGroups.find(
         (group) =>
@@ -1027,20 +1080,20 @@ export function Storefront({
           </div>
         </section>
 
-        {brandImages.length > 0 ? (
+        {featuredBrandImages.length > 0 ? (
           <section className="brand-strip" aria-label="Marcas destacadas">
-            {normalizedBrandImages.slice(0, 6).map((image) => (
+            {featuredBrandImages.map((image) => (
               <button
                 type="button"
-                className={`brand-chip ${selectedBrand === image.label ? "active" : ""}`}
+                className={`brand-chip ${selectedBrand === image.actualLabel ? "active" : ""}`}
                 key={image.src}
-                onClick={() => applyBrandFilter(image.label)}
-                aria-label={`Filtrar por ${image.label}`}
-                title={`Filtrar por ${image.label}`}
+                onClick={() => applyBrandFilter(image.actualLabel)}
+                aria-label={`Filtrar por ${image.actualLabel}`}
+                title={`Filtrar por ${image.actualLabel}`}
               >
                 <img
                   src={buildImageProxyUrl(image.src) || image.src}
-                  alt={image.alt}
+                  alt={image.alt || image.actualLabel}
                   loading="lazy"
                 />
               </button>
@@ -1119,15 +1172,18 @@ export function Storefront({
             </div>
 
             <div className="panel-block">
-              <button
-                type="button"
-                className="filter-section-toggle"
-                onClick={() => setFamiliesOpen((current) => !current)}
-                aria-expanded={familiesOpen}
-              >
-                <span>Categorias</span>
-                <span className="filter-section-chevron" aria-hidden="true" />
-              </button>
+              <FilterSectionHeader
+                label="Categorias"
+                expanded={familiesOpen}
+                onToggle={() => setFamiliesOpen((current) => !current)}
+                activeLabel={activeCategoryLabel}
+                onClear={() => setSelectedFamily("all")}
+                clearLabel={
+                  activeCategoryLabel
+                    ? `Quitar filtro de categoria ${activeCategoryLabel}`
+                    : undefined
+                }
+              />
               {familiesOpen ? (
                 <div className="filter-section-content">
                   <div className="filter-list">
@@ -1136,16 +1192,16 @@ export function Storefront({
                       className={`filter-chip ${selectedFamily === "all" ? "active" : ""}`}
                       onClick={() => setSelectedFamily("all")}
                     >
-                      Todos los productos
+                      Todas las categorias
                     </button>
-                    {families.map((family) => (
+                    {categories.map((category) => (
                       <button
-                        key={family}
+                        key={category}
                         type="button"
-                        className={`filter-chip ${selectedFamily === family ? "active" : ""}`}
-                        onClick={() => setSelectedFamily(family)}
+                        className={`filter-chip ${selectedFamily === category ? "active" : ""}`}
+                        onClick={() => setSelectedFamily(category)}
                       >
-                        Familia {family}
+                        {category}
                       </button>
                     ))}
                   </div>
@@ -1154,15 +1210,18 @@ export function Storefront({
             </div>
 
             <div className="panel-block">
-              <button
-                type="button"
-                className="filter-section-toggle"
-                onClick={() => setAudienceOpen((current) => !current)}
-                aria-expanded={audienceOpen}
-              >
-                <span>Publico</span>
-                <span className="filter-section-chevron" aria-hidden="true" />
-              </button>
+              <FilterSectionHeader
+                label="Publico"
+                expanded={audienceOpen}
+                onToggle={() => setAudienceOpen((current) => !current)}
+                activeLabel={activeAudienceFilterLabel}
+                onClear={() => setSelectedAudience("all")}
+                clearLabel={
+                  activeAudienceFilterLabel
+                    ? `Quitar filtro de publico ${activeAudienceFilterLabel}`
+                    : undefined
+                }
+              />
               {audienceOpen ? (
                 <div className="filter-section-content">
                   <div className="filter-list">
@@ -1183,15 +1242,18 @@ export function Storefront({
 
             {brandOptions.length > 0 ? (
               <div className="panel-block">
-                <button
-                  type="button"
-                  className="filter-section-toggle"
-                  onClick={() => setBrandsOpen((current) => !current)}
-                  aria-expanded={brandsOpen}
-                >
-                  <span>Marcas</span>
-                  <span className="filter-section-chevron" aria-hidden="true" />
-                </button>
+                <FilterSectionHeader
+                  label="Marcas"
+                  expanded={brandsOpen}
+                  onToggle={() => setBrandsOpen((current) => !current)}
+                  activeLabel={activeBrandLabel}
+                  onClear={() => setSelectedBrand("all")}
+                  clearLabel={
+                    activeBrandLabel
+                      ? `Quitar filtro de marca ${activeBrandLabel}`
+                      : undefined
+                  }
+                />
                 {brandsOpen ? (
                   <div className="filter-section-content">
                     <div className="filter-list">
@@ -1204,12 +1266,12 @@ export function Storefront({
                       </button>
                       {brandOptions.map((brand) => (
                         <button
-                          key={brand.label}
+                          key={brand}
                           type="button"
-                          className={`filter-chip ${selectedBrand === brand.label ? "active" : ""}`}
-                          onClick={() => setSelectedBrand(brand.label)}
+                          className={`filter-chip ${selectedBrand === brand ? "active" : ""}`}
+                          onClick={() => setSelectedBrand(brand)}
                         >
-                          {brand.label}
+                          {brand}
                         </button>
                       ))}
                     </div>
@@ -1219,15 +1281,17 @@ export function Storefront({
             ) : null}
 
             <div className="panel-block">
-              <button
-                type="button"
-                className="filter-section-toggle"
-                onClick={() => setPriceOpen((current) => !current)}
-                aria-expanded={priceOpen}
-              >
-                <span>Rango de precio</span>
-                <span className="filter-section-chevron" aria-hidden="true" />
-              </button>
+              <FilterSectionHeader
+                label="Rango de precio"
+                expanded={priceOpen}
+                onToggle={() => setPriceOpen((current) => !current)}
+                activeLabel={activePriceLabel}
+                onClear={() => {
+                  setSelectedMinPrice(minPrice);
+                  setSelectedMaxPrice(maxPrice);
+                }}
+                clearLabel="Quitar filtro de precio"
+              />
               {priceOpen ? (
                 <div className="filter-section-content">
                   <div className="price-range-values" aria-label="Valores de precio">
@@ -1545,6 +1609,7 @@ export function Storefront({
               <a href={`mailto:${settings.supportEmail}`}>
                 {settings.supportEmail}
               </a>
+              <a href="/admin/login">Panel admin</a>
               {whatsappHref ? (
                 <a href={whatsappHref} target="_blank" rel="noreferrer">
                   WhatsApp
@@ -2764,22 +2829,85 @@ function matchesAudienceFilter(
   );
 }
 
-function matchesBrandFilter(
-  normalizedDescription: string,
-  normalizedCode: string,
-  aliases: string[],
-) {
-  if (aliases.length === 0) {
+function getProductCategoryLabel(product: Product) {
+  return (
+    product.categoryName.trim() ||
+    product.categoryId.trim() ||
+    product.familyId.trim()
+  );
+}
+
+function getProductBrandLabel(product: Product) {
+  return product.brandName.trim();
+}
+
+function matchesBrandFilter(product: Product, selectedBrand: string) {
+  if (!selectedBrand) {
     return true;
   }
 
-  return aliases.some((alias) => {
-    const normalizedAlias = normalizeFilterValue(alias);
-    return (
-      normalizedDescription.includes(normalizedAlias) ||
-      normalizedCode.includes(normalizedAlias)
-    );
-  });
+  const normalizedSelectedBrand = normalizeFilterValue(selectedBrand);
+  const normalizedBrandName = normalizeFilterValue(product.brandName);
+  if (
+    normalizedBrandName &&
+    (normalizedBrandName === normalizedSelectedBrand ||
+      normalizedBrandName.includes(normalizedSelectedBrand))
+  ) {
+    return true;
+  }
+
+  const normalizedDescription = normalizeFilterValue(product.description);
+  const normalizedCode = normalizeFilterValue(product.code);
+
+  return (
+    normalizedDescription.includes(normalizedSelectedBrand) ||
+    normalizedCode.includes(normalizedSelectedBrand)
+  );
+}
+
+function FilterSectionHeader({
+  label,
+  expanded,
+  onToggle,
+  activeLabel,
+  onClear,
+  clearLabel,
+}: FilterSectionHeaderProps) {
+  return (
+    <div className="filter-section-header">
+      <button
+        type="button"
+        className="filter-section-toggle"
+        onClick={onToggle}
+        aria-expanded={expanded}
+      >
+        <span>{label}</span>
+      </button>
+      {activeLabel && onClear ? (
+        <button
+          type="button"
+          className="filter-summary-chip"
+          onClick={onClear}
+          aria-label={clearLabel || `Quitar filtro de ${label.toLowerCase()}`}
+          title={clearLabel || `Quitar filtro de ${label.toLowerCase()}`}
+        >
+          <span className="filter-summary-label">{activeLabel}</span>
+          <span className="filter-summary-clear" aria-hidden="true">
+            ×
+          </span>
+        </button>
+      ) : null}
+      <button
+        type="button"
+        className="filter-section-chevron-button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        aria-label={expanded ? `Ocultar ${label.toLowerCase()}` : `Mostrar ${label.toLowerCase()}`}
+      >
+        <span className="filter-section-chevron" aria-hidden="true" />
+      </button>
+    </div>
+  );
 }
 
 function IconCart() {

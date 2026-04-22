@@ -46,6 +46,20 @@ npm run dev
 
 Abrir `http://localhost:3000`.
 
+`npm run dev` ahora usa `webpack` por defecto para evitar que el cache de desarrollo de Turbopack crezca demasiado en este proyecto.
+
+Si igual queres usar Turbopack:
+
+```bash
+npm run dev:turbopack
+```
+
+Si queres limpiar los artefactos locales de Next:
+
+```bash
+npm run clean:next
+```
+
 Panel admin: `http://localhost:3000/admin`
 
 ## Exponer por internet
@@ -58,7 +72,7 @@ npm run preview
 
 Despues apuntar el tunel al puerto `3000`.
 
-`next dev` sirve para trabajo local, pero por tuneles puede fallar la parte interactiva del cliente por el websocket de HMR.
+`npm run dev` sirve para trabajo local con `webpack`. Si queres probar `Turbopack`, queda disponible con `npm run dev:turbopack`, pero en este proyecto puede generar caches locales muy grandes dentro de `.next`.
 
 ## Notas de integracion
 

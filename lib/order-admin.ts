@@ -1,4 +1,8 @@
-import { getNextActionLabel, getOrderViewBucket } from "@/lib/models/order";
+import {
+  getNextActionLabel,
+  getOrderViewBucket,
+  matchesOrderListView,
+} from "@/lib/models/order";
 import type {
   AdminOrderBucket,
   AdminOrderRecord,
@@ -23,7 +27,7 @@ export const ADMIN_ORDER_VIEWS: OrderListView[] = [
 export function normalizeAdminOrderView(value: string | null | undefined) {
   return ADMIN_ORDER_VIEWS.includes((value || "") as OrderListView)
     ? ((value || "") as OrderListView)
-    : "pedidos";
+    : "pendientes";
 }
 
 export function getAdminOrderViewLabel(view: AdminOrderBucket) {
@@ -245,8 +249,29 @@ export function buildAdminOrdersSnapshot(input: {
   };
 
   for (const order of summarySource) {
-    const bucket = getOrderViewBucket(order.estado);
-    summary[bucket] += 1;
+    if (matchesOrderListView(order, "pendientes")) {
+      summary.pendientes += 1;
+    }
+
+    if (matchesOrderListView(order, "procesados")) {
+      summary.procesados += 1;
+    }
+
+    if (matchesOrderListView(order, "pendientes_retiro")) {
+      summary.pendientes_retiro += 1;
+    }
+
+    if (matchesOrderListView(order, "finalizados")) {
+      summary.finalizados += 1;
+    }
+
+    if (order.estado === "CANCELADO") {
+      summary.cancelados += 1;
+    }
+
+    if (order.estado === "ERROR") {
+      summary.error += 1;
+    }
   }
 
   return {

@@ -1,5 +1,7 @@
 import "server-only";
 import type { CSSProperties } from "react";
+import { formatCurrency } from "@/lib/commerce";
+import { getServerSettings } from "@/lib/store-config";
 import { getStoredSettingValuesByEnvKey } from "@/lib/store-settings";
 import type { OrderState, StoredOrder } from "@/lib/types/order";
 
@@ -14,6 +16,8 @@ export type OrderStateAutomationConfig = {
   sendEmailOnEnter: boolean;
   emailSubject: string;
   emailBody: string;
+  emailCc: string;
+  useBranding: boolean;
 };
 
 export type OrderStateConfig = {
@@ -36,39 +40,93 @@ const STATE_THEME_KEYS: Record<OrderState, string> = {
 const DEFAULT_STATE_CONFIG: Record<OrderState, OrderStateConfig> = {
   PENDIENTE: {
     colors: { bg: "#fff4db", text: "#915d12", border: "#f4d38e", dot: "#dd9a1f" },
-    automation: { sendEmailOnEnter: false, emailSubject: "", emailBody: "" },
+    automation: {
+      sendEmailOnEnter: false,
+      emailSubject: "",
+      emailBody: "",
+      emailCc: "",
+      useBranding: true,
+    },
   },
   APROBADO: {
     colors: { bg: "#e8f3ff", text: "#175d9c", border: "#b9d9f7", dot: "#2f84d8" },
-    automation: { sendEmailOnEnter: false, emailSubject: "", emailBody: "" },
+    automation: {
+      sendEmailOnEnter: false,
+      emailSubject: "",
+      emailBody: "",
+      emailCc: "",
+      useBranding: true,
+    },
   },
   FACTURADO: {
     colors: { bg: "#eef0ff", text: "#4b4fc8", border: "#c9c7fb", dot: "#6a63db" },
-    automation: { sendEmailOnEnter: true, emailSubject: "", emailBody: "" },
+    automation: {
+      sendEmailOnEnter: true,
+      emailSubject: "",
+      emailBody: "",
+      emailCc: "",
+      useBranding: true,
+    },
   },
   PREPARANDO: {
     colors: { bg: "#f2ecff", text: "#6e43c0", border: "#d8c4fb", dot: "#8b5cf6" },
-    automation: { sendEmailOnEnter: false, emailSubject: "", emailBody: "" },
+    automation: {
+      sendEmailOnEnter: false,
+      emailSubject: "",
+      emailBody: "",
+      emailCc: "",
+      useBranding: true,
+    },
   },
   LISTO_PARA_RETIRO: {
     colors: { bg: "#e9f8ee", text: "#1d7a49", border: "#b9e6c7", dot: "#27a85e" },
-    automation: { sendEmailOnEnter: true, emailSubject: "", emailBody: "" },
+    automation: {
+      sendEmailOnEnter: true,
+      emailSubject: "",
+      emailBody: "",
+      emailCc: "",
+      useBranding: true,
+    },
   },
   ENVIADO: {
     colors: { bg: "#e8f7fb", text: "#0f7490", border: "#b8e5f1", dot: "#0891b2" },
-    automation: { sendEmailOnEnter: true, emailSubject: "", emailBody: "" },
+    automation: {
+      sendEmailOnEnter: true,
+      emailSubject: "",
+      emailBody: "",
+      emailCc: "",
+      useBranding: true,
+    },
   },
   ENTREGADO: {
     colors: { bg: "#e8f6ec", text: "#21673d", border: "#b7ddc1", dot: "#2f855a" },
-    automation: { sendEmailOnEnter: true, emailSubject: "", emailBody: "" },
+    automation: {
+      sendEmailOnEnter: true,
+      emailSubject: "",
+      emailBody: "",
+      emailCc: "",
+      useBranding: true,
+    },
   },
   CANCELADO: {
     colors: { bg: "#eef2f6", text: "#546273", border: "#d3dbe5", dot: "#7b8794" },
-    automation: { sendEmailOnEnter: false, emailSubject: "", emailBody: "" },
+    automation: {
+      sendEmailOnEnter: false,
+      emailSubject: "",
+      emailBody: "",
+      emailCc: "",
+      useBranding: true,
+    },
   },
   ERROR: {
     colors: { bg: "#fdeceb", text: "#b33b35", border: "#f5b8b3", dot: "#d64545" },
-    automation: { sendEmailOnEnter: false, emailSubject: "", emailBody: "" },
+    automation: {
+      sendEmailOnEnter: false,
+      emailSubject: "",
+      emailBody: "",
+      emailCc: "",
+      useBranding: true,
+    },
   },
 };
 
@@ -122,6 +180,12 @@ export async function getOrderStateConfigs() {
             ),
             emailSubject: (settings.get(buildStateEnvKey(state, "EMAIL_SUBJECT")) ?? "").trim(),
             emailBody: (settings.get(buildStateEnvKey(state, "EMAIL_BODY")) ?? "").trim(),
+            emailCc: (settings.get(buildStateEnvKey(state, "EMAIL_CC")) ?? "").trim(),
+            useBranding: readBoolean(
+              settings,
+              buildStateEnvKey(state, "USE_BRANDING"),
+              defaults.automation.useBranding,
+            ),
           },
         } satisfies OrderStateConfig,
       ];
@@ -150,9 +214,16 @@ export async function getAdminOrderStateCssVariables() {
   return style;
 }
 
-export function buildOrderTemplateVariables(order: StoredOrder, state: OrderState, trackingUrl: string | null) {
+export async function buildOrderTemplateVariables(
+  order: StoredOrder,
+  state: OrderState,
+  trackingUrl: string | null,
+) {
+  const settings = await getServerSettings();
   const retryUrl = order.metadata.lastCheckoutUrl || trackingUrl || "";
+  const storedSettings = await getStoredSettingValuesByEnvKey();
   const stateLabel =
+    storedSettings.get(buildStateEnvKey(state, "LABEL"))?.trim() ||
     process.env[`APP_STATE_${state}_LABEL`]?.trim() ||
     state;
 
@@ -160,27 +231,44 @@ export function buildOrderTemplateVariables(order: StoredOrder, state: OrderStat
     nombre_cliente: order.nombre_cliente,
     numero_pedido: order.numero_pedido,
     estado: stateLabel,
-    monto_total: new Intl.NumberFormat("es-AR", {
-      style: "currency",
-      currency: "ARS",
-      maximumFractionDigits: 0,
-    }).format(order.monto_total),
+    monto_total: formatCurrency(order.monto_total),
     tipo_entrega:
       order.metadata.deliveryMethod ||
       (order.tipo_pedido === "envio" ? "Envio a domicilio" : "Retiro en local"),
     link_seguimiento: trackingUrl || "",
     link_reintento: retryUrl,
     codigo_retiro: order.metadata.pickupCode || "",
+    direccion_local:
+      storedSettings.get("NEXT_PUBLIC_STORE_ADDRESS")?.trim() ||
+      process.env.NEXT_PUBLIC_STORE_ADDRESS?.trim() ||
+      "",
+    nombre_local:
+      storedSettings.get("NEXT_PUBLIC_STORE_NAME")?.trim() ||
+      process.env.NEXT_PUBLIC_STORE_NAME?.trim() ||
+      "Tu tienda",
+    horario_local:
+      settings.pickupAvailabilityText ||
+      storedSettings.get("NEXT_PUBLIC_STORE_HOURS")?.trim() ||
+      process.env.NEXT_PUBLIC_STORE_HOURS?.trim() ||
+      "",
+    email_contacto:
+      storedSettings.get("NEXT_PUBLIC_SUPPORT_EMAIL")?.trim() ||
+      process.env.NEXT_PUBLIC_SUPPORT_EMAIL?.trim() ||
+      "",
+    telefono_contacto:
+      storedSettings.get("NEXT_PUBLIC_SUPPORT_PHONE")?.trim() ||
+      process.env.NEXT_PUBLIC_SUPPORT_PHONE?.trim() ||
+      "",
   };
 }
 
-export function renderOrderTemplate(
+export async function renderOrderTemplate(
   template: string,
   order: StoredOrder,
   state: OrderState,
   trackingUrl: string | null,
 ) {
-  const variables = buildOrderTemplateVariables(order, state, trackingUrl);
+  const variables = await buildOrderTemplateVariables(order, state, trackingUrl);
 
   return template.replace(/\{\{\s*([a-z_]+)\s*\}\}/gi, (_match, key: string) => {
     const value = variables[key as keyof typeof variables];

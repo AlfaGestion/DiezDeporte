@@ -11,6 +11,7 @@ import {
 import { AdminHelpWorkspace } from "@/components/admin/admin-help-workspace";
 import { AdminPageHeader } from "@/components/admin/admin-page-header";
 import { AdminConfigWorkspace } from "@/components/admin/admin-config-workspace";
+import { AdminSystemWorkspace } from "@/components/admin/admin-system-workspace";
 import { AdminLiveOrderWatcher } from "@/components/admin/admin-live-order-watcher";
 import { AdminThemeToggle } from "@/components/admin-theme-toggle";
 import { cn } from "@/components/admin/admin-ui";
@@ -28,6 +29,13 @@ import {
   getAdminConfigFields,
 } from "@/lib/admin-config";
 import {
+  ADMIN_SYSTEM_SECTIONS,
+  normalizeAdminSystemEditorMode,
+  normalizeAdminSystemSection,
+  type AdminSystemEditorMode,
+  type AdminSystemSection,
+} from "@/lib/admin-system";
+import {
   ADMIN_PASSWORD_PATTERN,
   ADMIN_PASSWORD_POLICY_HINT,
   listAdminUsers,
@@ -40,6 +48,7 @@ import {
 } from "@/lib/order-admin";
 import { getAdminOrderStateCssVariables } from "@/lib/order-state-config";
 import { normalizeOrderFilters } from "@/lib/models/order";
+import { getAdminSystemWorkspaceData } from "@/lib/services/adminSystemService";
 import { getOrders } from "@/lib/services/orderService";
 import { getPublicStoreSettings, getServerSettings } from "@/lib/store-config";
 import type {
@@ -63,14 +72,21 @@ type AdminPageProps = {
     tipo_pedido?: string;
     fecha_desde?: string;
     fecha_hasta?: string;
+    system?: string;
+    system_q?: string;
+    system_mode?: string;
+    system_article?: string;
+    system_article_page?: string;
+    system_stock_page?: string;
     config?: string;
     error?: string;
+    detail?: string;
     create?: string;
     editUser?: string;
   }>;
 };
 
-type AdminView = "orders" | "pickups" | "users" | "config" | "help";
+type AdminView = "orders" | "pickups" | "users" | "system" | "config" | "help";
 
 type AdminHrefInput = {
   view?: AdminView;
@@ -81,6 +97,12 @@ type AdminHrefInput = {
   tipo_pedido?: string | null;
   fecha_desde?: string | null;
   fecha_hasta?: string | null;
+  system?: AdminSystemSection;
+  system_q?: string | null;
+  system_mode?: AdminSystemEditorMode | null;
+  system_article?: string | null;
+  system_article_page?: number | null;
+  system_stock_page?: number | null;
   config?: string;
   create?: boolean;
   editUser?: number;
@@ -97,6 +119,10 @@ function normalizeView(rawValue: string | undefined): AdminView {
 
   if (rawValue === "config" || rawValue === "general") {
     return "config";
+  }
+
+  if (rawValue === "system" || rawValue === "sistema") {
+    return "system";
   }
 
   if (rawValue === "help" || rawValue === "ayuda") {
@@ -139,6 +165,7 @@ function buildAdminHref(input: AdminHrefInput) {
     input.view !== "users" &&
     input.view !== "config" &&
     input.view !== "pickups" &&
+    input.view !== "system" &&
     input.view !== "help"
   ) {
     if (input.vista && input.vista !== "pedidos") {
@@ -167,6 +194,40 @@ function buildAdminHref(input: AdminHrefInput) {
 
     if (input.fecha_hasta) {
       params.set("fecha_hasta", input.fecha_hasta);
+    }
+  }
+
+  if (input.view === "system") {
+    if (input.system && input.system !== "articulos") {
+      params.set("system", input.system);
+    }
+
+    if (input.system_q) {
+      params.set("system_q", input.system_q);
+    }
+
+    if (input.system_mode) {
+      params.set("system_mode", input.system_mode);
+    }
+
+    if (input.system_article) {
+      params.set("system_article", input.system_article);
+    }
+
+    if (
+      input.system === "articulos" &&
+      input.system_article_page &&
+      input.system_article_page > 1
+    ) {
+      params.set("system_article_page", String(input.system_article_page));
+    }
+
+    if (
+      input.system === "stock" &&
+      input.system_stock_page &&
+      input.system_stock_page > 1
+    ) {
+      params.set("system_stock_page", String(input.system_stock_page));
     }
   }
 
@@ -208,6 +269,11 @@ function getViewMeta(view: AdminView) {
         label: "Configuracion",
         description: "Parametros del checkout y comportamiento comercial.",
       };
+    case "system":
+      return {
+        label: "Sistema",
+        description: "Mantenimiento de articulos, stock, marcas y categorias.",
+      };
     case "help":
       return {
         label: "Ayuda",
@@ -231,11 +297,17 @@ function getSummaryCount(
 function FlashMessages({
   saved,
   error,
+  detail,
 }: {
   saved?: string;
   error?: string;
+  detail?: string;
 }) {
-  const renderBanner = (tone: "success" | "error", message: string) => (
+  const renderBanner = (
+    tone: "success" | "error",
+    message: string,
+    extraDetail?: string,
+  ) => (
     <div
       className={cn(
         "rounded-[18px] border px-4 py-3 text-sm",
@@ -244,7 +316,10 @@ function FlashMessages({
           : "border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-400/20 dark:bg-rose-400/10 dark:text-rose-200",
       )}
     >
-      {message}
+      <div>{message}</div>
+      {extraDetail ? (
+        <div className="mt-1 text-xs opacity-80">{extraDetail}</div>
+      ) : null}
     </div>
   );
 
@@ -282,6 +357,34 @@ function FlashMessages({
 
   if (saved === "user-deleted") {
     return renderBanner("success", "Usuario admin eliminado.");
+  }
+
+  if (saved === "system-article-created") {
+    return renderBanner("success", "Articulo creado correctamente.");
+  }
+
+  if (saved === "system-article-updated") {
+    return renderBanner("success", "Articulo actualizado.");
+  }
+
+  if (saved === "system-article-blocked") {
+    return renderBanner("success", "Articulo bloqueado en la web.");
+  }
+
+  if (saved === "system-article-unblocked") {
+    return renderBanner("success", "Articulo habilitado otra vez en la web.");
+  }
+
+  if (saved === "system-stock-updated") {
+    return renderBanner("success", "Stock actualizado.");
+  }
+
+  if (saved === "system-brand-created") {
+    return renderBanner("success", "Marca creada correctamente.");
+  }
+
+  if (saved === "system-category-created") {
+    return renderBanner("success", "Categoria creada correctamente.");
   }
 
   if (error === "order-not-found") {
@@ -375,6 +478,30 @@ function FlashMessages({
       "error",
       "No puedes quitarte permisos de superadmin desde tu propia sesion.",
     );
+  }
+
+  if (error === "system-article-create") {
+    return renderBanner("error", "No se pudo crear el articulo.", detail);
+  }
+
+  if (error === "system-article-update") {
+    return renderBanner("error", "No se pudo actualizar el articulo.", detail);
+  }
+
+  if (error === "system-article-block") {
+    return renderBanner("error", "No se pudo cambiar la visibilidad web del articulo.", detail);
+  }
+
+  if (error === "system-stock-update") {
+    return renderBanner("error", "No se pudo registrar el movimiento de stock.", detail);
+  }
+
+  if (error === "system-brand-create") {
+    return renderBanner("error", "No se pudo crear la marca.", detail);
+  }
+
+  if (error === "system-category-create") {
+    return renderBanner("error", "No se pudo crear la categoria.", detail);
   }
 
   return null;
@@ -767,6 +894,44 @@ function HelpPane(props: {
   );
 }
 
+type SystemPaneProps = Awaited<ReturnType<typeof getAdminSystemWorkspaceData>> & {
+  section: AdminSystemSection;
+  visibleSections: readonly AdminSystemSection[];
+  searchQuery: string;
+  editorMode: AdminSystemEditorMode | null;
+};
+
+function SystemPane(props: SystemPaneProps) {
+  return (
+    <section className="admin-pane">
+      <AdminSystemWorkspace
+        activeSection={props.section}
+        visibleSections={props.visibleSections}
+        searchQuery={props.searchQuery}
+        editorMode={props.editorMode}
+        summary={props.summary}
+        articles={props.articles}
+        articleCurrentPage={props.articleCurrentPage}
+        articlePageSize={props.articlePageSize}
+        articleTotalCount={props.articleTotalCount}
+        articleTotalPages={props.articleTotalPages}
+        stockArticles={props.stockArticles}
+        stockCurrentPage={props.stockCurrentPage}
+        stockPageSize={props.stockPageSize}
+        stockTotalCount={props.stockTotalCount}
+        stockTotalPages={props.stockTotalPages}
+        selectedArticle={props.selectedArticle}
+        nextArticleCode={props.nextArticleCode}
+        brands={props.brands}
+        categories={props.categories}
+        units={props.units}
+        defaultStockReasonId={props.defaultStockReasonId}
+        stockReasons={props.stockReasons}
+      />
+    </section>
+  );
+}
+
 export default async function AdminPage({ searchParams }: AdminPageProps) {
   const [
     {
@@ -780,8 +945,15 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
       tipo_pedido,
       fecha_desde,
       fecha_hasta,
+      system,
+      system_q,
+      system_mode,
+      system_article,
+      system_article_page,
+      system_stock_page,
       config,
       error,
+      detail,
       create,
       editUser,
     },
@@ -796,6 +968,27 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
 
   const activeView = normalizeView(view);
   const activeOrderView = normalizeAdminOrderView(vista || status);
+  const requestedSystemSection = normalizeAdminSystemSection(system);
+  const canAccessSystemStock =
+    sessionUser.username.trim().toLowerCase() === "useralfa";
+  const visibleSystemSections = canAccessSystemStock
+    ? ADMIN_SYSTEM_SECTIONS
+    : ADMIN_SYSTEM_SECTIONS.filter((section) => section !== "stock");
+  const activeSystemSection =
+    !canAccessSystemStock && requestedSystemSection === "stock"
+      ? "articulos"
+      : requestedSystemSection;
+  const activeSystemMode = normalizeAdminSystemEditorMode(system_mode);
+  const activeSystemArticle = system_article?.trim() || "";
+  const systemSearchQuery = system_q?.trim() || "";
+  const activeSystemArticlePage =
+    activeSystemSection === "articulos"
+      ? normalizePositiveInt(system_article_page) || 1
+      : 1;
+  const activeSystemStockPage =
+    activeSystemSection === "stock"
+      ? normalizePositiveInt(system_stock_page) || 1
+      : 1;
   const baseOrderFilters = normalizeOrderFilters({
     q,
     estado,
@@ -814,6 +1007,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     adminUsers,
     stateColorStyle,
     initialWatchSnapshot,
+    systemWorkspaceData,
   ] = await Promise.all([
     getPublicStoreSettings(),
     getServerSettings(),
@@ -831,6 +1025,21 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     listAdminUsers(),
     getAdminOrderStateCssVariables(),
     getWatchSnapshot(),
+    activeView === "system"
+      ? getAdminSystemWorkspaceData({
+          section: activeSystemSection,
+          query: systemSearchQuery,
+          articleCode: activeSystemArticle,
+          articlePage: activeSystemArticlePage,
+          stockPage: activeSystemStockPage,
+        }).then((workspace) => ({
+          ...workspace,
+          section: activeSystemSection,
+          visibleSections: visibleSystemSections,
+          searchQuery: systemSearchQuery,
+          editorMode: activeSystemMode,
+        }))
+      : Promise.resolve(null),
   ]);
   const ordersSnapshot = buildAdminOrdersSnapshot({
     orders: filteredOrders,
@@ -879,6 +1088,17 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     fecha_desde: baseOrderFilters.fecha_desde,
     fecha_hasta: baseOrderFilters.fecha_hasta,
   });
+  const currentSystemHref = buildAdminHref({
+    view: "system",
+    system: activeSystemSection,
+    system_q: systemSearchQuery,
+    system_mode: activeSystemMode,
+    system_article: activeSystemArticle || null,
+    system_article_page:
+      activeSystemSection === "articulos" ? activeSystemArticlePage : null,
+    system_stock_page:
+      activeSystemSection === "stock" ? activeSystemStockPage : null,
+  });
   const showTechnicalHelp =
     sessionUser.username.trim().toLowerCase() === "useralfa";
 
@@ -915,7 +1135,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           </div>
         </header>
 
-        <FlashMessages saved={saved} error={error} />
+        <FlashMessages saved={saved} error={error} detail={detail} />
         <AdminLiveOrderWatcher
           initialSnapshot={initialWatchSnapshot}
           ordersHref={currentOrdersHref}
@@ -936,7 +1156,13 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             )}
           >
             <span>Pedidos</span>
-            <small className={activeView === "orders" ? "text-white/80" : "text-[color:var(--admin-text)]"}>
+            <small
+              className={
+                activeView === "orders"
+                  ? "text-white/80"
+                  : "text-[color:var(--admin-text)]"
+              }
+            >
               {ordersSnapshot.summary.total}
             </small>
           </Link>
@@ -966,6 +1192,20 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             <span>Usuarios</span>
             <small className={activeView === "users" ? "text-white/80" : "text-[color:var(--admin-text)]"}>
               {adminUsers.length}
+            </small>
+          </Link>
+          <Link
+            href={currentSystemHref}
+            className={cn(
+              "inline-flex min-w-[140px] items-center justify-between rounded-[14px] px-4 py-2.5 text-sm transition",
+              activeView === "system"
+                ? "bg-[color:var(--admin-accent)] text-white"
+                : "text-[color:var(--admin-title)] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]",
+            )}
+          >
+            <span>Sistema</span>
+            <small className={activeView === "system" ? "text-white/80" : "text-[color:var(--admin-text)]"}>
+              {visibleSystemSections.length}
             </small>
           </Link>
           <Link
@@ -1018,6 +1258,16 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             showUserEditForm={showUserEditForm}
             editingUser={editingUser}
           />
+        ) : activeView === "system" ? (
+          systemWorkspaceData ? (
+            <SystemPane {...systemWorkspaceData} />
+          ) : (
+            <EmptyState
+              title="No se pudo abrir Sistema"
+              message="Revisa la conexion y vuelve a intentar."
+              compact
+            />
+          )
         ) : activeView === "help" ? (
           <HelpPane
             storeName={settings.storeName}

@@ -1,12 +1,15 @@
 import "server-only";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import type { ConnectionPool, Transaction } from "mssql";
-import { getConnection, sql } from "@/lib/db";
+import type { DbExecutor } from "@/lib/db";
+import {
+  executeStatement,
+  normalizeDbDate,
+  queryOne,
+  queryRows,
+  withTransaction,
+} from "@/lib/db";
 
-type Executor = ConnectionPool | Transaction;
-
-const ADMIN_USERS_TABLE = "dbo.TA_UsuariosWeb";
-const LEGACY_ADMIN_USERS_TABLE = "dbo.TA_UsuarioWeb";
+const ADMIN_USERS_TABLE = "dbo_TA_UsuariosWeb";
 const PASSWORD_MIN_LENGTH = 8;
 const USERNAME_MIN_LENGTH = 3;
 
@@ -37,10 +40,10 @@ type AdminUserRow = {
   ID: number;
   Usuario: string;
   Contrasena: string;
-  SuperAdmin: boolean;
-  Habilitado: boolean;
-  FechaAlta: Date;
-  FechaModificacion: Date;
+  SuperAdmin: number | boolean;
+  Habilitado: number | boolean;
+  FechaAlta: Date | string;
+  FechaModificacion: Date | string;
 };
 
 export type AdminUser = {
@@ -73,22 +76,6 @@ type DeleteAdminUserInput = {
   id: number;
   actorUserId?: number;
 };
-
-function createRequest(executor: Executor) {
-  if ("begin" in executor) {
-    return new sql.Request(executor);
-  }
-
-  return executor.request();
-}
-
-function setInput(
-  request: ReturnType<typeof createRequest>,
-  name: string,
-  value: unknown,
-) {
-  request.input(name, value);
-}
 
 function normalizeUsername(value: string) {
   return value.trim();
@@ -150,10 +137,8 @@ function mapAdminUser(row: AdminUserRow): AdminUser {
     passwordHash: row.Contrasena,
     superAdmin: Boolean(row.SuperAdmin),
     enabled: Boolean(row.Habilitado),
-    createdAt: row.FechaAlta ? new Date(row.FechaAlta).toISOString() : "",
-    updatedAt: row.FechaModificacion
-      ? new Date(row.FechaModificacion).toISOString()
-      : "",
+    createdAt: normalizeDbDate(row.FechaAlta)?.toISOString() || "",
+    updatedAt: normalizeDbDate(row.FechaModificacion)?.toISOString() || "",
   };
 }
 
@@ -198,13 +183,8 @@ function normalizeUserError(error: unknown) {
     return new Error("No se pudo guardar el usuario admin.");
   }
 
-  const sqlError = error as Error & {
-    number?: number;
-    originalError?: { info?: { number?: number; message?: string }; number?: number };
-  };
-  const number = sqlError.number || sqlError.originalError?.info?.number || sqlError.originalError?.number;
-
-  if (number === 2601 || number === 2627) {
+  const mysqlError = error as Error & { code?: string };
+  if (mysqlError.code === "ER_DUP_ENTRY") {
     return new Error(DUPLICATE_USER_ERROR);
   }
 
@@ -262,63 +242,120 @@ function validateDeleteAdminUserInput(input: DeleteAdminUserInput) {
   }
 }
 
-async function countOtherEnabledSuperAdmins(id: number, executor: Executor) {
-  const request = createRequest(executor);
-  setInput(request, "id", id);
+async function ensureAdminUsersUsernameIndex(executor?: DbExecutor) {
+  const existingIndex = await queryOne<{ index_name: string }>(
+    `
+      SELECT index_name
+      FROM information_schema.statistics
+      WHERE table_schema = DATABASE()
+        AND table_name = :tableName
+        AND index_name = 'UX_TA_UsuariosWeb_Usuario'
+      LIMIT 1;
+    `,
+    { tableName: ADMIN_USERS_TABLE },
+    executor,
+  );
 
-  const result = await request.query<{ total: number }>(`
-    SELECT COUNT(*) AS total
-    FROM ${ADMIN_USERS_TABLE} WITH (UPDLOCK, HOLDLOCK)
-    WHERE ID <> @id
-      AND SuperAdmin = 1
-      AND Habilitado = 1;
-  `);
+  if (existingIndex) {
+    return;
+  }
 
-  return Number(result.recordset[0]?.total || 0);
+  try {
+    await executeStatement(
+      `ALTER TABLE ${ADMIN_USERS_TABLE} ADD UNIQUE KEY UX_TA_UsuariosWeb_Usuario (Usuario);`,
+      undefined,
+      executor,
+    );
+  } catch (error) {
+    const normalized = normalizeUserError(error);
+    if (normalized instanceof Error && normalized.message === DUPLICATE_USER_ERROR) {
+      throw normalized;
+    }
+  }
+}
+
+async function removeSystemAdminFromDatabase(executor?: DbExecutor) {
+  await executeStatement(
+    `
+      DELETE FROM ${ADMIN_USERS_TABLE}
+      WHERE LOWER(TRIM(Usuario)) = LOWER(:systemUsername);
+    `,
+    { systemUsername: ADMIN_SYSTEM_USERNAME },
+    executor,
+  );
+}
+
+export async function ensureAdminUsersTable(executor?: DbExecutor) {
+  await executeStatement(
+    `
+      CREATE TABLE IF NOT EXISTS ${ADMIN_USERS_TABLE} (
+        ID BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        Usuario VARCHAR(80) NOT NULL,
+        Contrasena VARCHAR(255) NOT NULL,
+        SuperAdmin TINYINT(1) NOT NULL DEFAULT 0,
+        Habilitado TINYINT(1) NOT NULL DEFAULT 1,
+        FechaAlta DATETIME NOT NULL,
+        FechaModificacion DATETIME NOT NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `,
+    undefined,
+    executor,
+  );
+
+  await ensureAdminUsersUsernameIndex(executor);
+  await removeSystemAdminFromDatabase(executor);
+}
+
+async function countOtherEnabledSuperAdmins(id: number, executor: DbExecutor) {
+  const row = await queryOne<{ total: number }>(
+    `
+      SELECT COUNT(*) AS total
+      FROM ${ADMIN_USERS_TABLE}
+      WHERE ID <> :id
+        AND SuperAdmin = 1
+        AND Habilitado = 1;
+    `,
+    { id },
+    executor,
+  );
+
+  return Number(row?.total || 0);
 }
 
 async function withAdminUsersTransaction<T>(
-  executor: Executor | undefined,
-  callback: (runExecutor: Executor) => Promise<T>,
+  executor: DbExecutor | undefined,
+  callback: (runExecutor: DbExecutor) => Promise<T>,
 ) {
   if (executor) {
     await ensureAdminUsersTable(executor);
     return callback(executor);
   }
 
-  const pool = await getConnection();
-  const transaction = new sql.Transaction(pool);
-  await transaction.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
-
-  try {
+  return withTransaction(async (transaction) => {
     await ensureAdminUsersTable(transaction);
-    const result = await callback(transaction);
-    await transaction.commit();
-    return result;
-  } catch (error) {
-    await transaction.rollback();
-    throw error;
-  }
+    return callback(transaction);
+  });
 }
 
-async function getMutableAdminUser(id: number, executor: Executor) {
-  const request = createRequest(executor);
-  setInput(request, "id", id);
+async function getMutableAdminUser(id: number, executor: DbExecutor) {
+  const row = await queryOne<AdminUserRow>(
+    `
+      SELECT
+        ID,
+        Usuario,
+        Contrasena,
+        SuperAdmin,
+        Habilitado,
+        FechaAlta,
+        FechaModificacion
+      FROM ${ADMIN_USERS_TABLE}
+      WHERE ID = :id
+      FOR UPDATE;
+    `,
+    { id },
+    executor,
+  );
 
-  const result = await request.query<AdminUserRow>(`
-    SELECT TOP (1)
-      CAST(ID AS int) AS ID,
-      Usuario,
-      Contrasena,
-      SuperAdmin,
-      Habilitado,
-      FechaAlta,
-      FechaModificacion
-    FROM ${ADMIN_USERS_TABLE} WITH (UPDLOCK, HOLDLOCK)
-    WHERE ID = @id;
-  `);
-
-  const row = result.recordset[0];
   return row ? mapAdminUser(row) : null;
 }
 
@@ -329,7 +366,7 @@ async function assertUserMutationAllowed(
     enabled: boolean;
     actorUserId?: number;
   },
-  executor: Executor,
+  executor: DbExecutor,
 ) {
   if (nextState.actorUserId && nextState.actorUserId === currentUser.id) {
     if (!nextState.enabled) {
@@ -355,16 +392,6 @@ async function assertUserMutationAllowed(
       throw new Error(LAST_SUPERADMIN_ERROR);
     }
   }
-}
-
-async function removeSystemAdminFromDatabase(executor: Executor) {
-  const request = createRequest(executor);
-  setInput(request, "systemUsername", ADMIN_SYSTEM_USERNAME);
-
-  await request.query(`
-    DELETE FROM ${ADMIN_USERS_TABLE}
-    WHERE LOWER(LTRIM(RTRIM(Usuario))) = LOWER(@systemUsername);
-  `);
 }
 
 export function getAdminUserErrorCode(error: unknown) {
@@ -397,101 +424,18 @@ export function getAdminUserErrorCode(error: unknown) {
   }
 }
 
-export async function ensureAdminUsersTable(executor?: Executor) {
-  const connection = executor || (await getConnection());
-
-  await createRequest(connection).query(`
-    IF OBJECT_ID('${ADMIN_USERS_TABLE}', 'U') IS NULL
-      AND OBJECT_ID('${LEGACY_ADMIN_USERS_TABLE}', 'U') IS NOT NULL
-    BEGIN
-      EXEC sp_rename '${LEGACY_ADMIN_USERS_TABLE}', 'TA_UsuariosWeb';
-    END;
-
-    IF OBJECT_ID('dbo.DF_TA_UsuarioWeb_SuperAdmin', 'D') IS NOT NULL
-      AND OBJECT_ID('dbo.DF_TA_UsuariosWeb_SuperAdmin', 'D') IS NULL
-    BEGIN
-      EXEC sp_rename 'dbo.DF_TA_UsuarioWeb_SuperAdmin', 'DF_TA_UsuariosWeb_SuperAdmin', 'OBJECT';
-    END;
-
-    IF OBJECT_ID('dbo.DF_TA_UsuarioWeb_Habilitado', 'D') IS NOT NULL
-      AND OBJECT_ID('dbo.DF_TA_UsuariosWeb_Habilitado', 'D') IS NULL
-    BEGIN
-      EXEC sp_rename 'dbo.DF_TA_UsuarioWeb_Habilitado', 'DF_TA_UsuariosWeb_Habilitado', 'OBJECT';
-    END;
-
-    IF OBJECT_ID('dbo.DF_TA_UsuarioWeb_FechaAlta', 'D') IS NOT NULL
-      AND OBJECT_ID('dbo.DF_TA_UsuariosWeb_FechaAlta', 'D') IS NULL
-    BEGIN
-      EXEC sp_rename 'dbo.DF_TA_UsuarioWeb_FechaAlta', 'DF_TA_UsuariosWeb_FechaAlta', 'OBJECT';
-    END;
-
-    IF OBJECT_ID('dbo.DF_TA_UsuarioWeb_FechaModificacion', 'D') IS NOT NULL
-      AND OBJECT_ID('dbo.DF_TA_UsuariosWeb_FechaModificacion', 'D') IS NULL
-    BEGIN
-      EXEC sp_rename 'dbo.DF_TA_UsuarioWeb_FechaModificacion', 'DF_TA_UsuariosWeb_FechaModificacion', 'OBJECT';
-    END;
-
-    IF EXISTS (
-      SELECT 1
-      FROM sys.indexes
-      WHERE name = 'UX_TA_UsuarioWeb_Usuario'
-        AND object_id = OBJECT_ID('${ADMIN_USERS_TABLE}')
-    )
-      AND NOT EXISTS (
-        SELECT 1
-        FROM sys.indexes
-        WHERE name = 'UX_TA_UsuariosWeb_Usuario'
-          AND object_id = OBJECT_ID('${ADMIN_USERS_TABLE}')
-      )
-    BEGIN
-      EXEC sp_rename 'dbo.TA_UsuariosWeb.UX_TA_UsuarioWeb_Usuario', 'UX_TA_UsuariosWeb_Usuario', 'INDEX';
-    END;
-
-    IF OBJECT_ID('${ADMIN_USERS_TABLE}', 'U') IS NULL
-    BEGIN
-      CREATE TABLE ${ADMIN_USERS_TABLE} (
-        ID bigint IDENTITY(1, 1) NOT NULL PRIMARY KEY,
-        Usuario nvarchar(80) NOT NULL,
-        Contrasena nvarchar(255) NOT NULL,
-        SuperAdmin bit NOT NULL CONSTRAINT DF_TA_UsuariosWeb_SuperAdmin DEFAULT 0,
-        Habilitado bit NOT NULL CONSTRAINT DF_TA_UsuariosWeb_Habilitado DEFAULT 1,
-        FechaAlta datetime2 NOT NULL CONSTRAINT DF_TA_UsuariosWeb_FechaAlta DEFAULT SYSDATETIME(),
-        FechaModificacion datetime2 NOT NULL CONSTRAINT DF_TA_UsuariosWeb_FechaModificacion DEFAULT SYSDATETIME()
-      );
-    END;
-
-    IF NOT EXISTS (
-      SELECT 1
-      FROM sys.indexes
-      WHERE name = 'UX_TA_UsuariosWeb_Usuario'
-        AND object_id = OBJECT_ID('${ADMIN_USERS_TABLE}')
-    )
-    BEGIN
-      CREATE UNIQUE INDEX UX_TA_UsuariosWeb_Usuario
-      ON ${ADMIN_USERS_TABLE} (Usuario);
-    END;
-  `);
-
-  await removeSystemAdminFromDatabase(connection);
-}
-
 export async function countAdminUsers() {
-  const pool = await getConnection();
-  await ensureAdminUsersTable(pool);
-
-  const result = await pool.request().query<{
-    total: number;
-    enabled: number;
-  }>(`
+  await ensureAdminUsersTable();
+  const row = await queryOne<{ total: number; enabled: number }>(`
     SELECT
       COUNT(*) AS total,
       SUM(CASE WHEN Habilitado = 1 THEN 1 ELSE 0 END) AS enabled
-    FROM ${ADMIN_USERS_TABLE} WITH (NOLOCK);
+    FROM ${ADMIN_USERS_TABLE};
   `);
 
   return {
-    total: Number(result.recordset[0]?.total || 0),
-    enabled: Number(result.recordset[0]?.enabled || 0),
+    total: Number(row?.total || 0),
+    enabled: Number(row?.enabled || 0),
   };
 }
 
@@ -501,26 +445,27 @@ export async function hasAdminUsers() {
 }
 
 export async function listAdminUsers() {
-  const pool = await getConnection();
-  await ensureAdminUsersTable(pool);
-
-  const result = await pool.request().query<AdminUserRow>(`
+  await ensureAdminUsersTable();
+  const rows = await queryRows<AdminUserRow>(`
     SELECT
-      CAST(ID AS int) AS ID,
+      ID,
       Usuario,
       Contrasena,
       SuperAdmin,
       Habilitado,
       FechaAlta,
       FechaModificacion
-    FROM ${ADMIN_USERS_TABLE} WITH (NOLOCK)
+    FROM ${ADMIN_USERS_TABLE}
     ORDER BY Usuario ASC, ID ASC;
   `);
 
-  return result.recordset.map(mapAdminUser);
+  return rows.map(mapAdminUser);
 }
 
-export async function findAdminUserByUsername(username: string, executor?: Executor) {
+export async function findAdminUserByUsername(
+  username: string,
+  executor?: DbExecutor,
+) {
   const normalizedUsername = normalizeUsername(username);
   if (!normalizedUsername) {
     return null;
@@ -530,30 +475,29 @@ export async function findAdminUserByUsername(username: string, executor?: Execu
     return getSystemAdminUser();
   }
 
-  const connection = executor || (await getConnection());
-  await ensureAdminUsersTable(connection);
+  await ensureAdminUsersTable(executor);
+  const row = await queryOne<AdminUserRow>(
+    `
+      SELECT
+        ID,
+        Usuario,
+        Contrasena,
+        SuperAdmin,
+        Habilitado,
+        FechaAlta,
+        FechaModificacion
+      FROM ${ADMIN_USERS_TABLE}
+      WHERE TRIM(Usuario) = :username
+      LIMIT 1;
+    `,
+    { username: normalizedUsername },
+    executor,
+  );
 
-  const request = createRequest(connection);
-  setInput(request, "username", normalizedUsername);
-
-  const result = await request.query<AdminUserRow>(`
-    SELECT TOP (1)
-      CAST(ID AS int) AS ID,
-      Usuario,
-      Contrasena,
-      SuperAdmin,
-      Habilitado,
-      FechaAlta,
-      FechaModificacion
-    FROM ${ADMIN_USERS_TABLE} WITH (NOLOCK)
-    WHERE LTRIM(RTRIM(Usuario)) = @username;
-  `);
-
-  const row = result.recordset[0];
   return row ? mapAdminUser(row) : null;
 }
 
-export async function findAdminUserById(id: number, executor?: Executor) {
+export async function findAdminUserById(id: number, executor?: DbExecutor) {
   if (isSystemAdminUserId(id)) {
     return getSystemAdminUser();
   }
@@ -562,26 +506,25 @@ export async function findAdminUserById(id: number, executor?: Executor) {
     return null;
   }
 
-  const connection = executor || (await getConnection());
-  await ensureAdminUsersTable(connection);
+  await ensureAdminUsersTable(executor);
+  const row = await queryOne<AdminUserRow>(
+    `
+      SELECT
+        ID,
+        Usuario,
+        Contrasena,
+        SuperAdmin,
+        Habilitado,
+        FechaAlta,
+        FechaModificacion
+      FROM ${ADMIN_USERS_TABLE}
+      WHERE ID = :id
+      LIMIT 1;
+    `,
+    { id },
+    executor,
+  );
 
-  const request = createRequest(connection);
-  setInput(request, "id", id);
-
-  const result = await request.query<AdminUserRow>(`
-    SELECT TOP (1)
-      CAST(ID AS int) AS ID,
-      Usuario,
-      Contrasena,
-      SuperAdmin,
-      Habilitado,
-      FechaAlta,
-      FechaModificacion
-    FROM ${ADMIN_USERS_TABLE} WITH (NOLOCK)
-    WHERE ID = @id;
-  `);
-
-  const row = result.recordset[0];
   return row ? mapAdminUser(row) : null;
 }
 
@@ -602,44 +545,47 @@ export async function authenticateAdminUser(username: string, password: string) 
 
 export async function createAdminUser(
   input: CreateAdminUserInput,
-  executor?: Executor,
+  executor?: DbExecutor,
 ) {
   validateNewUser(input);
+  await ensureAdminUsersTable(executor);
 
-  const connection = executor || (await getConnection());
-  await ensureAdminUsersTable(connection);
-
-  const request = createRequest(connection);
   const username = normalizeUsername(input.username);
-
-  setInput(request, "username", username);
-  setInput(request, "passwordHash", hashPassword(input.password));
-  setInput(request, "superAdmin", input.superAdmin ? 1 : 0);
-  setInput(request, "enabled", input.enabled === false ? 0 : 1);
+  const duplicate = await findAdminUserByUsername(username, executor);
+  if (duplicate) {
+    throw new Error(DUPLICATE_USER_ERROR);
+  }
 
   try {
-    const result = await request.query<{ ID: number }>(`
-      INSERT INTO ${ADMIN_USERS_TABLE} (
-        Usuario,
-        Contrasena,
-        SuperAdmin,
-        Habilitado,
-        FechaAlta,
-        FechaModificacion
-      )
-      OUTPUT CAST(INSERTED.ID AS int) AS ID
-      VALUES (
-        @username,
-        @passwordHash,
-        @superAdmin,
-        @enabled,
-        SYSDATETIME(),
-        SYSDATETIME()
-      );
-    `);
+    const result = await executeStatement(
+      `
+        INSERT INTO ${ADMIN_USERS_TABLE} (
+          Usuario,
+          Contrasena,
+          SuperAdmin,
+          Habilitado,
+          FechaAlta,
+          FechaModificacion
+        )
+        VALUES (
+          :username,
+          :passwordHash,
+          :superAdmin,
+          :enabled,
+          NOW(),
+          NOW()
+        );
+      `,
+      {
+        username,
+        passwordHash: hashPassword(input.password),
+        superAdmin: input.superAdmin ? 1 : 0,
+        enabled: input.enabled === false ? 0 : 1,
+      },
+      executor,
+    );
 
-    const id = Number(result.recordset[0]?.ID || 0);
-    return findAdminUserById(id, connection);
+    return findAdminUserById(Number(result.insertId || 0), executor);
   } catch (error) {
     throw normalizeUserError(error);
   }
@@ -647,7 +593,7 @@ export async function createAdminUser(
 
 export async function updateAdminUser(
   input: UpdateAdminUserInput,
-  executor?: Executor,
+  executor?: DbExecutor,
 ) {
   validateAdminUserUpdate(input);
 
@@ -669,29 +615,54 @@ export async function updateAdminUser(
       runExecutor,
     );
 
-    const request = createRequest(runExecutor);
-    const shouldUpdatePassword = validatePasswordForUpdate(input.password);
+    const duplicate = await queryOne<{ ID: number }>(
+      `
+        SELECT ID
+        FROM ${ADMIN_USERS_TABLE}
+        WHERE TRIM(Usuario) = :username
+          AND ID <> :id
+        LIMIT 1;
+      `,
+      {
+        id: input.id,
+        username: normalizeUsername(input.username),
+      },
+      runExecutor,
+    );
 
-    setInput(request, "id", input.id);
-    setInput(request, "username", normalizeUsername(input.username));
-    setInput(request, "superAdmin", nextSuperAdmin ? 1 : 0);
-    setInput(request, "enabled", nextEnabled ? 1 : 0);
+    if (duplicate) {
+      throw new Error(DUPLICATE_USER_ERROR);
+    }
+
+    const shouldUpdatePassword = validatePasswordForUpdate(input.password);
+    const params: Record<string, unknown> = {
+      id: input.id,
+      username: normalizeUsername(input.username),
+      superAdmin: nextSuperAdmin ? 1 : 0,
+      enabled: nextEnabled ? 1 : 0,
+    };
+    const setClauses = [
+      "Usuario = :username",
+      "SuperAdmin = :superAdmin",
+      "Habilitado = :enabled",
+      "FechaModificacion = NOW()",
+    ];
 
     if (shouldUpdatePassword) {
-      setInput(request, "passwordHash", hashPassword(input.password || ""));
+      params.passwordHash = hashPassword(input.password || "");
+      setClauses.push("Contrasena = :passwordHash");
     }
 
     try {
-      await request.query(`
-        UPDATE ${ADMIN_USERS_TABLE}
-        SET
-          Usuario = @username,
-          SuperAdmin = @superAdmin,
-          Habilitado = @enabled,
-          FechaModificacion = SYSDATETIME()
-          ${shouldUpdatePassword ? ", Contrasena = @passwordHash" : ""}
-        WHERE ID = @id;
-      `);
+      await executeStatement(
+        `
+          UPDATE ${ADMIN_USERS_TABLE}
+          SET ${setClauses.join(", ")}
+          WHERE ID = :id;
+        `,
+        params,
+        runExecutor,
+      );
     } catch (error) {
       throw normalizeUserError(error);
     }
@@ -707,7 +678,7 @@ export async function updateAdminUser(
 
 export async function deleteAdminUser(
   input: DeleteAdminUserInput,
-  executor?: Executor,
+  executor?: DbExecutor,
 ) {
   validateDeleteAdminUserInput(input);
 
@@ -731,13 +702,14 @@ export async function deleteAdminUser(
       runExecutor,
     );
 
-    const request = createRequest(runExecutor);
-    setInput(request, "id", input.id);
-
-    await request.query(`
-      DELETE FROM ${ADMIN_USERS_TABLE}
-      WHERE ID = @id;
-    `);
+    await executeStatement(
+      `
+        DELETE FROM ${ADMIN_USERS_TABLE}
+        WHERE ID = :id;
+      `,
+      { id: input.id },
+      runExecutor,
+    );
 
     return currentUser;
   });

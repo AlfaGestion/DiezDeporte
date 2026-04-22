@@ -66,10 +66,24 @@ export type ServerSettings = {
   orderReceivedEmailBody: string;
   paymentInitFailureEmailSubject: string;
   paymentInitFailureEmailBody: string;
+  orderReceivedEmailCc: string;
+  orderReceivedEmailUseBranding: boolean;
+  paymentInitFailureEmailCc: string;
+  paymentInitFailureEmailUseBranding: boolean;
   invoiceEmailSubject: string;
   invoiceEmailBody: string;
+  invoiceEmailCc: string;
+  invoiceEmailUseBranding: boolean;
   enviarEmailFacturadoRetiro: boolean;
   enviarEmailFacturadoEnvio: boolean;
+  emailBrandingEnabled: boolean;
+  emailPrimaryColor: string;
+  emailAccentColor: string;
+  emailHighlightColor: string;
+  emailShowContactBlock: boolean;
+  emailFooterNote: string;
+  emailTrackingButtonLabel: string;
+  emailPickupButtonLabel: string;
 };
 
 function readSetting(
@@ -99,8 +113,8 @@ export async function getServerSettings(): Promise<ServerSettings> {
   return {
     priceColumn: priceColumns.has(priceColumn) ? priceColumn : "PRECIO1",
     productLimit: Math.max(
-      1,
-      Number(readSetting(storedValues, "APP_PRODUCT_LIMIT", "200") || "200"),
+      0,
+      Number(readSetting(storedValues, "APP_PRODUCT_LIMIT", "0") || "0"),
     ),
     stockDepositId: readSetting(storedValues, "APP_STOCK_DEPOSIT_ID"),
     defaultTaxRate: Number(
@@ -240,6 +254,14 @@ export async function getServerSettings(): Promise<ServerSettings> {
       storedValues,
       "APP_ORDER_RECEIVED_EMAIL_BODY",
     ),
+    orderReceivedEmailCc: readSetting(
+      storedValues,
+      "APP_ORDER_RECEIVED_EMAIL_CC",
+    ),
+    orderReceivedEmailUseBranding: parseBoolean(
+      readSetting(storedValues, "APP_ORDER_RECEIVED_EMAIL_USE_BRANDING", "true"),
+      true,
+    ),
     paymentInitFailureEmailSubject: readSetting(
       storedValues,
       "APP_PAYMENT_INIT_FAILURE_EMAIL_SUBJECT",
@@ -248,8 +270,25 @@ export async function getServerSettings(): Promise<ServerSettings> {
       storedValues,
       "APP_PAYMENT_INIT_FAILURE_EMAIL_BODY",
     ),
+    paymentInitFailureEmailCc: readSetting(
+      storedValues,
+      "APP_PAYMENT_INIT_FAILURE_EMAIL_CC",
+    ),
+    paymentInitFailureEmailUseBranding: parseBoolean(
+      readSetting(
+        storedValues,
+        "APP_PAYMENT_INIT_FAILURE_EMAIL_USE_BRANDING",
+        "true",
+      ),
+      true,
+    ),
     invoiceEmailSubject: readSetting(storedValues, "APP_INVOICE_EMAIL_SUBJECT"),
     invoiceEmailBody: readSetting(storedValues, "APP_INVOICE_EMAIL_BODY"),
+    invoiceEmailCc: readSetting(storedValues, "APP_INVOICE_EMAIL_CC"),
+    invoiceEmailUseBranding: parseBoolean(
+      readSetting(storedValues, "APP_INVOICE_EMAIL_USE_BRANDING", "true"),
+      true,
+    ),
     enviarEmailFacturadoRetiro: parseBoolean(
       readSetting(storedValues, "APP_SEND_FACTURADO_EMAIL_PICKUP", "false"),
       false,
@@ -257,6 +296,44 @@ export async function getServerSettings(): Promise<ServerSettings> {
     enviarEmailFacturadoEnvio: parseBoolean(
       readSetting(storedValues, "APP_SEND_FACTURADO_EMAIL_SHIPMENT", "true"),
       true,
+    ),
+    emailBrandingEnabled: parseBoolean(
+      readSetting(storedValues, "APP_EMAIL_BRANDING_ENABLED", "true"),
+      true,
+    ),
+    emailPrimaryColor: readSetting(
+      storedValues,
+      "APP_EMAIL_PRIMARY_COLOR",
+      "#0f172a",
+    ),
+    emailAccentColor: readSetting(
+      storedValues,
+      "APP_EMAIL_ACCENT_COLOR",
+      "#1d4ed8",
+    ),
+    emailHighlightColor: readSetting(
+      storedValues,
+      "APP_EMAIL_HIGHLIGHT_COLOR",
+      "#15803d",
+    ),
+    emailShowContactBlock: parseBoolean(
+      readSetting(storedValues, "APP_EMAIL_SHOW_CONTACT_BLOCK", "true"),
+      true,
+    ),
+    emailFooterNote: readSetting(
+      storedValues,
+      "APP_EMAIL_FOOTER_NOTE",
+      "Gracias por elegirnos. Si necesitas ayuda, responde este email o contactanos por nuestros canales habituales.",
+    ),
+    emailTrackingButtonLabel: readSetting(
+      storedValues,
+      "APP_EMAIL_TRACKING_BUTTON_LABEL",
+      "Seguir mi pedido",
+    ),
+    emailPickupButtonLabel: readSetting(
+      storedValues,
+      "APP_EMAIL_PICKUP_BUTTON_LABEL",
+      "Ver mi pedido y QR",
     ),
   };
 }

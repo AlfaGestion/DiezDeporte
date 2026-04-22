@@ -21,6 +21,15 @@ import {
   markOrderPaymentStatus,
   updateOrderStatus,
 } from "@/lib/services/orderService";
+import {
+  adjustAdminSystemArticleStockService,
+  createAdminSystemArticleService,
+  createAdminSystemBrandService,
+  createAdminSystemCategoryService,
+  createAdminSystemStockMovementService,
+  toggleAdminSystemArticleWebBlockedService,
+  updateAdminSystemArticleService,
+} from "@/lib/services/adminSystemService";
 import type { OrderState } from "@/lib/types/order";
 import {
   createAdminUser,
@@ -68,6 +77,56 @@ function buildUsersRedirect(input: {
   return `/admin?${params.toString()}`;
 }
 
+function buildSystemRedirect(input: {
+  section?: string;
+  query?: string | null;
+  mode?: string | null;
+  articleCode?: string | null;
+  articlePage?: string | null;
+  saved?: string;
+  error?: string;
+  detail?: string | null;
+}) {
+  const params = new URLSearchParams({
+    view: "system",
+    system: input.section || "articulos",
+  });
+
+  if (input.query) {
+    params.set("system_q", input.query);
+  }
+
+  if (input.mode) {
+    params.set("system_mode", input.mode);
+  }
+
+  if (input.articleCode) {
+    params.set("system_article", input.articleCode);
+  }
+
+  if (
+    (input.section || "articulos") === "articulos" &&
+    input.articlePage &&
+    Number(input.articlePage) > 1
+  ) {
+    params.set("system_article_page", input.articlePage);
+  }
+
+  if (input.saved) {
+    params.set("saved", input.saved);
+  }
+
+  if (input.error) {
+    params.set("error", input.error);
+  }
+
+  if (input.detail) {
+    params.set("detail", input.detail.slice(0, 180));
+  }
+
+  return `/admin?${params.toString()}`;
+}
+
 function buildRedirectWithParams(
   basePath: string,
   params: Record<string, string | null | undefined>,
@@ -106,6 +165,48 @@ function resolveAdminReturnTo(formData: FormData, fallback = "/admin") {
   }
 
   return fallback;
+}
+
+function resolveSystemSection(formData: FormData, fallback = "articulos") {
+  return typeof formData.get("systemSection") === "string"
+    ? String(formData.get("systemSection"))
+    : fallback;
+}
+
+function resolveSystemQuery(formData: FormData) {
+  return typeof formData.get("systemQuery") === "string"
+    ? String(formData.get("systemQuery"))
+    : "";
+}
+
+function resolveSystemMode(formData: FormData) {
+  return typeof formData.get("systemMode") === "string"
+    ? String(formData.get("systemMode"))
+    : "";
+}
+
+function resolveSystemArticle(formData: FormData) {
+  return typeof formData.get("systemArticle") === "string"
+    ? String(formData.get("systemArticle"))
+    : "";
+}
+
+function isUserAlfa(username: string | null | undefined) {
+  return (username || "").trim().toLowerCase() === "useralfa";
+}
+
+function resolveSystemArticlePage(formData: FormData) {
+  return typeof formData.get("systemArticlePage") === "string"
+    ? String(formData.get("systemArticlePage"))
+    : "";
+}
+
+function getActionErrorDetail(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "No se pudo completar la operacion.";
 }
 
 export async function refreshAdminOrderMutation(input: {
@@ -416,6 +517,412 @@ export async function saveAdminSettingsAction(formData: FormData) {
     ? `?view=config&config=${encodeURIComponent(activeConfig)}&saved=config`
     : "?view=config&saved=config";
   redirect(`/admin${suffix}`);
+}
+
+export async function createAdminSystemArticleAction(formData: FormData) {
+  const sessionUser = await requireAdminSession();
+  const query = resolveSystemQuery(formData);
+  const articlePage = resolveSystemArticlePage(formData);
+
+  try {
+    const article = await createAdminSystemArticleService({
+      code:
+        typeof formData.get("code") === "string"
+          ? String(formData.get("code"))
+          : "",
+      description:
+        typeof formData.get("description") === "string"
+          ? String(formData.get("description"))
+          : "",
+      barcode:
+        typeof formData.get("barcode") === "string"
+          ? String(formData.get("barcode"))
+          : "",
+      supplierAccount:
+        typeof formData.get("supplierAccount") === "string"
+          ? String(formData.get("supplierAccount"))
+          : "",
+      supplierProductCode:
+        typeof formData.get("supplierProductCode") === "string"
+          ? String(formData.get("supplierProductCode"))
+          : "",
+      imagePath:
+        typeof formData.get("imagePath") === "string"
+          ? String(formData.get("imagePath"))
+          : "",
+      unitId:
+        typeof formData.get("unitId") === "string"
+          ? String(formData.get("unitId"))
+          : "",
+      brandId:
+        typeof formData.get("brandId") === "string"
+          ? String(formData.get("brandId"))
+          : "",
+      categoryId:
+        typeof formData.get("categoryId") === "string"
+          ? String(formData.get("categoryId"))
+          : "",
+      exempt: formData.get("exempt") === "on",
+      weighable: formData.get("weighable") === "on",
+      suspended: formData.get("suspended") === "on",
+      suspendedForSales: formData.get("suspendedForSales") === "on",
+      price:
+        typeof formData.get("price") === "string"
+          ? String(formData.get("price"))
+          : "0",
+      cost:
+        typeof formData.get("cost") === "string"
+          ? String(formData.get("cost"))
+          : "0",
+      taxRate:
+        typeof formData.get("taxRate") === "string"
+          ? String(formData.get("taxRate"))
+          : "0",
+      username: sessionUser.username,
+    });
+
+    revalidatePath("/admin");
+    revalidatePath("/");
+    redirect(
+      buildSystemRedirect({
+        section: "articulos",
+        query: article.code || query,
+        mode: "edit",
+        articleCode: article.code,
+        articlePage,
+        saved: "system-article-created",
+      }),
+    );
+  } catch (error) {
+    redirect(
+      buildSystemRedirect({
+        section: "articulos",
+        query,
+        mode: "new",
+        articlePage,
+        error: "system-article-create",
+        detail: getActionErrorDetail(error),
+      }),
+    );
+  }
+}
+
+export async function updateAdminSystemArticleAction(formData: FormData) {
+  const sessionUser = await requireAdminSession();
+  const section = resolveSystemSection(formData, "articulos");
+  const query = resolveSystemQuery(formData);
+  const mode = resolveSystemMode(formData);
+  const articleCode = resolveSystemArticle(formData);
+  const articlePage = resolveSystemArticlePage(formData);
+
+  try {
+    await updateAdminSystemArticleService({
+      code:
+        typeof formData.get("code") === "string"
+          ? String(formData.get("code"))
+          : "",
+      description:
+        typeof formData.get("description") === "string"
+          ? String(formData.get("description"))
+          : "",
+      barcode:
+        typeof formData.get("barcode") === "string"
+          ? String(formData.get("barcode"))
+          : "",
+      supplierAccount:
+        typeof formData.get("supplierAccount") === "string"
+          ? String(formData.get("supplierAccount"))
+          : "",
+      supplierProductCode:
+        typeof formData.get("supplierProductCode") === "string"
+          ? String(formData.get("supplierProductCode"))
+          : "",
+      imagePath:
+        typeof formData.get("imagePath") === "string"
+          ? String(formData.get("imagePath"))
+          : "",
+      unitId:
+        typeof formData.get("unitId") === "string"
+          ? String(formData.get("unitId"))
+          : "",
+      brandId:
+        typeof formData.get("brandId") === "string"
+          ? String(formData.get("brandId"))
+          : "",
+      categoryId:
+        typeof formData.get("categoryId") === "string"
+          ? String(formData.get("categoryId"))
+          : "",
+      exempt: formData.get("exempt") === "on",
+      weighable: formData.get("weighable") === "on",
+      suspended: formData.get("suspended") === "on",
+      suspendedForSales: formData.get("suspendedForSales") === "on",
+      price:
+        typeof formData.get("price") === "string"
+          ? String(formData.get("price"))
+          : "0",
+      cost:
+        typeof formData.get("cost") === "string"
+          ? String(formData.get("cost"))
+          : "0",
+      taxRate:
+        typeof formData.get("taxRate") === "string"
+          ? String(formData.get("taxRate"))
+          : "0",
+      username: sessionUser.username,
+    });
+
+    revalidatePath("/admin");
+    revalidatePath("/");
+    redirect(
+      buildSystemRedirect({
+        section,
+        query,
+        mode: mode || "edit",
+        articleCode: articleCode || (
+          typeof formData.get("code") === "string" ? String(formData.get("code")) : ""
+        ),
+        articlePage,
+        saved: "system-article-updated",
+      }),
+    );
+  } catch (error) {
+    redirect(
+      buildSystemRedirect({
+        section,
+        query,
+        mode: mode || "edit",
+        articleCode: articleCode || (
+          typeof formData.get("code") === "string" ? String(formData.get("code")) : ""
+        ),
+        articlePage,
+        error: "system-article-update",
+        detail: getActionErrorDetail(error),
+      }),
+    );
+  }
+}
+
+export async function toggleAdminSystemArticleWebBlockAction(formData: FormData) {
+  const sessionUser = await requireAdminSession();
+  const section = resolveSystemSection(formData, "articulos");
+  const query = resolveSystemQuery(formData);
+  const mode = resolveSystemMode(formData);
+  const articleCode = resolveSystemArticle(formData);
+  const articlePage = resolveSystemArticlePage(formData);
+
+  try {
+    const blocked =
+      typeof formData.get("blocked") === "string"
+        ? String(formData.get("blocked")) === "1"
+        : false;
+
+    await toggleAdminSystemArticleWebBlockedService({
+      code:
+        typeof formData.get("code") === "string"
+          ? String(formData.get("code"))
+          : "",
+      blocked,
+      username: sessionUser.username,
+    });
+
+    revalidatePath("/admin");
+    revalidatePath("/");
+    redirect(
+      buildSystemRedirect({
+        section,
+        query,
+        mode,
+        articleCode,
+        articlePage,
+        saved: blocked ? "system-article-blocked" : "system-article-unblocked",
+      }),
+    );
+  } catch (error) {
+    redirect(
+      buildSystemRedirect({
+        section,
+        query,
+        mode,
+        articleCode,
+        articlePage,
+        error: "system-article-block",
+        detail: getActionErrorDetail(error),
+      }),
+    );
+  }
+}
+
+export async function createAdminSystemStockMovementAction(formData: FormData) {
+  const sessionUser = await requireAdminSession();
+
+  if (!isUserAlfa(sessionUser.username)) {
+    return {
+      ok: false as const,
+      error: "system-stock-update" as const,
+      detail: "No tienes permiso para usar Stock desde este panel.",
+    };
+  }
+
+  try {
+    const movementNumber = await createAdminSystemStockMovementService({
+      reasonId:
+        typeof formData.get("reasonId") === "string"
+          ? String(formData.get("reasonId"))
+          : "",
+      depositId:
+        typeof formData.get("depositId") === "string"
+          ? String(formData.get("depositId"))
+          : "",
+      linesJson:
+        typeof formData.get("linesJson") === "string"
+          ? String(formData.get("linesJson"))
+          : "[]",
+      observation:
+        typeof formData.get("observation") === "string"
+          ? String(formData.get("observation"))
+          : "",
+      username: sessionUser.username,
+    });
+
+    revalidatePath("/admin");
+    revalidatePath("/");
+    return {
+      ok: true as const,
+      saved: "system-stock-updated" as const,
+      movementNumber,
+    };
+  } catch (error) {
+    return {
+      ok: false as const,
+      error: "system-stock-update" as const,
+      detail: getActionErrorDetail(error),
+    };
+  }
+}
+
+export async function adjustAdminSystemArticleStockAction(formData: FormData) {
+  const sessionUser = await requireAdminSession();
+
+  if (!isUserAlfa(sessionUser.username)) {
+    redirect(
+      buildSystemRedirect({
+        section: "articulos",
+        error: "system-stock-update",
+        detail: "No tienes permiso para usar Stock desde este panel.",
+      }),
+    );
+  }
+
+  const section = resolveSystemSection(formData, "stock");
+  const query = resolveSystemQuery(formData);
+
+  try {
+    await adjustAdminSystemArticleStockService({
+      code:
+        typeof formData.get("code") === "string"
+          ? String(formData.get("code"))
+          : "",
+      targetStock:
+        typeof formData.get("targetStock") === "string"
+          ? String(formData.get("targetStock"))
+          : "0",
+      defaultDepositId:
+        typeof formData.get("defaultDepositId") === "string"
+          ? String(formData.get("defaultDepositId"))
+          : "",
+      defaultStockReasonId:
+        typeof formData.get("defaultStockReasonId") === "string"
+          ? String(formData.get("defaultStockReasonId"))
+          : "",
+      username: sessionUser.username,
+    });
+
+    revalidatePath("/admin");
+    revalidatePath("/");
+    redirect(
+      buildSystemRedirect({
+        section,
+        query,
+        saved: "system-stock-updated",
+      }),
+    );
+  } catch (error) {
+    redirect(
+      buildSystemRedirect({
+        section,
+        query,
+        error: "system-stock-update",
+        detail: getActionErrorDetail(error),
+      }),
+    );
+  }
+}
+
+export async function createAdminSystemBrandAction(formData: FormData) {
+  await requireAdminSession();
+
+  try {
+    await createAdminSystemBrandService({
+      code:
+        typeof formData.get("code") === "string"
+          ? String(formData.get("code"))
+          : "",
+      description:
+        typeof formData.get("description") === "string"
+          ? String(formData.get("description"))
+          : "",
+    });
+
+    revalidatePath("/admin");
+    redirect(
+      buildSystemRedirect({
+        section: "marcas",
+        saved: "system-brand-created",
+      }),
+    );
+  } catch (error) {
+    redirect(
+      buildSystemRedirect({
+        section: "marcas",
+        error: "system-brand-create",
+        detail: getActionErrorDetail(error),
+      }),
+    );
+  }
+}
+
+export async function createAdminSystemCategoryAction(formData: FormData) {
+  await requireAdminSession();
+
+  try {
+    await createAdminSystemCategoryService({
+      code:
+        typeof formData.get("code") === "string"
+          ? String(formData.get("code"))
+          : "",
+      description:
+        typeof formData.get("description") === "string"
+          ? String(formData.get("description"))
+          : "",
+    });
+
+    revalidatePath("/admin");
+    redirect(
+      buildSystemRedirect({
+        section: "categorias",
+        saved: "system-category-created",
+      }),
+    );
+  } catch (error) {
+    redirect(
+      buildSystemRedirect({
+        section: "categorias",
+        error: "system-category-create",
+        detail: getActionErrorDetail(error),
+      }),
+    );
+  }
 }
 
 export async function refreshAdminOrderAction(formData: FormData) {

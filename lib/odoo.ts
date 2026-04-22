@@ -1,6 +1,7 @@
 import "server-only";
-import type { BrandImage, PromoTile } from "@/lib/types";
 import { parseBoolean } from "@/lib/commerce";
+import { getStoredSettingValuesByEnvKey } from "@/lib/store-settings";
+import type { BrandImage, PromoTile } from "@/lib/types";
 
 type OdooProductImage = {
   code: string;
@@ -26,12 +27,15 @@ declare global {
 const CACHE_TTL_MS = 30 * 60 * 1000;
 const MAX_SAFE_PAGES = 30;
 
-function getOdooShopUrl() {
-  return process.env.ODOO_SHOP_URL?.trim() || "";
+function getOdooShopUrl(settings?: Map<string, string>) {
+  return settings?.get("ODOO_SHOP_URL")?.trim() || process.env.ODOO_SHOP_URL?.trim() || "";
 }
 
-function shouldSyncImages() {
-  return parseBoolean(process.env.ODOO_SYNC_IMAGES, false);
+function shouldSyncImages(settings?: Map<string, string>) {
+  return parseBoolean(
+    settings?.get("ODOO_SYNC_IMAGES") ?? process.env.ODOO_SYNC_IMAGES,
+    false,
+  );
 }
 
 function normalizeCode(value: string) {
@@ -51,14 +55,14 @@ function absoluteUrl(baseUrl: string, maybeRelativeUrl: string) {
   return new URL(decodeHtml(maybeRelativeUrl), baseUrl).toString();
 }
 
-function parseMaxPages(html: string) {
+function parseMaxPages(html: string, configuredValue?: string | null) {
   const matches = [...html.matchAll(/\/shop\/page\/(\d+)/g)];
   const maxPage = matches.reduce((max, current) => {
     const page = Number(current[1]);
     return Number.isFinite(page) ? Math.max(max, page) : max;
   }, 1);
 
-  const configuredMax = Number(process.env.ODOO_MAX_PAGES || String(maxPage));
+  const configuredMax = Number(configuredValue || process.env.ODOO_MAX_PAGES || String(maxPage));
   const safeMax = Number.isFinite(configuredMax)
     ? Math.max(1, configuredMax)
     : maxPage;
@@ -255,8 +259,11 @@ async function fetchHtml(url: string) {
 }
 
 export async function getOdooAssets(): Promise<OdooAssets> {
-  const shopUrl = getOdooShopUrl();
-  if (!shopUrl || !shouldSyncImages()) {
+  const storedSettings = await getStoredSettingValuesByEnvKey().catch(
+    () => new Map<string, string>(),
+  );
+  const shopUrl = getOdooShopUrl(storedSettings);
+  if (!shopUrl || !shouldSyncImages(storedSettings)) {
     return {
       brandImages: [],
       productImages: new Map(),
@@ -280,7 +287,7 @@ export async function getOdooAssets(): Promise<OdooAssets> {
   }
 
   const firstPageHtml = await fetchHtml(shopUrl);
-  const maxPages = parseMaxPages(firstPageHtml);
+  const maxPages = parseMaxPages(firstPageHtml, storedSettings.get("ODOO_MAX_PAGES"));
   const pageUrls = Array.from({ length: maxPages - 1 }, (_, index) => {
     return `${shopUrl.replace(/\/$/, "")}/page/${index + 2}`;
   });
