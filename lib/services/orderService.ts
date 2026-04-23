@@ -291,11 +291,7 @@ async function ensureOrderNoteDocument(order: StoredOrder) {
     throw new OrderValidationError("El pedido no tiene articulos para grabar el comprobante.");
   }
 
-  const products = await getProductsByIds(
-    itemInputs.map((item) => item.productId),
-    undefined,
-    { includeWebBlocked: true },
-  );
+  const products = await getProductsByIds(itemInputs.map((item) => item.productId));
   const productMap = new Map(products.map((product) => [product.id.trim(), product]));
   const missingProduct = itemInputs.find((item) => !productMap.has(item.productId.trim()));
 

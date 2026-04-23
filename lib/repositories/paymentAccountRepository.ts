@@ -1,5 +1,5 @@
 import "server-only";
-import { queryOne, queryRows } from "@/lib/db";
+import { getConnection } from "@/lib/db";
 import type { PaymentCollectionAccount } from "@/lib/types";
 
 type PaymentAccountRow = {
@@ -29,23 +29,24 @@ function mapPaymentAccountRow(row: PaymentAccountRow): PaymentCollectionAccount 
 }
 
 export async function getPaymentCollectionAccounts() {
-  const rows = await queryRows<PaymentAccountRow>(`
+  const pool = await getConnection();
+  const result = await pool.request().query<PaymentAccountRow>(`
     SELECT
-      TRIM(CODIGO) AS CODIGO,
-      TRIM(COALESCE(DESCRIPCION, '')) AS DESCRIPCION,
-      TRIM(COALESCE(CodigoOpcional, '')) AS CODIGO_OPCIONAL,
-      TRIM(COALESCE(MedioDePago, '')) AS MEDIO_DE_PAGO
-    FROM dbo_MA_CUENTAS
+      LTRIM(RTRIM(CODIGO)) AS CODIGO,
+      LTRIM(RTRIM(ISNULL(DESCRIPCION, ''))) AS DESCRIPCION,
+      LTRIM(RTRIM(ISNULL(CodigoOpcional, ''))) AS CODIGO_OPCIONAL,
+      LTRIM(RTRIM(ISNULL(MedioDePago, ''))) AS MEDIO_DE_PAGO
+    FROM dbo.MA_CUENTAS WITH (NOLOCK)
     WHERE TipoVista = ''
       AND TITULO = 0
       AND Libro_Iva_Compras = 0
       AND Libro_Iva_Ventas = 0
       AND CajaYBanco = 1
-      AND TRIM(COALESCE(CodigoOpcional, '')) <> ''
+      AND LTRIM(RTRIM(ISNULL(CodigoOpcional, ''))) <> ''
     ORDER BY DESCRIPCION, CODIGO;
   `);
 
-  return rows.map(mapPaymentAccountRow);
+  return result.recordset.map(mapPaymentAccountRow);
 }
 
 export async function getPaymentCollectionAccountByCode(code: string) {
@@ -55,25 +56,24 @@ export async function getPaymentCollectionAccountByCode(code: string) {
     return null;
   }
 
-  const row = await queryOne<PaymentAccountRow>(
-    `
-      SELECT
-        TRIM(CODIGO) AS CODIGO,
-        TRIM(COALESCE(DESCRIPCION, '')) AS DESCRIPCION,
-        TRIM(COALESCE(CodigoOpcional, '')) AS CODIGO_OPCIONAL,
-        TRIM(COALESCE(MedioDePago, '')) AS MEDIO_DE_PAGO
-      FROM dbo_MA_CUENTAS
-      WHERE TRIM(CODIGO) = :code
-        AND TipoVista = ''
-        AND TITULO = 0
-        AND Libro_Iva_Compras = 0
-        AND Libro_Iva_Ventas = 0
-        AND CajaYBanco = 1
-        AND TRIM(COALESCE(CodigoOpcional, '')) <> ''
-      LIMIT 1;
-    `,
-    { code: normalizedCode },
-  );
+  const pool = await getConnection();
+  const request = pool.request();
+  request.input("code", normalizedCode);
+  const result = await request.query<PaymentAccountRow>(`
+    SELECT TOP (1)
+      LTRIM(RTRIM(CODIGO)) AS CODIGO,
+      LTRIM(RTRIM(ISNULL(DESCRIPCION, ''))) AS DESCRIPCION,
+      LTRIM(RTRIM(ISNULL(CodigoOpcional, ''))) AS CODIGO_OPCIONAL,
+      LTRIM(RTRIM(ISNULL(MedioDePago, ''))) AS MEDIO_DE_PAGO
+    FROM dbo.MA_CUENTAS WITH (NOLOCK)
+    WHERE LTRIM(RTRIM(CODIGO)) = @code
+      AND TipoVista = ''
+      AND TITULO = 0
+      AND Libro_Iva_Compras = 0
+      AND Libro_Iva_Ventas = 0
+      AND CajaYBanco = 1
+      AND LTRIM(RTRIM(ISNULL(CodigoOpcional, ''))) <> '';
+  `);
 
-  return row ? mapPaymentAccountRow(row) : null;
+  return result.recordset[0] ? mapPaymentAccountRow(result.recordset[0]) : null;
 }

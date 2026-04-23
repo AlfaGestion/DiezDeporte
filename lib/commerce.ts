@@ -1,12 +1,5 @@
 import type { CartItem, CheckoutCustomer, Product } from "@/lib/types";
 
-const ARS_CURRENCY_FORMATTER = new Intl.NumberFormat("es-AR", {
-  style: "currency",
-  currency: "ARS",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
 export function parseBoolean(value: string | undefined, fallback: boolean) {
   if (value === undefined) return fallback;
   return ["1", "true", "yes", "si", "on"].includes(value.trim().toLowerCase());
@@ -104,7 +97,12 @@ export function buildImageProxyUrl(
 }
 
 export function formatCurrency(value: number) {
-  return ARS_CURRENCY_FORMATTER.format(Number.isFinite(value) ? value : 0);
+  return new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "ARS",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
 }
 
 export function formatSizeLabel(value: string | null | undefined) {

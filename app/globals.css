@@ -818,18 +818,10 @@ svg {
   font-size: 1rem;
 }
 
-.filter-section-header {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 10px;
-}
-
 .filter-section-toggle {
   display: flex;
   align-items: center;
-  justify-content: flex-start;
-  min-width: 0;
+  justify-content: space-between;
   width: 100%;
   padding: 0;
   border: none;
@@ -841,31 +833,6 @@ svg {
   font-size: 1rem;
 }
 
-.filter-section-toggle span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.filter-section-chevron-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: none;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--text-soft);
-  cursor: pointer;
-}
-
-.filter-section-chevron-button:hover {
-  background: var(--surface-soft);
-  color: var(--text);
-}
-
 .filter-section-chevron {
   width: 9px;
   height: 9px;
@@ -875,44 +842,8 @@ svg {
   transition: transform 160ms ease;
 }
 
-.filter-section-chevron-button[aria-expanded="true"] .filter-section-chevron {
+.filter-section-toggle[aria-expanded="true"] .filter-section-chevron {
   transform: rotate(225deg);
-}
-
-.filter-summary-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  max-width: min(56vw, 180px);
-  padding: 6px 10px;
-  border: 1px solid color-mix(in srgb, var(--primary) 34%, var(--line));
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--primary-soft) 86%, var(--surface-soft));
-  color: var(--text);
-  font-size: 0.76rem;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.filter-summary-label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.filter-summary-clear {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--text) 12%, transparent);
-  font-size: 0.95rem;
-  line-height: 1;
 }
 
 .filter-section-content {
@@ -1363,11 +1294,57 @@ svg {
   background: var(--card-media-bg);
 }
 
+.product-detail-media-stack {
+  display: grid;
+  gap: 14px;
+  width: 100%;
+}
+
 .product-detail-media img {
   width: 100%;
   max-width: 78%;
   max-height: 260px;
   height: auto;
+  object-fit: contain;
+}
+
+.product-detail-gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+}
+
+.product-detail-thumb {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.75);
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.product-detail-thumb.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.product-detail-thumb:hover {
+  transform: translateY(-1px);
+}
+
+.product-detail-thumb img {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
   object-fit: contain;
 }
 

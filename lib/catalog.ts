@@ -1,16 +1,19 @@
 import "server-only";
-import type { DbExecutor } from "@/lib/db";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import type { ConnectionPool, IResult, Transaction } from "mssql";
 import {
   formatSizeLabel,
   getPriceBreakdown,
   resolveImageUrl,
   toNumber,
 } from "@/lib/commerce";
-import { queryRows } from "@/lib/db";
-import { ensureSchema as ensureAdminSystemSchema } from "@/lib/repositories/adminSystemRepository";
+import { getConnection, sql } from "@/lib/db";
 import { getServerSettings } from "@/lib/store-config";
 import type { ServerSettings } from "@/lib/store-config";
 import type { Product } from "@/lib/types";
+
+type Executor = ConnectionPool | Transaction;
 
 type ProductRecord = {
   IDARTICULO: string;
@@ -22,10 +25,7 @@ type ProductRecord = {
   Moneda: string | null;
   IDUNIDAD: string | null;
   IdFamilia: string | null;
-  IDRUBRO: string | null;
   IDTIPO: string | null;
-  TipoDescripcion: string | null;
-  RubroDescripcion: string | null;
   TalleDefault: string | null;
   Presentacion: string | null;
   CUENTAPROVEEDOR: string | null;
@@ -34,35 +34,88 @@ type ProductRecord = {
   URL1: string | null;
 };
 
-const GENERIC_BRAND_NAMES = new Set(["MARCA"]);
-const BRAND_NAME_NORMALIZATIONS: Record<string, string> = {
-  REEBOOK: "REEBOK",
-  TREVO: "MONTAGNE",
-};
-
-function normalizeCatalogText(value: string | null | undefined) {
-  return value?.replace(/\s+/g, " ").trim() || "";
+declare global {
+  var __diezDeportesProductImageGalleryCache:
+    | Map<string, string[]>
+    | undefined;
 }
 
-function normalizeBrandName(value: string | null | undefined) {
-  const normalizedValue = normalizeCatalogText(value);
-  if (!normalizedValue) {
-    return "";
+function getProductImageGalleryCache() {
+  if (!global.__diezDeportesProductImageGalleryCache) {
+    global.__diezDeportesProductImageGalleryCache = new Map<string, string[]>();
   }
 
-  const canonicalValue =
-    BRAND_NAME_NORMALIZATIONS[normalizedValue.toUpperCase()] ||
-    normalizedValue.toUpperCase();
-
-  if (GENERIC_BRAND_NAMES.has(canonicalValue)) {
-    return "";
-  }
-
-  return canonicalValue;
+  return global.__diezDeportesProductImageGalleryCache;
 }
 
-function normalizeCategoryName(value: string | null | undefined) {
-  return normalizeCatalogText(value).toUpperCase();
+function setInput(
+  request: ReturnType<typeof createRequest> | ReturnType<ConnectionPool["request"]>,
+  name: string,
+  value: unknown,
+) {
+  request.input(name, value);
+}
+
+function buildProductImageGallery(productCode: string, settings: ServerSettings) {
+  const imageBaseUrl = settings.imageBaseUrl.trim().replace(/\/+$/, "");
+  const imageDirectory = settings.productImageDirectory.trim();
+  const baseCode = productCode.split("||")[0]?.trim();
+
+  if (!imageBaseUrl || !imageDirectory || !baseCode) {
+    return [];
+  }
+
+  const cacheKey = [
+    imageBaseUrl,
+    imageDirectory,
+    settings.productImageSuffixes.join(","),
+    settings.productImageExtensions.join(","),
+    baseCode,
+  ].join("::");
+  const cache = getProductImageGalleryCache();
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const safeBaseCode = baseCode.replace(/[\\/:*?"<>|]/g, "").trim();
+  if (!safeBaseCode) {
+    cache.set(cacheKey, []);
+    return [];
+  }
+
+  const suffixes = settings.productImageSuffixes.length > 0
+    ? settings.productImageSuffixes
+    : ["a"];
+  const extensions = settings.productImageExtensions.length > 0
+    ? settings.productImageExtensions
+    : ["jpg", "jpeg", "png", "webp"];
+  const urls: string[] = [];
+
+  for (const rawSuffix of suffixes) {
+    const suffix = rawSuffix.startsWith("-") ? rawSuffix : `-${rawSuffix}`;
+
+    for (const rawExtension of extensions) {
+      const extension = rawExtension.replace(/^\./, "").trim().toLowerCase();
+      if (!extension) continue;
+
+      const fileName = `${safeBaseCode}${suffix}.${extension}`;
+      const filePath = path.join(
+        /*turbopackIgnore: true*/ imageDirectory,
+        fileName,
+      );
+
+      if (!existsSync(filePath)) {
+        continue;
+      }
+
+      urls.push(`${imageBaseUrl}/${encodeURIComponent(fileName)}`);
+      break;
+    }
+  }
+
+  cache.set(cacheKey, urls);
+  return urls;
 }
 
 function mapProduct(record: ProductRecord, settings: ServerSettings) {
@@ -77,6 +130,10 @@ function mapProduct(record: ProductRecord, settings: ServerSettings) {
     record.URL1?.trim() || null,
     settings.imageBaseUrl,
   );
+  const imageGalleryUrls = resolvedImageUrl
+    ? [resolvedImageUrl]
+    : buildProductImageGallery(record.IDARTICULO?.trim() || "", settings);
+  const primaryImageUrl = imageGalleryUrls[0] || resolvedImageUrl || null;
 
   return {
     id: record.IDARTICULO.trim(),
@@ -92,123 +149,123 @@ function mapProduct(record: ProductRecord, settings: ServerSettings) {
     unitId: record.IDUNIDAD?.trim() || "",
     familyId: record.IdFamilia?.trim() || "",
     typeId: record.IDTIPO?.trim() || "",
-    categoryId: record.IDRUBRO?.trim() || record.IdFamilia?.trim() || "",
-    categoryName:
-      normalizeCategoryName(record.RubroDescripcion) ||
-      normalizeCatalogText(record.IdFamilia) ||
-      "",
-    brandId: record.IDTIPO?.trim() || "",
-    brandName: normalizeBrandName(record.TipoDescripcion),
     defaultSize: formatSizeLabel(record.TalleDefault),
     presentation: record.Presentacion?.trim() || "",
     supplierAccount: record.CUENTAPROVEEDOR?.trim() || "",
     barcode: record.CODIGOBARRA?.trim() || null,
-    imageUrl: resolvedImageUrl,
-    imageMode: resolvedImageUrl ? "exact" : "none",
+    imageUrl: primaryImageUrl,
+    imageGalleryUrls,
+    imageMode: primaryImageUrl ? "exact" : "none",
     imageNote: null,
     imageSourceUrl: null,
     cost: toNumber(record.COSTO),
   } satisfies Product;
 }
 
-function buildProductsBaseQuery(settings: ServerSettings, includeWebBlocked: boolean) {
-  return `
-    SELECT
+export async function listProducts() {
+  const settings = await getServerSettings();
+  const pool = await getConnection();
+  const request = pool.request();
+  const safeLimit = Math.max(1, Math.min(1000, Math.trunc(settings.productLimit)));
+
+  setInput(request, "depositId", settings.stockDepositId || null);
+
+  const result = await request.query<ProductRecord>(`
+    WITH StockActual AS (
+      SELECT
+        LTRIM(RTRIM(IDArticulo)) AS IDArticulo,
+        SUM(ISNULL(CantidadUD, 0)) AS StockActual
+      FROM dbo.V_MV_Stock WITH (NOLOCK)
+      WHERE (Anulado = 0 OR Anulado IS NULL)
+        AND (@depositId IS NULL OR LTRIM(RTRIM(ISNULL(IdDeposito, ''))) = @depositId)
+      GROUP BY LTRIM(RTRIM(IDArticulo))
+    )
+    SELECT TOP (${safeLimit})
       a.IDARTICULO,
       a.DESCRIPCION,
-      COALESCE(a.${settings.priceColumn}, 0) AS RawPrice,
-      COALESCE(a.COSTO, 0) AS COSTO,
-      COALESCE(s.StockActual, 0) AS StockActual,
-      COALESCE(a.TasaIVA, ${settings.defaultTaxRate}) AS TasaIVA,
+      CAST(ISNULL(a.${settings.priceColumn}, 0) AS float) AS RawPrice,
+      CAST(ISNULL(a.COSTO, 0) AS float) AS COSTO,
+      CAST(ISNULL(s.StockActual, 0) AS float) AS StockActual,
+      CAST(ISNULL(a.TasaIVA, ${settings.defaultTaxRate}) AS float) AS TasaIVA,
       a.Moneda,
       a.IDUNIDAD,
       a.IdFamilia,
-      a.IDRUBRO,
       a.IDTIPO,
-      t.Descripcion AS TipoDescripcion,
-      r.Descripcion AS RubroDescripcion,
       a.TalleDefault,
       a.Presentacion,
       a.CUENTAPROVEEDOR,
       a.CODIGOBARRA,
       a.RutaImagen,
       a.URL1
-    FROM dbo_V_MA_ARTICULOS a
-    LEFT JOIN (
-      SELECT
-        TRIM(IDArticulo) AS IDArticulo,
-        SUM(COALESCE(CantidadUD, 0)) AS StockActual
-      FROM dbo_V_MV_Stock
-      WHERE (Anulado = 0 OR Anulado IS NULL)
-        AND (:depositId IS NULL OR TRIM(COALESCE(IdDeposito, '')) = :depositId)
-      GROUP BY TRIM(IDArticulo)
-    ) s
-      ON s.IDArticulo = TRIM(a.IDARTICULO)
-    LEFT JOIN dbo_WEB_V_MA_ARTICULOS_BLOQUEADOS wb
-      ON TRIM(wb.IDARTICULO) = TRIM(a.IDARTICULO)
-    LEFT JOIN dbo_V_TA_TipoArticulo t
-      ON TRIM(t.IdTipo) = TRIM(a.IDTIPO)
-    LEFT JOIN dbo_V_TA_Rubros r
-      ON TRIM(r.IdRubro) = TRIM(a.IDRUBRO)
-    WHERE COALESCE(a.SUSPENDIDO, 0) = 0
-      AND COALESCE(a.SuspendidoV, 0) = 0
-      ${includeWebBlocked ? "" : "AND wb.ID IS NULL"}
-  `;
-}
+    FROM dbo.V_MA_ARTICULOS a WITH (NOLOCK)
+    LEFT JOIN StockActual s
+      ON s.IDArticulo = LTRIM(RTRIM(a.IDARTICULO))
+    WHERE ISNULL(a.SUSPENDIDO, 0) = 0
+      AND ISNULL(a.SuspendidoV, 0) = 0
+    ORDER BY a.DESCRIPCION ASC;
+  `);
 
-export async function listProducts() {
-  await ensureAdminSystemSchema();
-  const settings = await getServerSettings();
-  const safeLimit =
-    settings.productLimit > 0
-      ? Math.max(1, Math.min(10000, Math.trunc(settings.productLimit)))
-      : null;
-  const limitClause = safeLimit ? ` LIMIT ${safeLimit}` : "";
-  const rows = await queryRows<ProductRecord>(
-    `
-      ${buildProductsBaseQuery(settings, false)}
-      ORDER BY a.DESCRIPCION ASC${limitClause};
-    `,
-    { depositId: settings.stockDepositId || null },
-  );
-
-  return rows.map((record) => mapProduct(record, settings));
+  return result.recordset.map((record) => mapProduct(record, settings));
 }
 
 export async function getProductsByIds(
   productIds: string[],
-  executor?: DbExecutor,
-  options?: {
-    includeWebBlocked?: boolean;
-  },
+  executor?: Executor,
 ) {
-  if (productIds.length === 0) {
-    return [];
-  }
+  if (productIds.length === 0) return [];
 
-  await ensureAdminSystemSchema();
   const settings = await getServerSettings();
-  const normalizedIds = productIds.map((productId) => productId.trim()).filter(Boolean);
+  const connection = executor || (await getConnection());
+  const request = createRequest(connection);
+  setInput(request, "depositId", settings.stockDepositId || null);
 
-  if (normalizedIds.length === 0) {
-    return [];
+  const placeholders = productIds.map((_, index) => `@productId${index}`);
+  productIds.forEach((productId, index) => {
+    setInput(request, `productId${index}`, productId.trim());
+  });
+
+  const result: IResult<ProductRecord> = await request.query(`
+    WITH StockActual AS (
+      SELECT
+        LTRIM(RTRIM(IDArticulo)) AS IDArticulo,
+        SUM(ISNULL(CantidadUD, 0)) AS StockActual
+      FROM dbo.V_MV_Stock WITH (NOLOCK)
+      WHERE (Anulado = 0 OR Anulado IS NULL)
+        AND (@depositId IS NULL OR LTRIM(RTRIM(ISNULL(IdDeposito, ''))) = @depositId)
+      GROUP BY LTRIM(RTRIM(IDArticulo))
+    )
+    SELECT
+      a.IDARTICULO,
+      a.DESCRIPCION,
+      CAST(ISNULL(a.${settings.priceColumn}, 0) AS float) AS RawPrice,
+      CAST(ISNULL(a.COSTO, 0) AS float) AS COSTO,
+      CAST(ISNULL(s.StockActual, 0) AS float) AS StockActual,
+      CAST(ISNULL(a.TasaIVA, ${settings.defaultTaxRate}) AS float) AS TasaIVA,
+      a.Moneda,
+      a.IDUNIDAD,
+      a.IdFamilia,
+      a.IDTIPO,
+      a.TalleDefault,
+      a.Presentacion,
+      a.CUENTAPROVEEDOR,
+      a.CODIGOBARRA,
+      a.RutaImagen,
+      a.URL1
+    FROM dbo.V_MA_ARTICULOS a WITH (NOLOCK)
+    LEFT JOIN StockActual s
+      ON s.IDArticulo = LTRIM(RTRIM(a.IDARTICULO))
+    WHERE LTRIM(RTRIM(a.IDARTICULO)) IN (${placeholders.join(", ")})
+      AND ISNULL(a.SUSPENDIDO, 0) = 0
+      AND ISNULL(a.SuspendidoV, 0) = 0;
+  `);
+
+  return result.recordset.map((record) => mapProduct(record, settings));
+}
+
+function createRequest(executor: Executor) {
+  if ("begin" in executor) {
+    return new sql.Request(executor);
   }
 
-  const idPlaceholders = normalizedIds
-    .map((_, index) => `:productId${index}`)
-    .join(", ");
-  const params = Object.fromEntries([
-    ["depositId", settings.stockDepositId || null],
-    ...normalizedIds.map((value, index) => [`productId${index}`, value]),
-  ]);
-  const rows = await queryRows<ProductRecord>(
-    `
-      ${buildProductsBaseQuery(settings, Boolean(options?.includeWebBlocked))}
-      AND TRIM(a.IDARTICULO) IN (${idPlaceholders});
-    `,
-    params,
-    executor,
-  );
-
-  return rows.map((record) => mapProduct(record, settings));
+  return executor.request();
 }

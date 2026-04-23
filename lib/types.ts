@@ -21,15 +21,12 @@ export type Product = {
   unitId: string;
   familyId: string;
   typeId: string;
-  categoryId: string;
-  categoryName: string;
-  brandId: string;
-  brandName: string;
   defaultSize: string;
   presentation: string;
   supplierAccount: string;
   barcode: string | null;
   imageUrl: string | null;
+  imageGalleryUrls: string[];
   imageMode: ProductImageMode;
   imageNote: string | null;
   imageSourceUrl: string | null;

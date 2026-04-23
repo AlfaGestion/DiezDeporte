@@ -1,12 +1,5 @@
 import "server-only";
-import {
-  type DbExecutor,
-  executeStatement,
-  queryOne,
-  queryRows,
-  withTransaction,
-} from "@/lib/db";
-import { normalizeBranch, normalizeNumber } from "@/lib/commerce";
+import { getConnection, sql } from "@/lib/db";
 import { isPickupLocalPaymentOrder } from "@/lib/models/order";
 import type { ServerSettings } from "@/lib/store-config";
 import type { StoredOrder } from "@/lib/types/order";
@@ -21,19 +14,6 @@ type CommercialDocumentLine = {
   articleId: string;
   quantity: number;
   unitPrice: number;
-};
-
-type ProductLookupRow = {
-  IDARTICULO: string;
-  DESCRIPCION: string;
-  IDUNIDAD: string | null;
-  COSTO: number | null;
-  CUENTAPROVEEDOR: string | null;
-  TasaIVA: number | null;
-  EXENTO: number | boolean | null;
-  CODIGOBARRA: string | null;
-  PRESENTACION: string | null;
-  IDTIPO: string | null;
 };
 
 function trimOrNull(value: string | null | undefined) {
@@ -99,7 +79,7 @@ function buildCommercialDocumentHeaderPatch(order: StoredOrder) {
     modelo: trimToMax(order.email_cliente, 50),
     matricula: trimToMax(resolveDeliveryLabel(order), 20),
     serie: trimToMax(resolveSerieLabel(order), 20),
-    nombre: trimToMax(order.nombre_cliente, 50) || "Pedido web",
+    nombre: trimToMax(order.nombre_cliente, 50),
     domicilio: trimToMax(order.metadata.customerAddress || order.direccion, 50),
     telefono: trimToMax(order.telefono_cliente, 100),
     localidad: trimToMax(order.metadata.customerCity, 50),
@@ -127,44 +107,45 @@ function resolveOrderUser(order: StoredOrder, settings: ServerSettings) {
   const paymentMethod = (order.metadata.paymentMethod || "").trim().toLowerCase();
 
   if (paymentMethod.includes("mercado pago") && !baseUser.endsWith("-mp")) {
-    return `${baseUser}-mp`.slice(0, 50);
+    return `${baseUser}-mp`.slice(0, 250);
   }
 
-  return baseUser.slice(0, 50);
+  return baseUser.slice(0, 250);
 }
 
-async function resolveCustomerAccount(configuredAccount: string) {
+async function resolveCustomerAccount(
+  transaction: InstanceType<typeof sql.Transaction>,
+  configuredAccount: string,
+) {
   const preferred = trimOrNull(configuredAccount);
 
   if (preferred) {
     return preferred;
   }
 
-  const directMatch = await queryOne<{ CODIGO: string }>(
-    `
-      SELECT TRIM(CODIGO) AS CODIGO
-      FROM dbo_VT_CLIENTES
-      WHERE TRIM(CODIGO) = :codigo
-      LIMIT 1;
-    `,
-    { codigo: "112010001" },
-  );
-
-  if (directMatch?.CODIGO?.trim()) {
-    return directMatch.CODIGO.trim();
-  }
-
-  const fallbackMatch = await queryOne<{ CODIGO: string }>(`
-    SELECT TRIM(CODIGO) AS CODIGO
-    FROM dbo_VT_CLIENTES
-    WHERE UPPER(COALESCE(RAZON_SOCIAL, '')) LIKE '%CONSUMIDOR FINAL%'
-       OR UPPER(COALESCE(RAZON_SOCIAL, '')) LIKE '%CONSUMIDOR%'
-    ORDER BY CODIGO
-    LIMIT 1;
+  const directRequest = new sql.Request(transaction);
+  directRequest.input("codigo", sql.NVarChar(15), "112010001");
+  const directMatch = await directRequest.query<{ CODIGO: string }>(`
+    SELECT TOP (1) CODIGO
+    FROM dbo.VT_CLIENTES WITH (NOLOCK)
+    WHERE CODIGO = @codigo;
   `);
 
-  if (fallbackMatch?.CODIGO?.trim()) {
-    return fallbackMatch.CODIGO.trim();
+  if (directMatch.recordset[0]?.CODIGO?.trim()) {
+    return directMatch.recordset[0].CODIGO.trim();
+  }
+
+  const fallbackRequest = new sql.Request(transaction);
+  const fallbackMatch = await fallbackRequest.query<{ CODIGO: string }>(`
+    SELECT TOP (1) CODIGO
+    FROM dbo.VT_CLIENTES WITH (NOLOCK)
+    WHERE RAZON_SOCIAL LIKE '%Consumidor Final%'
+       OR RAZON_SOCIAL LIKE '%CONSUMIDOR%'
+    ORDER BY CODIGO;
+  `);
+
+  if (fallbackMatch.recordset[0]?.CODIGO?.trim()) {
+    return fallbackMatch.recordset[0].CODIGO.trim();
   }
 
   throw new Error(
@@ -172,328 +153,138 @@ async function resolveCustomerAccount(configuredAccount: string) {
   );
 }
 
-async function getNextHeaderNumber(input: {
-  tc: string;
-  branch: string;
-  executor?: DbExecutor;
-}) {
-  const row = await queryOne<{ NEXT_NUMBER: number | null }>(
-    `
-      SELECT
-        COALESCE(
-          MAX(
-            CASE
-              WHEN TC = :tc
-                AND TRIM(COALESCE(SUCURSAL, '')) = :branch
-                AND TRIM(COALESCE(NUMERO, '')) REGEXP '^[0-9]+$'
-              THEN CAST(TRIM(NUMERO) AS UNSIGNED)
-              ELSE 0
-            END
-          ),
-          0
-        ) + 1 AS NEXT_NUMBER
-      FROM dbo_V_MV_Cpte;
-    `,
-    {
-      tc: input.tc,
-      branch: input.branch,
-    },
-    input.executor,
-  );
+async function createHeader(
+  transaction: InstanceType<typeof sql.Transaction>,
+  input: {
+    customerAccount: string;
+    vendorId: string;
+    order: StoredOrder;
+  },
+) {
+  const request = new sql.Request(transaction);
+  request.input("pCliente", sql.NVarChar(15), input.customerAccount);
+  request.input("pVendedor", sql.NVarChar(4), trimOrNull(input.vendorId) || "9999");
+  request.input("pFecha", sql.DateTime, new Date(input.order.fecha_creacion));
+  request.output("pResultado", sql.SmallInt);
+  request.output("pMensaje", sql.VarChar(255));
+  request.output("pIdComprobanteRES", sql.Int);
 
-  return normalizeNumber(Number(row?.NEXT_NUMBER || 1));
-}
+  const execution = await request.execute("dbo.wsSysMobileSPPedidosV_MV_CPTE");
 
-async function getProductRowsByIds(productIds: string[]) {
-  const normalizedIds = Array.from(
-    new Set(productIds.map((value) => value.trim()).filter(Boolean)),
-  );
+  const result = Number(execution.output.pResultado || 0);
+  const message = String(execution.output.pMensaje || "").trim();
+  const headerId = Number(execution.output.pIdComprobanteRES || 0);
 
-  if (normalizedIds.length === 0) {
-    return new Map<string, ProductLookupRow>();
+  if (result !== 11 || !Number.isFinite(headerId) || headerId <= 0) {
+    throw new Error(
+      message ||
+        `No se pudo generar la cabecera del comprobante. Resultado=${String(result)}.`,
+    );
   }
 
-  const params = Object.fromEntries(
-    normalizedIds.map((value, index) => [`productId${index}`, value]),
-  );
-  const placeholders = normalizedIds
-    .map((_, index) => `:productId${index}`)
-    .join(", ");
-  const rows = await queryRows<ProductLookupRow>(
-    `
-      SELECT
-        TRIM(IDARTICULO) AS IDARTICULO,
-        DESCRIPCION,
-        IDUNIDAD,
-        COSTO,
-        CUENTAPROVEEDOR,
-        TasaIVA,
-        EXENTO,
-        CODIGOBARRA,
-        Presentacion AS PRESENTACION,
-        IDTIPO
-      FROM dbo_V_MA_ARTICULOS
-      WHERE TRIM(IDARTICULO) IN (${placeholders});
-    `,
-    params,
-  );
-
-  return new Map(rows.map((row) => [row.IDARTICULO.trim(), row]));
+  return headerId;
 }
 
-async function createHeader(input: {
-  customerAccount: string;
-  settings: ServerSettings;
-  order: StoredOrder;
-  executor?: DbExecutor;
-}) {
-  const branch = normalizeBranch(input.settings.orderBranch || "0");
-  const tc = trimOrNull(input.settings.orderTc) || "NP";
-  const number = await getNextHeaderNumber({ tc, branch, executor: input.executor });
-  const idComprobante = `${branch}${number}`;
-  const headerPatch = buildCommercialDocumentHeaderPatch(input.order);
-  const orderDate = new Date(input.order.fecha_creacion);
-  const total = Number(input.order.monto_total || 0);
-  const result = await executeStatement(
-    `
-      INSERT INTO dbo_V_MV_Cpte (
-        TC,
-        IDCOMPROBANTE,
-        IDCOMPLEMENTO,
-        FECHA,
-        CUENTA,
-        MATRICULA,
-        MODELO,
-        SERIE,
-        NOMBRE,
-        DOMICILIO,
-        TELEFONO,
-        LOCALIDAD,
-        DOCUMENTOTIPO,
-        CONDICIONIVA,
-        IDCOND_CPRA_VTA,
-        CLASEPRECIO,
-        OBSERVACIONES,
-        IMPORTE,
-        APROBADO,
-        IdVendedor,
-        ImporteInsumos,
-        IdLista,
-        SUCURSAL,
-        NUMERO,
-        LETRA,
-        UNEGOCIO,
-        Usuario,
-        FechaHora_Grabacion,
-        IDMOTIVOCPRAVTA,
-        IdDeposito,
-        IdMotivoStock,
-        TRANSPORTE,
-        TRANSPORTE_NOMBRE,
-        TRANSPORTE_DOMICILIO,
-        FechaEntrega
-      )
-      VALUES (
-        :tc,
-        :idComprobante,
-        0,
-        :fecha,
-        :cuenta,
-        :matricula,
-        :modelo,
-        :serie,
-        :nombre,
-        :domicilio,
-        :telefono,
-        :localidad,
-        :documentoTipo,
-        :condicionIva,
-        :condicionPago,
-        :clasePrecio,
-        :observaciones,
-        :importe,
-        :aprobado,
-        :idVendedor,
-        :importeInsumos,
-        :idLista,
-        :sucursal,
-        :numero,
-        :letra,
-        :uNegocio,
-        :usuario,
-        :fechaGrabacion,
-        :motivoCompraVenta,
-        :idDeposito,
-        :idMotivoStock,
-        :transporte,
-        :transporteNombre,
-        :transporteDomicilio,
-        :fechaEntrega
-      );
-    `,
-    {
-      tc,
-      idComprobante,
-      fecha: orderDate,
-      cuenta: input.customerAccount,
-      matricula: headerPatch.matricula,
-      modelo: headerPatch.modelo,
-      serie: headerPatch.serie,
-      nombre: headerPatch.nombre,
-      domicilio: headerPatch.domicilio,
-      telefono: headerPatch.telefono,
-      localidad: headerPatch.localidad,
-      documentoTipo: trimOrNull(input.settings.documentType),
-      condicionIva: trimOrNull(input.settings.ivaCondition),
-      condicionPago: trimOrNull(input.settings.paymentCondition),
-      clasePrecio: Number(input.settings.classPrice || 1),
-      observaciones: buildDocumentObservations(input.order),
-      importe: total,
-      aprobado: input.order.estado_pago === "aprobado" ? 1 : 0,
-      idVendedor: trimOrNull(input.settings.vendorId),
-      importeInsumos: total,
-      idLista: trimOrNull(input.settings.priceListId),
-      sucursal: branch,
-      numero: number,
-      letra: trimOrNull(input.settings.orderLetter) || "X",
-      uNegocio: trimOrNull(input.settings.unitBusiness),
-      usuario: resolveOrderUser(input.order, input.settings),
-      fechaGrabacion: orderDate,
-      motivoCompraVenta: trimOrNull(input.settings.saleReasonId),
-      idDeposito: trimOrNull(input.settings.stockDepositId),
-      idMotivoStock: trimOrNull(input.settings.stockReasonId),
-      transporte: headerPatch.transporte,
-      transporteNombre: headerPatch.transporteNombre,
-      transporteDomicilio: headerPatch.transporteDomicilio,
-      fechaEntrega: headerPatch.fechaEntrega,
-    },
-    input.executor,
-  );
+async function createLine(
+  transaction: InstanceType<typeof sql.Transaction>,
+  input: {
+    headerId: number;
+    line: CommercialDocumentLine;
+  },
+) {
+  const request = new sql.Request(transaction);
+  request.input("pIdCpte", sql.Int, input.headerId);
+  request.input("pIdArticulo", sql.NVarChar(25), input.line.articleId.trim());
+  request.input("pCantidad", sql.Float, input.line.quantity);
+  request.input("pImporteUnitario", sql.Money, input.line.unitPrice);
+  request.input("pPorcDescuento", sql.Float, 0);
+  request.output("pResultado", sql.SmallInt);
+  request.output("pMensaje", sql.VarChar(255));
+  request.output("pIdVMVCpteInsumosRES", sql.Int);
 
-  return {
-    id: Number(result.insertId || 0),
-    tc,
-    idComprobante,
-  } satisfies CommercialDocumentHeader;
-}
+  const execution = await request.execute("dbo.wsSysMobileSPPedidosV_MV_CPTEINSUMOS");
 
-async function createLines(input: {
-  header: CommercialDocumentHeader;
-  lines: CommercialDocumentLine[];
-  settings: ServerSettings;
-  executor?: DbExecutor;
-}) {
-  const products = await getProductRowsByIds(
-    input.lines.map((line) => line.articleId),
-  );
+  const result = Number(execution.output.pResultado || 0);
+  const message = String(execution.output.pMensaje || "").trim();
 
-  for (const [index, line] of input.lines.entries()) {
-    const product = products.get(line.articleId.trim());
-
-    if (!product) {
-      throw new Error(`No se pudo grabar el articulo ${line.articleId}.`);
-    }
-
-    const quantity = Number(line.quantity || 0);
-    const unitPrice = Number(line.unitPrice || 0);
-    const total = Number((quantity * unitPrice).toFixed(4));
-    const taxRate = Number(product.TasaIVA || 0);
-    const exempt = Boolean(product.EXENTO);
-
-    await executeStatement(
-      `
-        INSERT INTO dbo_V_MV_CpteInsumos (
-          TC,
-          IDCOMPROBANTE,
-          IDCOMPLEMENTO,
-          IDARTICULO,
-          DESCRIPCION,
-          IDUNIDAD,
-          CANTIDADUD,
-          CANTIDAD,
-          COSTO,
-          IMPORTE,
-          IMPORTE_S_IVA,
-          TOTAL,
-          EXENTO,
-          IdLista,
-          CLASEPRECIO,
-          AlicIVA,
-          CuentaProveedor,
-          CODIGOBARRA,
-          PRESENTACION,
-          IdTipo,
-          SECUENCIA,
-          TotalFinal
-        )
-        VALUES (
-          :tc,
-          :idComprobante,
-          0,
-          :articleId,
-          :descripcion,
-          :unidad,
-          :cantidadUd,
-          :cantidad,
-          :costo,
-          :importe,
-          :importeSinIva,
-          :total,
-          :exento,
-          :idLista,
-          :clasePrecio,
-          :alicIva,
-          :cuentaProveedor,
-          :codigoBarra,
-          :presentacion,
-          :idTipo,
-          :secuencia,
-          :totalFinal
-        );
-      `,
-      {
-        tc: input.header.tc,
-        idComprobante: input.header.idComprobante,
-        articleId: product.IDARTICULO,
-        descripcion: trimToMax(product.DESCRIPCION, 100) || product.IDARTICULO,
-        unidad: trimOrNull(product.IDUNIDAD),
-        cantidadUd: quantity,
-        cantidad: quantity,
-        costo: Number(product.COSTO || 0),
-        importe: unitPrice,
-        importeSinIva: unitPrice,
-        total,
-        exento: exempt ? 1 : 0,
-        idLista: trimOrNull(input.settings.priceListId),
-        clasePrecio: Number(input.settings.classPrice || 1),
-        alicIva: exempt ? 0 : taxRate,
-        cuentaProveedor: trimOrNull(product.CUENTAPROVEEDOR) || "*",
-        codigoBarra: trimOrNull(product.CODIGOBARRA),
-        presentacion: trimOrNull(product.PRESENTACION),
-        idTipo: trimOrNull(product.IDTIPO),
-        secuencia: index + 1,
-        totalFinal: total,
-      },
-      input.executor,
+  if (result !== 11) {
+    throw new Error(
+      message ||
+        `No se pudo grabar el articulo ${input.line.articleId}. Resultado=${String(result)}.`,
     );
   }
 }
 
-async function getHeaderById(headerId: number, executor?: DbExecutor) {
-  const row = await queryOne<{
+async function stampHeaderMetadata(
+  transaction: InstanceType<typeof sql.Transaction>,
+  input: {
+    headerId: number;
+    order: StoredOrder;
+    user: string;
+  },
+) {
+  const headerPatch = buildCommercialDocumentHeaderPatch(input.order);
+  const request = new sql.Request(transaction);
+  request.input("id", sql.Int, input.headerId);
+  request.input("modelo", sql.NVarChar(50), headerPatch.modelo);
+  request.input("matricula", sql.NVarChar(20), headerPatch.matricula);
+  request.input("serie", sql.NVarChar(20), headerPatch.serie);
+  request.input("nombre", sql.NVarChar(50), headerPatch.nombre);
+  request.input("domicilio", sql.NVarChar(50), headerPatch.domicilio);
+  request.input("telefono", sql.NVarChar(100), headerPatch.telefono);
+  request.input("localidad", sql.NVarChar(50), headerPatch.localidad);
+  request.input("transporte", sql.NVarChar(15), headerPatch.transporte);
+  request.input("transporteNombre", sql.NVarChar(100), headerPatch.transporteNombre);
+  request.input(
+    "transporteDomicilio",
+    sql.NVarChar(100),
+    headerPatch.transporteDomicilio,
+  );
+  request.input("fechaEntrega", sql.DateTime, headerPatch.fechaEntrega);
+  request.input("usuario", sql.NVarChar(250), input.user);
+  request.input("fecha", sql.DateTime, new Date(input.order.fecha_creacion));
+  request.input(
+    "observaciones",
+    sql.NVarChar(250),
+    buildDocumentObservations(input.order),
+  );
+  await request.query(`
+    UPDATE dbo.V_MV_Cpte
+    SET MODELO = @modelo,
+        MATRICULA = @matricula,
+        SERIE = @serie,
+        NOMBRE = @nombre,
+        DOMICILIO = @domicilio,
+        TELEFONO = @telefono,
+        LOCALIDAD = @localidad,
+        TRANSPORTE = @transporte,
+        TRANSPORTE_NOMBRE = @transporteNombre,
+        TRANSPORTE_DOMICILIO = @transporteDomicilio,
+        FechaEntrega = @fechaEntrega,
+        Usuario = @usuario,
+        FechaHora_Grabacion = @fecha,
+        Observaciones = @observaciones
+    WHERE ID = @id;
+  `);
+}
+
+async function getHeaderById(
+  transaction: InstanceType<typeof sql.Transaction>,
+  headerId: number,
+) {
+  const request = new sql.Request(transaction);
+  request.input("id", sql.Int, headerId);
+  const result = await request.query<{
     ID: number;
     TC: string;
     IDCOMPROBANTE: string;
-  }>(
-    `
-      SELECT ID, TC, IDCOMPROBANTE
-      FROM dbo_V_MV_Cpte
-      WHERE ID = :id
-      LIMIT 1;
-    `,
-    { id: headerId },
-    executor,
-  );
+  }>(`
+    SELECT TOP (1) ID, TC, IDCOMPROBANTE
+    FROM dbo.V_MV_Cpte WITH (NOLOCK)
+    WHERE ID = @id;
+  `);
+
+  const row = result.recordset[0];
 
   if (!row) {
     throw new Error("No se pudo leer el comprobante recien grabado.");
@@ -515,30 +306,45 @@ export async function createCommercialDocument(input: {
     throw new Error("El pedido no tiene articulos para generar el comprobante.");
   }
 
-  const customerAccount = await resolveCustomerAccount(input.settings.customerAccount);
+  const pool = await getConnection();
+  const transaction = new sql.Transaction(pool);
+  await transaction.begin();
 
-  return withTransaction(async (transaction) => {
-    const header = await createHeader({
+  try {
+    const customerAccount = await resolveCustomerAccount(
+      transaction,
+      input.settings.customerAccount,
+    );
+    const headerId = await createHeader(transaction, {
       customerAccount,
-      settings: input.settings,
+      vendorId: input.settings.vendorId,
       order: input.order,
-      executor: transaction,
     });
 
-    await createLines({
-      header,
-      lines: input.lines,
-      settings: input.settings,
-      executor: transaction,
+    for (const line of input.lines) {
+      await createLine(transaction, {
+        headerId,
+        line,
+      });
+    }
+
+    await stampHeaderMetadata(transaction, {
+      headerId,
+      order: input.order,
+      user: resolveOrderUser(input.order, input.settings),
     });
 
-    const persistedHeader = await getHeaderById(header.id, transaction);
+    const header = await getHeaderById(transaction, headerId);
+    await transaction.commit();
 
     return {
-      ...persistedHeader,
+      ...header,
       customerAccount,
     };
-  });
+  } catch (error) {
+    await transaction.rollback().catch(() => undefined);
+    throw error;
+  }
 }
 
 export const createOrderNoteDocument = createCommercialDocument;
@@ -551,40 +357,44 @@ export async function syncCommercialDocumentHeader(order: StoredOrder) {
   }
 
   const headerPatch = buildCommercialDocumentHeaderPatch(order);
-  const result = await executeStatement(
-    `
-      UPDATE dbo_V_MV_Cpte
-      SET MODELO = :modelo,
-          MATRICULA = :matricula,
-          SERIE = :serie,
-          NOMBRE = :nombre,
-          DOMICILIO = :domicilio,
-          TELEFONO = :telefono,
-          LOCALIDAD = :localidad,
-          TRANSPORTE = :transporte,
-          TRANSPORTE_NOMBRE = :transporteNombre,
-          TRANSPORTE_DOMICILIO = :transporteDomicilio,
-          FechaEntrega = :fechaEntrega,
-          Observaciones = :observaciones,
-          FechaHora_Modificacion = NOW()
-      WHERE ID = :id;
-    `,
-    {
-      id: headerId,
-      modelo: headerPatch.modelo,
-      matricula: headerPatch.matricula,
-      serie: headerPatch.serie,
-      nombre: headerPatch.nombre,
-      domicilio: headerPatch.domicilio,
-      telefono: headerPatch.telefono,
-      localidad: headerPatch.localidad,
-      transporte: headerPatch.transporte,
-      transporteNombre: headerPatch.transporteNombre,
-      transporteDomicilio: headerPatch.transporteDomicilio,
-      fechaEntrega: headerPatch.fechaEntrega,
-      observaciones: buildDocumentObservations(order),
-    },
+  const pool = await getConnection();
+  const request = pool.request();
+  request.input("id", sql.Int, headerId);
+  request.input("modelo", sql.NVarChar(50), headerPatch.modelo);
+  request.input("matricula", sql.NVarChar(20), headerPatch.matricula);
+  request.input("serie", sql.NVarChar(20), headerPatch.serie);
+  request.input("nombre", sql.NVarChar(50), headerPatch.nombre);
+  request.input("domicilio", sql.NVarChar(50), headerPatch.domicilio);
+  request.input("telefono", sql.NVarChar(100), headerPatch.telefono);
+  request.input("localidad", sql.NVarChar(50), headerPatch.localidad);
+  request.input("transporte", sql.NVarChar(15), headerPatch.transporte);
+  request.input("transporteNombre", sql.NVarChar(100), headerPatch.transporteNombre);
+  request.input(
+    "transporteDomicilio",
+    sql.NVarChar(100),
+    headerPatch.transporteDomicilio,
   );
+  request.input("fechaEntrega", sql.DateTime, headerPatch.fechaEntrega);
+  request.input("observaciones", sql.NVarChar(250), buildDocumentObservations(order));
+  const result = await request.query(`
+    UPDATE dbo.V_MV_Cpte
+    SET MODELO = @modelo,
+        MATRICULA = @matricula,
+        SERIE = @serie,
+        NOMBRE = @nombre,
+        DOMICILIO = @domicilio,
+        TELEFONO = @telefono,
+        LOCALIDAD = @localidad,
+        TRANSPORTE = @transporte,
+        TRANSPORTE_NOMBRE = @transporteNombre,
+        TRANSPORTE_DOMICILIO = @transporteDomicilio,
+        FechaEntrega = @fechaEntrega,
+        Observaciones = @observaciones,
+        FechaHora_Modificacion = SYSDATETIME()
+    WHERE ID = @id;
 
-  return Number(result.affectedRows || 0) > 0;
+    SELECT @@ROWCOUNT AS AffectedRows;
+  `);
+
+  return Number(result.recordset[0]?.AffectedRows || 0) > 0;
 }

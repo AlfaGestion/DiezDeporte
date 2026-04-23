@@ -1,9 +1,7 @@
 import "server-only";
 import { getProductsByIds } from "@/lib/catalog";
-import { formatCurrency } from "@/lib/commerce";
 import { getOrderStateAutomationConfig, renderOrderTemplate } from "@/lib/order-state-config";
 import { getServerSettings } from "@/lib/store-config";
-import { getStoredSettingValuesByEnvKey } from "@/lib/store-settings";
 import { formatSqlServerLocalDateTime } from "@/lib/store-datetime";
 import type { OrderState, StoredOrder } from "@/lib/types/order";
 
@@ -43,22 +41,6 @@ type EmailContentOptions = {
   customMessage?: string | null;
 };
 
-type EmailVisualConfig = {
-  useBranding: boolean;
-  storeName: string;
-  supportEmail: string;
-  supportPhone: string;
-  storeAddress: string;
-  storeHours: string;
-  primaryColor: string;
-  accentColor: string;
-  highlightColor: string;
-  showContactBlock: boolean;
-  footerNote: string;
-  trackingButtonLabel: string;
-  pickupButtonLabel: string;
-};
-
 function escapeHtml(value: string | null | undefined) {
   return String(value || "")
     .replace(/&/g, "&amp;")
@@ -72,117 +54,53 @@ function formatPlainTextAsHtml(value: string) {
   return escapeHtml(value).replace(/\r?\n/g, "<br />");
 }
 
-async function getEmailVisualConfig() {
-  const [settings, storedValues] = await Promise.all([
-    getServerSettings(),
-    getStoredSettingValuesByEnvKey().catch(() => new Map<string, string>()),
-  ]);
-
+function getEmailBranding() {
   return {
-    useBranding: settings.emailBrandingEnabled,
-    storeName:
-      storedValues.get("NEXT_PUBLIC_STORE_NAME")?.trim() ||
-      process.env.NEXT_PUBLIC_STORE_NAME?.trim() ||
-      "Tu tienda",
-    supportEmail:
-      storedValues.get("NEXT_PUBLIC_SUPPORT_EMAIL")?.trim() ||
-      process.env.NEXT_PUBLIC_SUPPORT_EMAIL?.trim() ||
-      "",
-    supportPhone:
-      storedValues.get("NEXT_PUBLIC_SUPPORT_PHONE")?.trim() ||
-      process.env.NEXT_PUBLIC_SUPPORT_PHONE?.trim() ||
-      "",
-    storeAddress: storedValues.get("NEXT_PUBLIC_STORE_ADDRESS")?.trim() || "",
-    storeHours:
-      storedValues.get("NEXT_PUBLIC_STORE_HOURS")?.trim() ||
-      settings.pickupAvailabilityText ||
-      "",
-    primaryColor: settings.emailPrimaryColor,
-    accentColor: settings.emailAccentColor,
-    highlightColor: settings.emailHighlightColor,
-    showContactBlock: settings.emailShowContactBlock,
-    footerNote: settings.emailFooterNote,
-    trackingButtonLabel: settings.emailTrackingButtonLabel,
-    pickupButtonLabel: settings.emailPickupButtonLabel,
-  } satisfies EmailVisualConfig;
+    storeName: process.env.NEXT_PUBLIC_STORE_NAME?.trim() || "Tu tienda",
+    supportEmail: process.env.NEXT_PUBLIC_SUPPORT_EMAIL?.trim() || "",
+    supportPhone: process.env.NEXT_PUBLIC_SUPPORT_PHONE?.trim() || "",
+  };
 }
 
-function buildMinimalEmailHtml(title: string, body: string) {
-  return `
-    <div style="margin:0;padding:24px;background:#f8fafc;font-family:Arial,sans-serif;color:#0f172a;">
-      <div style="max-width:680px;margin:0 auto;background:#ffffff;border:1px solid #d8e1ec;border-radius:24px;padding:28px 30px;">
-        <h1 style="margin:0 0 18px;font-size:28px;line-height:1.2;color:#0f172a;">${escapeHtml(title)}</h1>
-        <div style="padding:18px 20px;border:1px solid #e2e8f0;border-radius:18px;background:#f8fafc;font-size:15px;line-height:1.8;color:#334155;">
-          ${formatPlainTextAsHtml(body)}
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-async function buildPlainTemplateHtml(
-  title: string,
-  body: string,
-  options?: { useBranding?: boolean | null; eyebrow?: string | null },
-) {
-  const branding = await getEmailVisualConfig();
-  const useBranding = options?.useBranding ?? branding.useBranding;
-
-  if (!useBranding) {
-    return buildMinimalEmailHtml(title, body);
-  }
-
-  const contactRows = [
-    branding.supportEmail
-      ? `Email: <a href="mailto:${escapeHtml(branding.supportEmail)}" style="color:${escapeHtml(branding.primaryColor)};text-decoration:none;">${escapeHtml(branding.supportEmail)}</a>`
-      : null,
-    branding.supportPhone
-      ? `Telefono: <span style="color:${escapeHtml(branding.primaryColor)};">${escapeHtml(branding.supportPhone)}</span>`
-      : null,
-    branding.storeAddress
-      ? `Direccion: <span style="color:${escapeHtml(branding.primaryColor)};">${escapeHtml(branding.storeAddress)}</span>`
-      : null,
-    branding.storeHours
-      ? `Horarios: <span style="color:${escapeHtml(branding.primaryColor)};">${escapeHtml(branding.storeHours)}</span>`
-      : null,
-  ]
-    .filter(Boolean)
-    .join("<br />");
+function buildPlainTemplateHtml(title: string, body: string) {
+  const branding = getEmailBranding();
 
   return `
     <div style="margin:0;padding:28px;background:#eef3f8;font-family:Arial,sans-serif;color:#0f172a;">
       <div style="max-width:720px;margin:0 auto;background:#ffffff;border:1px solid #d8e1ec;border-radius:28px;overflow:hidden;box-shadow:0 18px 40px rgba(15,23,42,.08);">
-        <div style="padding:30px 34px;background:linear-gradient(135deg,${escapeHtml(branding.primaryColor)} 0%,${escapeHtml(branding.accentColor)} 100%);color:#ffffff;">
-          <div style="font-size:12px;letter-spacing:.18em;text-transform:uppercase;opacity:.8;">${escapeHtml(options?.eyebrow || branding.storeName)}</div>
+        <div style="padding:30px 34px;background:linear-gradient(135deg,#0f172a 0%,#1e3a8a 100%);color:#ffffff;">
+          <div style="font-size:12px;letter-spacing:.18em;text-transform:uppercase;opacity:.8;">${escapeHtml(branding.storeName)}</div>
           <h1 style="margin:10px 0 0;font-size:30px;line-height:1.15;">${escapeHtml(title)}</h1>
         </div>
         <div style="padding:30px 34px;">
           <div style="padding:20px 22px;border:1px solid #e2e8f0;border-radius:20px;background:#f8fafc;font-size:15px;line-height:1.8;color:#334155;">
             ${formatPlainTextAsHtml(body)}
           </div>
-          ${
-            branding.showContactBlock && contactRows
-              ? `
-                <div style="margin-top:24px;padding:18px;border:1px solid #e2e8f0;border-radius:18px;background:#ffffff;font-size:13px;line-height:1.8;color:#64748b;">
-                  <strong style="display:block;margin-bottom:8px;color:${escapeHtml(branding.primaryColor)};">${escapeHtml(branding.storeName)}</strong>
-                  ${contactRows}
-                </div>
-              `
-              : ""
-          }
-          ${
-            branding.footerNote
-              ? `
-                <div style="margin-top:18px;font-size:13px;line-height:1.7;color:#64748b;">
-                  ${formatPlainTextAsHtml(branding.footerNote)}
-                </div>
-              `
-              : ""
-          }
+          <div style="margin-top:24px;padding-top:18px;border-top:1px solid #e2e8f0;font-size:13px;line-height:1.7;color:#64748b;">
+            <strong style="color:#0f172a;">${escapeHtml(branding.storeName)}</strong><br />
+            ${
+              branding.supportEmail
+                ? `Email: <a href="mailto:${escapeHtml(branding.supportEmail)}" style="color:#0f172a;text-decoration:none;">${escapeHtml(branding.supportEmail)}</a><br />`
+                : ""
+            }
+            ${
+              branding.supportPhone
+                ? `Telefono: <span style="color:#0f172a;">${escapeHtml(branding.supportPhone)}</span>`
+                : ""
+            }
+          </div>
         </div>
       </div>
     </div>
   `;
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "ARS",
+    maximumFractionDigits: 0,
+  }).format(Number.isFinite(value) ? value : 0);
 }
 
 function buildDeliveryAddress(order: StoredOrder) {
@@ -241,11 +159,7 @@ async function hydrateOrderItemsForEmail(order: StoredOrder) {
     return order;
   }
 
-  const products = await getProductsByIds(
-    productIds,
-    undefined,
-    { includeWebBlocked: true },
-  ).catch(() => []);
+  const products = await getProductsByIds(productIds).catch(() => []);
   const productMap = new Map(products.map((product) => [product.id.trim(), product]));
   let didChange = false;
 
@@ -400,7 +314,6 @@ function buildItemsHtml(order: StoredOrder) {
 async function buildOrderReceivedEmail(order: StoredOrder) {
   const publicOrderUrl = await buildPublicOrderUrl(order);
   const settings = await getServerSettings();
-  const branding = await getEmailVisualConfig();
   const deliveryLabel = buildOrderDeliveryLabel(order);
   const isMercadoPago = (order.metadata.paymentMethod || "")
     .toLowerCase()
@@ -433,13 +346,13 @@ async function buildOrderReceivedEmail(order: StoredOrder) {
         ? "Recibimos tu pedido / estamos procesando tu pago"
         : isLocalPayment
           ? "Recibimos tu pedido / pagas al retirar"
-          : "Recibimos tu pedido",
+        : "Recibimos tu pedido",
       text: textLines.join("\n"),
       html: `
       <div style="margin:0;padding:24px;background:#f1f5f9;font-family:Arial,sans-serif;color:#0f172a;">
         <div style="max-width:720px;margin:0 auto;background:#ffffff;border:1px solid #dbe3ee;border-radius:24px;overflow:hidden;">
-          <div style="padding:28px 32px;background:linear-gradient(135deg,${escapeHtml(branding.primaryColor)} 0%,${escapeHtml(branding.accentColor)} 100%);color:#ffffff;">
-            <div style="font-size:12px;letter-spacing:.18em;text-transform:uppercase;opacity:.78;">${escapeHtml(branding.storeName)}</div>
+          <div style="padding:28px 32px;background:linear-gradient(135deg,#0f172a 0%,#1d4ed8 100%);color:#ffffff;">
+            <div style="font-size:12px;letter-spacing:.18em;text-transform:uppercase;opacity:.78;">Diez Deportes</div>
             <h1 style="margin:10px 0 8px;font-size:28px;line-height:1.2;">Recibimos tu pedido</h1>
             <p style="margin:0;font-size:15px;line-height:1.7;opacity:.92;">
               Tu NP / pedido web <strong>#${escapeHtml(order.numero_pedido)}</strong> ya quedo registrada para ${escapeHtml(order.nombre_cliente)}.
@@ -485,14 +398,14 @@ async function buildOrderReceivedEmail(order: StoredOrder) {
                   <div style="margin-top:22px;">
                     <a
                       href="${publicOrderUrl}"
-                      style="display:inline-flex;align-items:center;justify-content:center;padding:14px 20px;border-radius:14px;background:${escapeHtml(branding.primaryColor)};color:#ffffff;text-decoration:none;font-weight:700;"
+                      style="display:inline-flex;align-items:center;justify-content:center;padding:14px 20px;border-radius:14px;background:#0f172a;color:#ffffff;text-decoration:none;font-weight:700;"
                     >
-                      ${escapeHtml(branding.trackingButtonLabel)}
+                      Seguir estado del pedido
                     </a>
                   </div>
                   <p style="margin:18px 0 0;font-size:13px;line-height:1.7;color:#64748b;">
                     Si el boton no abre, copia este enlace en tu navegador:<br />
-                    <a href="${publicOrderUrl}" style="color:${escapeHtml(branding.primaryColor)};word-break:break-all;">${publicOrderUrl}</a>
+                    <a href="${publicOrderUrl}" style="color:#0f172a;word-break:break-all;">${publicOrderUrl}</a>
                   </p>
                 `
                 : ""
@@ -509,8 +422,7 @@ async function buildOrderReceivedEmail(order: StoredOrder) {
   );
 }
 
-async function buildDispatchedEmail(order: StoredOrder) {
-  const branding = await getEmailVisualConfig();
+function buildDispatchedEmail(order: StoredOrder) {
   const trackingNumber = order.numero_seguimiento?.trim() || null;
   const deliveryAddress = buildDeliveryAddress(order);
   const customerNotes = order.metadata.customerNotes?.trim() || null;
@@ -527,7 +439,7 @@ async function buildDispatchedEmail(order: StoredOrder) {
     "",
     `Total: ${formatCurrency(order.monto_total)}.`,
     "",
-    `Gracias por comprar en ${branding.storeName}.`,
+    "Gracias por comprar en Diez Deportes.",
   ].filter(Boolean);
 
   return {
@@ -536,8 +448,8 @@ async function buildDispatchedEmail(order: StoredOrder) {
     html: `
       <div style="margin:0;padding:24px;background:#f1f5f9;font-family:Arial,sans-serif;color:#0f172a;">
         <div style="max-width:720px;margin:0 auto;background:#ffffff;border:1px solid #dbe3ee;border-radius:24px;overflow:hidden;">
-          <div style="padding:28px 32px;background:linear-gradient(135deg,${escapeHtml(branding.primaryColor)} 0%,${escapeHtml(branding.accentColor)} 100%);color:#ffffff;">
-            <div style="font-size:12px;letter-spacing:.18em;text-transform:uppercase;opacity:.78;">${escapeHtml(branding.storeName)}</div>
+          <div style="padding:28px 32px;background:linear-gradient(135deg,#0f172a 0%,#1d4ed8 100%);color:#ffffff;">
+            <div style="font-size:12px;letter-spacing:.18em;text-transform:uppercase;opacity:.78;">Diez Deportes</div>
             <h1 style="margin:10px 0 8px;font-size:28px;line-height:1.2;">Tu pedido ya fue despachado</h1>
             <p style="margin:0;font-size:15px;line-height:1.7;opacity:.92;">
               Pedido <strong>#${escapeHtml(order.numero_pedido)}</strong> para ${escapeHtml(order.nombre_cliente)}.
@@ -550,7 +462,7 @@ async function buildDispatchedEmail(order: StoredOrder) {
             </p>
 
             <div style="margin:0 0 22px;padding:18px;border:1px solid #dbeafe;border-radius:18px;background:#eff6ff;">
-              <div style="font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:${escapeHtml(branding.accentColor)};font-weight:700;">Seguimiento</div>
+              <div style="font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:#1d4ed8;font-weight:700;">Seguimiento</div>
               <div style="margin-top:8px;font-size:22px;font-weight:700;color:#0f172a;">
                 ${trackingNumber ? escapeHtml(trackingNumber) : "Se asignara en breve"}
               </div>
@@ -595,7 +507,7 @@ async function buildDispatchedEmail(order: StoredOrder) {
             ` : ""}
 
             <p style="margin:24px 0 0;font-size:14px;line-height:1.7;color:#475569;">
-              Gracias por elegir <strong>${escapeHtml(branding.storeName)}</strong>. Si necesitas ayuda con tu envio, puedes responder este email y te damos una mano.
+              Gracias por elegir <strong>Diez Deportes</strong>. Si necesitas ayuda con tu envio, puedes responder este email y te damos una mano.
             </p>
           </div>
         </div>
@@ -631,10 +543,7 @@ async function buildPaymentInitFailureEmail(order: StoredOrder) {
     {
       subject: "Tuvimos un inconveniente al iniciar tu pago",
       text: defaultBody,
-      html: await buildPlainTemplateHtml(
-        "Tuvimos un inconveniente al iniciar tu pago",
-        defaultBody,
-      ),
+      html: buildPlainTemplateHtml("Tuvimos un inconveniente al iniciar tu pago", defaultBody),
     },
     {
       subject: settings.paymentInitFailureEmailSubject,
@@ -663,35 +572,6 @@ function normalizeOptionalString(value: string | undefined | null) {
   return normalized || null;
 }
 
-function mergeEmailRecipients(...values: Array<string | null | undefined>) {
-  const normalized = values
-    .flatMap((value) => String(value || "").split(","))
-    .map((value) => value.trim())
-    .filter(Boolean);
-
-  return normalized.length > 0 ? Array.from(new Set(normalized)).join(", ") : null;
-}
-
-async function applyBrandingPreference(
-  content: {
-    subject: string;
-    text: string;
-    html: string;
-  },
-  useBranding: boolean,
-) {
-  if (useBranding) {
-    return content;
-  }
-
-  return {
-    ...content,
-    html: await buildPlainTemplateHtml(content.subject, content.text, {
-      useBranding: false,
-    }),
-  };
-}
-
 async function applyOrderTemplateOverrides(
   order: StoredOrder,
   state: OrderState,
@@ -714,16 +594,16 @@ async function applyOrderTemplateOverrides(
   }
 
   const subject = subjectTemplate
-    ? await renderOrderTemplate(subjectTemplate, order, state, trackingUrl)
+    ? renderOrderTemplate(subjectTemplate, order, state, trackingUrl)
     : baseContent.subject;
   const text = bodyTemplate
-    ? await renderOrderTemplate(bodyTemplate, order, state, trackingUrl)
+    ? renderOrderTemplate(bodyTemplate, order, state, trackingUrl)
     : baseContent.text;
 
   return {
     subject,
     text,
-    html: bodyTemplate ? await buildPlainTemplateHtml(subject, text) : baseContent.html,
+    html: bodyTemplate ? buildPlainTemplateHtml(subject, text) : baseContent.html,
   };
 }
 
@@ -753,50 +633,30 @@ function buildSmtpAccount(input: {
   } satisfies SmtpAccount;
 }
 
-async function getSmtpConfig() {
-  const storedValues = await getStoredSettingValuesByEnvKey().catch(
-    () => new Map<string, string>(),
-  );
-  const host =
-    normalizeOptionalString(storedValues.get("SMTP_HOST")) ||
-    normalizeOptionalString(process.env.SMTP_HOST);
-  const port = Number(
-    storedValues.get("SMTP_PORT") || process.env.SMTP_PORT || "587",
-  );
+function getSmtpConfig() {
+  const host = normalizeOptionalString(process.env.SMTP_HOST);
+  const port = Number(process.env.SMTP_PORT || "587");
   const fromName =
-    normalizeOptionalString(storedValues.get("SMTP_FROM_NAME")) ||
     normalizeOptionalString(process.env.SMTP_FROM_NAME) ||
     normalizeOptionalString(process.env.NEXT_PUBLIC_STORE_NAME) ||
     "Diez Deportes";
   const fallbackFromName =
-    normalizeOptionalString(storedValues.get("SMTP_FALLBACK_FROM_NAME")) ||
-    normalizeOptionalString(process.env.SMTP_FALLBACK_FROM_NAME) ||
-    fromName;
+    normalizeOptionalString(process.env.SMTP_FALLBACK_FROM_NAME) || fromName;
   const primaryAccount = buildSmtpAccount({
-    from:
-      normalizeOptionalString(storedValues.get("SMTP_FROM")) ||
-      normalizeOptionalString(process.env.SMTP_FROM),
+    from: normalizeOptionalString(process.env.SMTP_FROM),
     fromName,
     user:
-      normalizeOptionalString(storedValues.get("SMTP_USER")) ||
       normalizeOptionalString(process.env.SMTP_USER) ||
       normalizeOptionalString(process.env.SMTP_PRIMARY_USER),
     pass:
-      normalizeOptionalString(storedValues.get("SMTP_PASS")) ||
       normalizeOptionalString(process.env.SMTP_PASS) ||
       normalizeOptionalString(process.env.SMTP_PRIMARY_PASS),
   });
   const fallbackAccount = buildSmtpAccount({
-    from:
-      normalizeOptionalString(storedValues.get("SMTP_FALLBACK_FROM")) ||
-      normalizeOptionalString(process.env.SMTP_FALLBACK_FROM),
+    from: normalizeOptionalString(process.env.SMTP_FALLBACK_FROM),
     fromName: fallbackFromName,
-    user:
-      normalizeOptionalString(storedValues.get("SMTP_FALLBACK_USER")) ||
-      normalizeOptionalString(process.env.SMTP_FALLBACK_USER),
-    pass:
-      normalizeOptionalString(storedValues.get("SMTP_FALLBACK_PASS")) ||
-      normalizeOptionalString(process.env.SMTP_FALLBACK_PASS),
+    user: normalizeOptionalString(process.env.SMTP_FALLBACK_USER),
+    pass: normalizeOptionalString(process.env.SMTP_FALLBACK_PASS),
   });
   const accounts = [primaryAccount, fallbackAccount].filter(
     (account): account is SmtpAccount => Boolean(account),
@@ -805,21 +665,10 @@ async function getSmtpConfig() {
   return {
     host,
     port,
-    secure:
-      String(storedValues.get("SMTP_SECURE") || process.env.SMTP_SECURE || "false")
-        .trim()
-        .toLowerCase() === "true",
-    timeoutMs: Math.max(
-      1000,
-      Number(storedValues.get("SMTP_TIMEOUT_MS") || process.env.SMTP_TIMEOUT_MS || "8000") ||
-        8000,
-    ),
+    secure: String(process.env.SMTP_SECURE || "false").trim().toLowerCase() === "true",
+    timeoutMs: Math.max(1000, Number(process.env.SMTP_TIMEOUT_MS || "8000") || 8000),
     ignoreTlsErrors:
-      String(
-        storedValues.get("SMTP_IGNORE_TLS_ERRORS") ||
-          process.env.SMTP_IGNORE_TLS_ERRORS ||
-          "true",
-      )
+      String(process.env.SMTP_IGNORE_TLS_ERRORS || "true")
         .trim()
         .toLowerCase() === "true",
     accounts,
@@ -831,8 +680,6 @@ async function buildEmailContent(
   state: OrderState,
   options?: EmailContentOptions,
 ) {
-  const branding = await getEmailVisualConfig();
-
   if (state === "FACTURADO") {
     const publicOrderUrl = await buildPublicOrderUrl(order);
 
@@ -855,8 +702,8 @@ async function buildEmailContent(
       html: `
         <div style="margin:0;padding:24px;background:#f1f5f9;font-family:Arial,sans-serif;color:#0f172a;">
           <div style="max-width:720px;margin:0 auto;background:#ffffff;border:1px solid #dbe3ee;border-radius:24px;overflow:hidden;">
-            <div style="padding:28px 32px;background:linear-gradient(135deg,${escapeHtml(branding.primaryColor)} 0%,${escapeHtml(branding.accentColor)} 100%);color:#ffffff;">
-              <div style="font-size:12px;letter-spacing:.18em;text-transform:uppercase;opacity:.78;">${escapeHtml(branding.storeName)}</div>
+            <div style="padding:28px 32px;background:linear-gradient(135deg,#0f172a 0%,#1d4ed8 100%);color:#ffffff;">
+              <div style="font-size:12px;letter-spacing:.18em;text-transform:uppercase;opacity:.78;">Diez Deportes</div>
               <h1 style="margin:10px 0 8px;font-size:28px;line-height:1.2;">Tu pedido fue confirmado</h1>
               <p style="margin:0;font-size:15px;line-height:1.7;opacity:.92;">
                 La NP <strong>#${escapeHtml(order.numero_pedido)}</strong> ya quedo confirmada para ${escapeHtml(order.nombre_cliente)}.
@@ -883,9 +730,9 @@ async function buildEmailContent(
                     <div style="margin-top:22px;">
                       <a
                         href="${publicOrderUrl}"
-                        style="display:inline-flex;align-items:center;justify-content:center;padding:14px 20px;border-radius:14px;background:${escapeHtml(branding.primaryColor)};color:#ffffff;text-decoration:none;font-weight:700;"
+                        style="display:inline-flex;align-items:center;justify-content:center;padding:14px 20px;border-radius:14px;background:#0f172a;color:#ffffff;text-decoration:none;font-weight:700;"
                       >
-                        ${escapeHtml(branding.trackingButtonLabel)}
+                        Seguir estado del pedido
                       </a>
                     </div>
                   `
@@ -912,9 +759,9 @@ async function buildEmailContent(
         <div style="margin-top:22px;">
           <a
             href="${publicOrderUrl}"
-            style="display:inline-flex;align-items:center;justify-content:center;padding:14px 20px;border-radius:14px;background:${escapeHtml(branding.primaryColor)};color:#ffffff;text-decoration:none;font-weight:700;"
+            style="display:inline-flex;align-items:center;justify-content:center;padding:14px 20px;border-radius:14px;background:#0f172a;color:#ffffff;text-decoration:none;font-weight:700;"
           >
-            ${escapeHtml(branding.pickupButtonLabel)}
+            Ver mi pedido y QR de retiro
           </a>
         </div>
       `
@@ -937,8 +784,8 @@ async function buildEmailContent(
       html: `
         <div style="margin:0;padding:24px;background:#f1f5f9;font-family:Arial,sans-serif;color:#0f172a;">
           <div style="max-width:720px;margin:0 auto;background:#ffffff;border:1px solid #dbe3ee;border-radius:24px;overflow:hidden;">
-            <div style="padding:28px 32px;background:linear-gradient(135deg,${escapeHtml(branding.highlightColor)} 0%,${escapeHtml(branding.accentColor)} 100%);color:#ffffff;">
-              <div style="font-size:12px;letter-spacing:.18em;text-transform:uppercase;opacity:.8;">${escapeHtml(branding.storeName)}</div>
+            <div style="padding:28px 32px;background:linear-gradient(135deg,#14532d 0%,#15803d 100%);color:#ffffff;">
+              <div style="font-size:12px;letter-spacing:.18em;text-transform:uppercase;opacity:.8;">Diez Deportes</div>
               <h1 style="margin:10px 0 8px;font-size:28px;line-height:1.2;">Tu pedido esta listo para retirar</h1>
               <p style="margin:0;font-size:15px;line-height:1.7;opacity:.92;">
                 Pedido <strong>#${escapeHtml(order.numero_pedido)}</strong> listo para ${escapeHtml(order.nombre_cliente)}.
@@ -964,7 +811,7 @@ async function buildEmailContent(
                 pickupSchedule
                   ? `
                     <div style="margin-top:18px;padding:18px;border:1px solid #dbeafe;border-radius:18px;background:#f8fbff;">
-                      <div style="font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:${escapeHtml(branding.accentColor)};font-weight:700;">Dias y horarios para retirar</div>
+                      <div style="font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:#1d4ed8;font-weight:700;">Dias y horarios para retirar</div>
                       <div style="margin-top:8px;font-size:15px;line-height:1.7;color:#334155;">
                         ${escapeHtml(pickupSchedule).replace(/\r?\n/g, "<br />")}
                       </div>
@@ -988,7 +835,7 @@ async function buildEmailContent(
                 publicOrderUrl
                   ? `<p style="margin:18px 0 0;font-size:13px;line-height:1.7;color:#64748b;">
                       Si el boton no abre, copia este enlace en tu navegador:<br />
-                      <a href="${publicOrderUrl}" style="color:${escapeHtml(branding.primaryColor)};word-break:break-all;">${publicOrderUrl}</a>
+                      <a href="${publicOrderUrl}" style="color:#0f172a;word-break:break-all;">${publicOrderUrl}</a>
                     </p>`
                   : ""
               }
@@ -1011,8 +858,8 @@ async function buildEmailContent(
       html: `
         <div style="margin:0;padding:24px;background:#f1f5f9;font-family:Arial,sans-serif;color:#0f172a;">
           <div style="max-width:720px;margin:0 auto;background:#ffffff;border:1px solid #dbe3ee;border-radius:24px;overflow:hidden;">
-            <div style="padding:28px 32px;background:linear-gradient(135deg,${escapeHtml(branding.primaryColor)} 0%,${escapeHtml(branding.accentColor)} 100%);color:#ffffff;">
-              <div style="font-size:12px;letter-spacing:.18em;text-transform:uppercase;opacity:.8;">${escapeHtml(branding.storeName)}</div>
+            <div style="padding:28px 32px;background:linear-gradient(135deg,#0f172a 0%,#1d4ed8 100%);color:#ffffff;">
+              <div style="font-size:12px;letter-spacing:.18em;text-transform:uppercase;opacity:.8;">Diez Deportes</div>
               <h1 style="margin:10px 0 8px;font-size:28px;line-height:1.2;">Retiro registrado</h1>
               <p style="margin:0;font-size:15px;line-height:1.7;opacity:.92;">
                 Tu pedido <strong>#${escapeHtml(order.numero_pedido)}</strong> ya figura como retirado.
@@ -1044,7 +891,7 @@ async function buildEmailContent(
   return {
     subject: `Actualizacion de tu pedido: ${state}`,
     text: genericText,
-    html: await buildPlainTemplateHtml(`Actualizacion de tu pedido: ${state}`, genericText),
+    html: buildPlainTemplateHtml(`Actualizacion de tu pedido: ${state}`, genericText),
   };
 }
 
@@ -1061,7 +908,6 @@ export async function sendManualInvoiceEmail(input: {
   }>;
 }) {
   const settings = await getServerSettings();
-  const branding = await getEmailVisualConfig();
   const order = await hydrateOrderItemsForEmail(input.order);
   const publicOrderUrl = await buildPublicOrderUrl(order);
   const fallbackSubject =
@@ -1069,31 +915,28 @@ export async function sendManualInvoiceEmail(input: {
     `Factura de tu pedido NP ${order.numero_pedido}`;
   const fallbackBody =
     normalizeOptionalString(settings.invoiceEmailBody) ||
-    `Hola ${order.nombre_cliente},\n\nTe enviamos la factura correspondiente a tu pedido NP ${order.numero_pedido}.\nAdjuntamos el comprobante en este email.\n\nGracias por comprar en ${branding.storeName}.`;
-  const subject = await renderOrderTemplate(
+    `Hola ${order.nombre_cliente},\n\nTe enviamos la factura correspondiente a tu pedido NP ${order.numero_pedido}.\nAdjuntamos el comprobante en este email.\n\nGracias por comprar en Diez Deportes.`;
+  const subject = renderOrderTemplate(
     normalizeOptionalString(input.subject) || fallbackSubject,
     order,
     order.estado,
     publicOrderUrl,
   );
-  const text = await renderOrderTemplate(
+  const text = renderOrderTemplate(
     normalizeOptionalString(input.message) || fallbackBody,
     order,
     order.estado,
     publicOrderUrl,
   );
 
-  const useBranding = settings.invoiceEmailUseBranding;
-  const html = await buildPlainTemplateHtml(subject, text, { useBranding });
-
   return sendEmail(
     order,
     {
       to: normalizeOptionalString(input.to) || order.email_cliente,
-      cc: mergeEmailRecipients(input.cc, settings.invoiceEmailCc),
+      cc: normalizeOptionalString(input.cc),
       subject,
       text,
-      html,
+      html: buildPlainTemplateHtml(subject, text),
       attachments: input.attachments || [],
     },
   );
@@ -1139,7 +982,7 @@ async function sendEmail(
     }>;
   },
 ) {
-  const config = await getSmtpConfig();
+  const config = getSmtpConfig();
 
   if (!config.host || config.accounts.length === 0) {
     console.info("Email skipped because SMTP is not configured", {
@@ -1198,64 +1041,36 @@ export async function sendOrderStatusEmail(
       normalizeOptionalString(options?.customMessage) ||
       normalizeOptionalString(stateConfig.emailBody);
     const pickupMessage = bodyTemplate
-      ? await renderOrderTemplate(bodyTemplate, hydratedOrder, state, trackingUrl)
+      ? renderOrderTemplate(bodyTemplate, hydratedOrder, state, trackingUrl)
       : null;
     const baseContent = await buildEmailContent(hydratedOrder, state, {
       customMessage: pickupMessage,
     });
 
-    const content = await applyBrandingPreference(
-      {
-        ...baseContent,
-        subject: subjectTemplate
-          ? await renderOrderTemplate(subjectTemplate, hydratedOrder, state, trackingUrl)
-          : baseContent.subject,
-      },
-      stateConfig.useBranding,
-    );
-
     return sendEmail(hydratedOrder, {
-      ...content,
-      cc: mergeEmailRecipients(stateConfig.emailCc),
+      ...baseContent,
+      subject: subjectTemplate
+        ? renderOrderTemplate(subjectTemplate, hydratedOrder, state, trackingUrl)
+        : baseContent.subject,
     });
   }
 
   const baseContent = await buildEmailContent(hydratedOrder, state, options);
-  const content = await applyBrandingPreference(
-    await applyOrderTemplateOverrides(hydratedOrder, state, baseContent, {
-      subject: stateConfig.emailSubject,
-      body: stateConfig.emailBody,
-    }),
-    stateConfig.useBranding,
-  );
-  return sendEmail(hydratedOrder, {
-    ...content,
-    cc: mergeEmailRecipients(stateConfig.emailCc),
+  const content = await applyOrderTemplateOverrides(hydratedOrder, state, baseContent, {
+    subject: stateConfig.emailSubject,
+    body: stateConfig.emailBody,
   });
+  return sendEmail(hydratedOrder, content);
 }
 
 export async function sendOrderReceivedEmail(order: StoredOrder) {
-  const settings = await getServerSettings();
   const hydratedOrder = await hydrateOrderItemsForEmail(order);
-  const content = await applyBrandingPreference(
-    await buildOrderReceivedEmail(hydratedOrder),
-    settings.orderReceivedEmailUseBranding,
-  );
-  return sendEmail(hydratedOrder, {
-    ...content,
-    cc: mergeEmailRecipients(settings.orderReceivedEmailCc),
-  });
+  const content = await buildOrderReceivedEmail(hydratedOrder);
+  return sendEmail(hydratedOrder, content);
 }
 
 export async function sendPaymentInitFailureEmail(order: StoredOrder) {
-  const settings = await getServerSettings();
   const hydratedOrder = await hydrateOrderItemsForEmail(order);
-  const content = await applyBrandingPreference(
-    await buildPaymentInitFailureEmail(hydratedOrder),
-    settings.paymentInitFailureEmailUseBranding,
-  );
-  return sendEmail(hydratedOrder, {
-    ...content,
-    cc: mergeEmailRecipients(settings.paymentInitFailureEmailCc),
-  });
+  const content = await buildPaymentInitFailureEmail(hydratedOrder);
+  return sendEmail(hydratedOrder, content);
 }

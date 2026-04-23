@@ -49,7 +49,7 @@ export async function searchProductImageOnWeb(
     return null;
   }
 
-  const query = buildSearchQuery(description, code);
+  const query = buildSearchQuery(description, code, !currentImageUrl);
   if (!query) {
     cache.set(cacheKey, { result: null, fetchedAt: Date.now() });
     return null;
@@ -77,11 +77,20 @@ function getPlaceholderCache() {
   return global.__diezDeportesPlaceholderCache;
 }
 
-function buildSearchQuery(description: string, code: string) {
+function buildSearchQuery(
+  description: string,
+  code: string,
+  preferIllustrativeResults: boolean,
+) {
   const cleaned = tokenize(description).join(" ");
-  if (cleaned) return cleaned;
+  const baseQuery = cleaned || getBaseCode(code).toLowerCase();
+  if (!baseQuery) {
+    return "";
+  }
 
-  return getBaseCode(code).toLowerCase();
+  return preferIllustrativeResults
+    ? `${baseQuery} imagen ilustrativa`
+    : baseQuery;
 }
 
 async function fetchSearchHtml(query: string) {
@@ -148,7 +157,7 @@ function pickBestImageResult(html: string, query: string) {
       imageUrl,
       imageSourceUrl: null,
       imageMode: "illustrative",
-      imageNote: null,
+      imageNote: "Imagen ilustrativa encontrada en internet.",
     };
   }
 

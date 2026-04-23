@@ -31,7 +31,7 @@ export const ORDER_VIEW_STATES: Record<
   Exclude<OrderListView, "pedidos">,
   OrderState[]
 > = {
-  pendientes: ["PENDIENTE", "APROBADO", "LISTO_PARA_RETIRO"],
+  pendientes: ["PENDIENTE", "APROBADO"],
   procesados: ["FACTURADO", "PREPARANDO", "ENVIADO"],
   pendientes_retiro: ["LISTO_PARA_RETIRO"],
   finalizados: ["ENTREGADO"],
@@ -177,36 +177,6 @@ export function getStatesForOrderView(view: OrderListView | null | undefined) {
   }
 
   return ORDER_VIEW_STATES[view];
-}
-
-export function matchesOrderListView(
-  order: Pick<Order, "estado" | "tipo_pedido" | "retirado">,
-  view: OrderListView,
-) {
-  switch (view) {
-    case "pedidos":
-      return true;
-    case "pendientes":
-      return (
-        order.estado === "PENDIENTE" ||
-        order.estado === "APROBADO" ||
-        (order.estado === "LISTO_PARA_RETIRO" &&
-          order.tipo_pedido === "retiro" &&
-          order.retirado !== "SI")
-      );
-    case "procesados":
-      return ["FACTURADO", "PREPARANDO", "ENVIADO"].includes(order.estado);
-    case "pendientes_retiro":
-      return (
-        order.estado === "LISTO_PARA_RETIRO" &&
-        order.tipo_pedido === "retiro" &&
-        order.retirado !== "SI"
-      );
-    case "finalizados":
-      return order.estado === "ENTREGADO";
-    default:
-      return false;
-  }
 }
 
 export function getOrderViewBucket(state: OrderState) {
