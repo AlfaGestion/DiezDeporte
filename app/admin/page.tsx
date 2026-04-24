@@ -15,7 +15,10 @@ import { AdminLiveOrderWatcher } from "@/components/admin/admin-live-order-watch
 import { AdminArticleListGallery } from "@/components/admin/admin-article-list-gallery";
 import { AdminSystemArticleImageEditorFrame } from "@/components/admin/admin-system-article-image-editor-frame";
 import { AdminThemeToggle } from "@/components/admin-theme-toggle";
-import { cn } from "@/components/admin/admin-ui";
+import {
+  adminSecondaryButtonClass,
+  cn,
+} from "@/components/admin/admin-ui";
 import { EmptyState } from "@/components/admin/empty-state";
 import { OrderFiltersBar } from "@/components/admin/order-filters-bar";
 import { PickupDeskPane } from "@/components/admin/pickup-desk-pane";
@@ -86,6 +89,8 @@ type AdminPageProps = {
     fecha_hasta?: string;
     system?: string;
     system_q?: string;
+    system_brand?: string;
+    system_category?: string;
     system_article?: string;
     config?: string;
     error?: string;
@@ -142,6 +147,8 @@ type AdminHrefInput = {
   fecha_hasta?: string | null;
   system?: AdminSystemSection;
   system_q?: string | null;
+  system_brand?: string | null;
+  system_category?: string | null;
   system_article?: string | null;
   config?: string;
   create?: boolean;
@@ -452,6 +459,61 @@ function summarizeAdminLabels(labels: string[], limit = 4) {
   return `${labels.slice(0, limit).join(", ")} +${labels.length - limit}`;
 }
 
+function resolveAdminLookupLabel(
+  options: Array<{ id: string; label: string }>,
+  selectedId: string,
+) {
+  if (!selectedId) {
+    return null;
+  }
+
+  return options.find((option) => option.id === selectedId)?.label || `ID ${selectedId}`;
+}
+
+function AdminSystemFilterSection(props: {
+  title: string;
+  selectedId: string;
+  selectedLabel: string | null;
+  options: Array<{ id: string; label: string }>;
+  allHref: string;
+  getOptionHref: (optionId: string) => string;
+}) {
+  const { title, selectedId, selectedLabel, options, allHref, getOptionHref } = props;
+  const hasSelection = Boolean(selectedId);
+
+  return (
+    <details className="admin-filter-accordion" open={hasSelection || options.length <= 14}>
+      <summary className="admin-filter-accordion-summary">
+        <span className="admin-filter-accordion-title">{title}</span>
+        <span className="admin-filter-accordion-trailing">
+          {selectedLabel ? (
+            <span className="admin-filter-current-chip" title={selectedLabel}>
+              {selectedLabel}
+            </span>
+          ) : null}
+          <span className="admin-filter-accordion-chevron" aria-hidden="true" />
+        </span>
+      </summary>
+
+      <div className="admin-filter-chip-list">
+        <Link href={allHref} className={cn("admin-filter-chip", !hasSelection && "is-active")}>
+          Todas
+        </Link>
+        {options.map((option) => (
+          <Link
+            key={option.id}
+            href={getOptionHref(option.id)}
+            className={cn("admin-filter-chip", option.id === selectedId && "is-active")}
+            title={option.label}
+          >
+            {option.label}
+          </Link>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 function getAdminArticleBadgeToneClasses(
   tone: "neutral" | "accent" | "warning" | "success" | "danger",
 ) {
@@ -538,10 +600,20 @@ function AdminArticleListCard(props: {
   group: AdminProductImageGroup;
   activeSection: AdminSystemSection;
   productSearchQuery: string;
+  activeBrandFilterId: string;
+  activeCategoryFilterId: string;
   isSelectedGroup: boolean;
   selectedProductId: string | null;
 }) {
-  const { group, activeSection, productSearchQuery, isSelectedGroup, selectedProductId } = props;
+  const {
+    group,
+    activeSection,
+    productSearchQuery,
+    activeBrandFilterId,
+    activeCategoryFilterId,
+    isSelectedGroup,
+    selectedProductId,
+  } = props;
   const { primaryEntry, secondaryEntries } = getAdminGroupDisplayEntries(group);
   const imageGallery = getAdminArticleGallery(primaryEntry.product);
   const imageSummary = getAdminArticleImageSummary(primaryEntry);
@@ -550,6 +622,8 @@ function AdminArticleListCard(props: {
     view: "system",
     system: activeSection,
     system_q: productSearchQuery,
+    system_brand: activeBrandFilterId || null,
+    system_category: activeCategoryFilterId || null,
     system_article: primaryEntry.product.id,
   });
   const isPrimarySelected = selectedProductId === primaryEntry.product.id;
@@ -748,6 +822,8 @@ function AdminArticleListCard(props: {
                 view: "system",
                 system: activeSection,
                 system_q: productSearchQuery,
+                system_brand: activeBrandFilterId || null,
+                system_category: activeCategoryFilterId || null,
                 system_article: child.product.id,
               });
               const isChildSelected = selectedProductId === child.product.id;
@@ -874,6 +950,14 @@ function buildAdminHref(input: AdminHrefInput) {
 
     if (input.system_q) {
       params.set("system_q", input.system_q);
+    }
+
+    if (input.system_brand) {
+      params.set("system_brand", input.system_brand);
+    }
+
+    if (input.system_category) {
+      params.set("system_category", input.system_category);
     }
 
     if (input.system_article) {
@@ -1174,9 +1258,13 @@ function FlashMessages({
 async function loadAdminProductsPaneData(
   productSearchQuery: string | undefined,
   selectedProductId: string | undefined,
+  brandFilterId: string | undefined,
+  categoryFilterId: string | undefined,
 ) {
   const normalizedSearchQuery = (productSearchQuery || "").trim();
   const normalizedSelectedProductId = selectedProductId || "";
+  const normalizedBrandFilterId = brandFilterId || "";
+  const normalizedCategoryFilterId = categoryFilterId || "";
 
   try {
     await ensureProductImageSchemaReady();
@@ -1190,7 +1278,12 @@ async function loadAdminProductsPaneData(
       );
     }
 
-    const initialResults = await searchProductsForAdmin(normalizedSearchQuery, 60);
+    const initialResults = await searchProductsForAdmin({
+      query: normalizedSearchQuery,
+      brandId: normalizedBrandFilterId,
+      categoryId: normalizedCategoryFilterId,
+      limit: 60,
+    });
     const knownIds = new Set(initialResults.map((entry) => entry.product.id));
     const supplementalIds = new Set<string>();
 
@@ -1250,6 +1343,8 @@ async function loadAdminProductsPaneData(
 function SystemPane(props: {
   activeSection: AdminSystemSection;
   productSearchQuery: string;
+  activeBrandFilterId: string;
+  activeCategoryFilterId: string;
   searchResults: AdminProductImageEntry[];
   selectedProduct: AdminProductImageEntry | null;
   loadError: string | null;
@@ -1259,6 +1354,8 @@ function SystemPane(props: {
   const {
     activeSection,
     productSearchQuery,
+    activeBrandFilterId,
+    activeCategoryFilterId,
     searchResults,
     selectedProduct,
     loadError,
@@ -1285,20 +1382,42 @@ function SystemPane(props: {
     Boolean(selectedGroup?.parentEntry)
     && Boolean(selectedEntry)
     && selectedGroup?.parentEntry?.product.id === selectedEntry?.product.id;
+  const activeBrandFilterLabel = resolveAdminLookupLabel(brandOptions, activeBrandFilterId);
+  const activeCategoryFilterLabel = resolveAdminLookupLabel(
+    categoryOptions,
+    activeCategoryFilterId,
+  );
+  const hasActiveSystemFilters = Boolean(
+    productSearchQuery || activeBrandFilterId || activeCategoryFilterId,
+  );
 
   const editorCloseHref = buildAdminHref({
     view: "system",
     system: activeSection,
     system_q: productSearchQuery,
+    system_brand: activeBrandFilterId || null,
+    system_category: activeCategoryFilterId || null,
   });
   const editorReturnTo = selectedEntry
     ? buildAdminHref({
         view: "system",
         system: activeSection,
         system_q: productSearchQuery,
+        system_brand: activeBrandFilterId || null,
+        system_category: activeCategoryFilterId || null,
         system_article: selectedEntry.product.id,
       })
     : editorCloseHref;
+  const clearFiltersHref = buildAdminHref({
+    view: "system",
+    system: activeSection,
+  });
+  const clearSearchHref = buildAdminHref({
+    view: "system",
+    system: activeSection,
+    system_brand: activeBrandFilterId || null,
+    system_category: activeCategoryFilterId || null,
+  });
 
   return (
     <section className="admin-pane space-y-4">
@@ -1313,6 +1432,9 @@ function SystemPane(props: {
               view: "system",
               system: section,
               system_q: section === activeSection ? productSearchQuery : null,
+              system_brand: section === activeSection ? activeBrandFilterId || null : null,
+              system_category:
+                section === activeSection ? activeCategoryFilterId || null : null,
               system_article:
                 section === activeSection && selectedProduct
                   ? selectedProduct.product.id
@@ -1342,6 +1464,88 @@ function SystemPane(props: {
           searchPlaceholder="Buscar por codigo, descripcion o EAN"
           eyebrow="Sistema"
         />
+
+        <section className="admin-section-card space-y-4 px-5 py-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <span className="admin-pane-kicker">Filtros</span>
+              <h3 className="text-lg font-semibold text-[color:var(--admin-title)]">
+                Categorias y marcas
+              </h3>
+              <p className="mt-1 text-sm text-[color:var(--admin-text)]">
+                Filtra el catalogo por categoria, marca o combinando ambos con la busqueda actual.
+              </p>
+            </div>
+
+            {hasActiveSystemFilters ? (
+              <Link href={clearFiltersHref} className={adminSecondaryButtonClass}>
+                Limpiar filtros
+              </Link>
+            ) : null}
+          </div>
+
+          {productSearchQuery ? (
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href={clearSearchHref}
+                className="inline-flex min-h-10 items-center gap-2 rounded-full border border-[color:var(--admin-card-line)] bg-[color:var(--admin-pane-bg)] px-4 text-sm text-[color:var(--admin-title)] transition hover:bg-white/70 dark:hover:bg-white/10"
+              >
+                <span>Busqueda: {productSearchQuery}</span>
+                <strong aria-hidden="true">X</strong>
+              </Link>
+            </div>
+          ) : null}
+
+          <div className="admin-system-filter-stack">
+            {categoryOptions.length > 0 ? (
+              <AdminSystemFilterSection
+                title="Categorias"
+                selectedId={activeCategoryFilterId}
+                selectedLabel={activeCategoryFilterLabel}
+                options={categoryOptions}
+                allHref={buildAdminHref({
+                  view: "system",
+                  system: activeSection,
+                  system_q: productSearchQuery || null,
+                  system_brand: activeBrandFilterId || null,
+                })}
+                getOptionHref={(optionId) =>
+                  buildAdminHref({
+                    view: "system",
+                    system: activeSection,
+                    system_q: productSearchQuery || null,
+                    system_brand: activeBrandFilterId || null,
+                    system_category: optionId,
+                  })
+                }
+              />
+            ) : null}
+
+            {brandOptions.length > 0 ? (
+              <AdminSystemFilterSection
+                title="Marcas"
+                selectedId={activeBrandFilterId}
+                selectedLabel={activeBrandFilterLabel}
+                options={brandOptions}
+                allHref={buildAdminHref({
+                  view: "system",
+                  system: activeSection,
+                  system_q: productSearchQuery || null,
+                  system_category: activeCategoryFilterId || null,
+                })}
+                getOptionHref={(optionId) =>
+                  buildAdminHref({
+                    view: "system",
+                    system: activeSection,
+                    system_q: productSearchQuery || null,
+                    system_brand: optionId,
+                    system_category: activeCategoryFilterId || null,
+                  })
+                }
+              />
+            ) : null}
+          </div>
+        </section>
       </form>
 
       {loadError ? (
@@ -1469,6 +1673,8 @@ function SystemPane(props: {
                   group={group}
                   activeSection={activeSection}
                   productSearchQuery={productSearchQuery}
+                  activeBrandFilterId={activeBrandFilterId}
+                  activeCategoryFilterId={activeCategoryFilterId}
                   isSelectedGroup={selectedGroup?.parentCode === group.parentCode}
                   selectedProductId={selectedEntry?.product.id || null}
                 />
@@ -1883,6 +2089,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
       fecha_hasta,
       system,
       system_q,
+      system_brand,
+      system_category,
       system_article,
       config,
       error,
@@ -1905,6 +2113,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     system || (activeView === "system" ? "articulos" : undefined),
   );
   const activeSystemQuery = (system_q || productQ || "").trim();
+  const activeSystemBrandId = system_brand || "";
+  const activeSystemCategoryId = system_category || "";
   const activeSystemArticle = system_article || product || "";
   const activeOrderView = normalizeAdminOrderView(vista || status);
   const baseOrderFilters = normalizeOrderFilters({
@@ -1946,7 +2156,12 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     getAdminOrderStateCssVariables(),
     getWatchSnapshot(),
     activeView === "system"
-      ? loadAdminProductsPaneData(activeSystemQuery, activeSystemArticle)
+      ? loadAdminProductsPaneData(
+          activeSystemQuery,
+          activeSystemArticle,
+          activeSystemBrandId,
+          activeSystemCategoryId,
+        )
       : Promise.resolve({
           searchResults: [] as AdminProductImageEntry[],
           selectedProduct: null,
@@ -2100,6 +2315,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
               view: "system",
               system: activeSystemSection,
               system_q: activeSystemQuery,
+              system_brand: activeSystemBrandId || null,
+              system_category: activeSystemCategoryId || null,
               system_article: activeSystemArticle,
             })}
             className={cn(
@@ -2168,6 +2385,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           <SystemPane
             activeSection={activeSystemSection}
             productSearchQuery={activeSystemQuery}
+            activeBrandFilterId={activeSystemBrandId}
+            activeCategoryFilterId={activeSystemCategoryId}
             searchResults={productsPaneData.searchResults}
             selectedProduct={productsPaneData.selectedProduct}
             loadError={productsPaneData.loadError}

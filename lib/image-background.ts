@@ -56,8 +56,16 @@ export async function removeNearWhiteBackground(buffer: Buffer) {
       channels,
       backgroundColor,
     );
+    const refinedBackgroundMask = refineBackgroundMask(
+      data,
+      width,
+      height,
+      channels,
+      backgroundColor,
+      backgroundMask.mask,
+    );
 
-    if (backgroundMask.removedPixels === 0) {
+    if (refinedBackgroundMask.removedPixels === 0) {
       return null;
     }
 
@@ -67,7 +75,7 @@ export async function removeNearWhiteBackground(buffer: Buffer) {
       height,
       channels,
       backgroundColor,
-      backgroundMask.mask,
+      refinedBackgroundMask.mask,
     );
 
     return sharp(data, {
@@ -157,6 +165,7 @@ function floodFillBackground(
   backgroundColor: BackgroundColor,
 ) {
   const mask = new Uint8Array(width * height);
+  const scores = new Float32Array(width * height);
   const queue: number[] = [];
   let removedPixels = 0;
 
@@ -165,11 +174,14 @@ function floodFillBackground(
     if (mask[index] === 1) return;
 
     const stats = readPixelStats(data, width, channels, x, y);
-    if (!isSeedBackgroundPixel(stats, backgroundColor)) {
+    const backgroundScore = getBackgroundScore(stats, backgroundColor);
+
+    if (!isSeedBackgroundPixel(stats, backgroundColor, backgroundScore)) {
       return;
     }
 
     mask[index] = 1;
+    scores[index] = backgroundScore;
     queue.push(index);
     removedPixels += 1;
   };
@@ -197,17 +209,69 @@ function floodFillBackground(
       }
 
       const stats = readPixelStats(data, width, channels, nextX, nextY);
-      if (!isConnectedBackgroundPixel(stats, backgroundColor)) {
+      const backgroundScore = getBackgroundScore(stats, backgroundColor);
+      const currentStats = readPixelStatsAtOffset(data, index * channels);
+
+      if (
+        !isConnectedBackgroundPixel(
+          stats,
+          backgroundColor,
+          backgroundScore,
+          scores[index],
+          currentStats,
+        )
+      ) {
         continue;
       }
 
       mask[nextIndex] = 1;
+      scores[nextIndex] = backgroundScore;
       queue.push(nextIndex);
       removedPixels += 1;
     }
   }
 
   return { mask, removedPixels };
+}
+
+function refineBackgroundMask(
+  data: Buffer,
+  width: number,
+  height: number,
+  channels: number,
+  backgroundColor: BackgroundColor,
+  initialMask: Uint8Array,
+) {
+  let mask = initialMask.slice();
+
+  for (let iteration = 0; iteration < 2; iteration += 1) {
+    const nextMask = mask.slice();
+    let changed = 0;
+
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const index = y * width + x;
+        if (mask[index] !== 1) {
+          continue;
+        }
+
+        if (!shouldProtectMaskedPixel(data, width, height, channels, x, y, backgroundColor, mask)) {
+          continue;
+        }
+
+        nextMask[index] = 0;
+        changed += 1;
+      }
+    }
+
+    if (changed === 0) {
+      break;
+    }
+
+    mask = nextMask;
+  }
+
+  return retainBorderConnectedMask(mask, width, height);
 }
 
 function applyBackgroundTransparency(
@@ -263,17 +327,19 @@ function applyBackgroundTransparency(
 
     if (nextAlpha < 255) {
       const normalizedAlpha = nextAlpha / 255;
-      data[offset] = removeBackgroundSpill(data[offset], backgroundColor.red, normalizedAlpha);
-      data[offset + 1] = removeBackgroundSpill(
-        data[offset + 1],
-        backgroundColor.green,
-        normalizedAlpha,
-      );
-      data[offset + 2] = removeBackgroundSpill(
-        data[offset + 2],
-        backgroundColor.blue,
-        normalizedAlpha,
-      );
+      if (!shouldPreserveBrightNeutralPixel(stats, backgroundColor)) {
+        data[offset] = removeBackgroundSpill(data[offset], backgroundColor.red, normalizedAlpha);
+        data[offset + 1] = removeBackgroundSpill(
+          data[offset + 1],
+          backgroundColor.green,
+          normalizedAlpha,
+        );
+        data[offset + 2] = removeBackgroundSpill(
+          data[offset + 2],
+          backgroundColor.blue,
+          normalizedAlpha,
+        );
+      }
     }
   }
 }
@@ -304,21 +370,168 @@ function forEachBorderBandPixel(
   }
 }
 
-function isSeedBackgroundPixel(stats: PixelStats, backgroundColor: BackgroundColor) {
+function isSeedBackgroundPixel(
+  stats: PixelStats,
+  backgroundColor: BackgroundColor,
+  backgroundScore: number,
+) {
   return (
     stats.alpha >= 8 &&
     stats.average >= Math.max(208, backgroundColor.average - 18) &&
     stats.spread <= 58 &&
-    getBackgroundColorDistance(stats, backgroundColor) <= 42
+    getBackgroundColorDistance(stats, backgroundColor) <= 42 &&
+    backgroundScore >= 0.78
   );
 }
 
-function isConnectedBackgroundPixel(stats: PixelStats, backgroundColor: BackgroundColor) {
+function isConnectedBackgroundPixel(
+  stats: PixelStats,
+  backgroundColor: BackgroundColor,
+  backgroundScore: number,
+  currentBackgroundScore: number,
+  currentStats: PixelStats,
+) {
+  if (
+    !(
+      stats.alpha >= 8 &&
+      stats.average >= Math.max(188, backgroundColor.average - 42) &&
+      stats.spread <= 76 &&
+      getBackgroundColorDistance(stats, backgroundColor) <= 64 &&
+      backgroundScore >= 0.54
+    )
+  ) {
+    return false;
+  }
+
+  const scoreDrop = currentBackgroundScore - backgroundScore;
+  if (scoreDrop > 0.18 && stats.average < currentStats.average - 6) {
+    return false;
+  }
+
+  const stepDistance = getPixelColorDistance(stats, currentStats);
+  if (
+    stepDistance > 24 &&
+    (
+      stats.average < backgroundColor.average - 14 ||
+      stats.spread > 18 ||
+      backgroundScore < currentBackgroundScore - 0.08
+    )
+  ) {
+    return false;
+  }
+
   return (
     stats.alpha >= 8 &&
     stats.average >= Math.max(188, backgroundColor.average - 42) &&
     stats.spread <= 76 &&
     getBackgroundColorDistance(stats, backgroundColor) <= 64
+  );
+}
+
+function shouldProtectMaskedPixel(
+  data: Buffer,
+  width: number,
+  height: number,
+  channels: number,
+  x: number,
+  y: number,
+  backgroundColor: BackgroundColor,
+  mask: Uint8Array,
+) {
+  for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
+    for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+      if (offsetX === 0 && offsetY === 0) {
+        continue;
+      }
+
+      const nextX = x + offsetX;
+      const nextY = y + offsetY;
+      if (nextX < 0 || nextY < 0 || nextX >= width || nextY >= height) {
+        continue;
+      }
+
+      const nextIndex = nextY * width + nextX;
+      if (mask[nextIndex] === 1) {
+        continue;
+      }
+
+      const neighborStats = readPixelStats(data, width, channels, nextX, nextY);
+      if (isStrongForegroundPixel(neighborStats, backgroundColor)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function retainBorderConnectedMask(mask: Uint8Array, width: number, height: number) {
+  const connectedMask = new Uint8Array(mask.length);
+  const queue: number[] = [];
+  let removedPixels = 0;
+  const borderThickness = getBorderThickness(width, height);
+
+  forEachBorderBandPixel(width, height, borderThickness, (x, y) => {
+    const index = y * width + x;
+    if (mask[index] !== 1 || connectedMask[index] === 1) {
+      return;
+    }
+
+    connectedMask[index] = 1;
+    queue.push(index);
+    removedPixels += 1;
+  });
+
+  for (let head = 0; head < queue.length; head += 1) {
+    const index = queue[head];
+    const x = index % width;
+    const y = Math.floor(index / width);
+
+    for (const [nextX, nextY] of [
+      [x - 1, y],
+      [x + 1, y],
+      [x, y - 1],
+      [x, y + 1],
+    ]) {
+      if (nextX < 0 || nextY < 0 || nextX >= width || nextY >= height) {
+        continue;
+      }
+
+      const nextIndex = nextY * width + nextX;
+      if (mask[nextIndex] !== 1 || connectedMask[nextIndex] === 1) {
+        continue;
+      }
+
+      connectedMask[nextIndex] = 1;
+      queue.push(nextIndex);
+      removedPixels += 1;
+    }
+  }
+
+  return { mask: connectedMask, removedPixels };
+}
+
+function isStrongForegroundPixel(stats: PixelStats, backgroundColor: BackgroundColor) {
+  const backgroundScore = getBackgroundScore(stats, backgroundColor);
+
+  return (
+    stats.alpha >= 8 &&
+    (
+      backgroundScore <= 0.42 ||
+      stats.average <= backgroundColor.average - 18 ||
+      stats.spread >= 20 ||
+      getBackgroundColorDistance(stats, backgroundColor) >= 26
+    )
+  );
+}
+
+function shouldPreserveBrightNeutralPixel(
+  stats: PixelStats,
+  backgroundColor: BackgroundColor,
+) {
+  return (
+    stats.average >= Math.max(224, backgroundColor.average - 10) &&
+    stats.spread <= 18
   );
 }
 
@@ -332,6 +545,35 @@ function getBackgroundColorDistance(stats: PixelStats, backgroundColor: Backgrou
     (greenDelta * greenDelta) +
     (blueDelta * blueDelta),
   );
+}
+
+function getPixelColorDistance(left: PixelStats, right: PixelStats) {
+  const redDelta = left.red - right.red;
+  const greenDelta = left.green - right.green;
+  const blueDelta = left.blue - right.blue;
+
+  return Math.sqrt(
+    (redDelta * redDelta) +
+    (greenDelta * greenDelta) +
+    (blueDelta * blueDelta),
+  );
+}
+
+function getBackgroundScore(stats: PixelStats, backgroundColor: BackgroundColor) {
+  const minAverage = Math.max(168, backgroundColor.average - 84);
+  const similarity = clamp(
+    1 - getBackgroundColorDistance(stats, backgroundColor) / 72,
+    0,
+    1,
+  );
+  const brightness = clamp(
+    (stats.average - minAverage) / Math.max(18, backgroundColor.average - minAverage),
+    0,
+    1,
+  );
+  const neutrality = clamp(1 - stats.spread / 84, 0, 1);
+
+  return (similarity * 0.62) + (brightness * 0.24) + (neutrality * 0.14);
 }
 
 function readPixelStats(

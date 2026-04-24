@@ -1,4 +1,4 @@
-import type { NextConfig } from "next";
+import type { NextConfig, SizeLimit } from "next";
 
 function readAllowedDevOrigins() {
   const configured =
@@ -26,10 +26,21 @@ function readAllowedServerActionOrigins() {
   return Array.from(new Set(configured));
 }
 
+function readServerActionBodySizeLimit(): SizeLimit {
+  const configured = process.env.NEXT_SERVER_ACTIONS_BODY_SIZE_LIMIT?.trim();
+
+  if (!configured) {
+    return "32mb";
+  }
+
+  return configured as SizeLimit;
+}
+
 const nextConfig: NextConfig = {
   allowedDevOrigins: readAllowedDevOrigins(),
   experimental: {
     serverActions: {
+      bodySizeLimit: readServerActionBodySizeLimit(),
       allowedOrigins: readAllowedServerActionOrigins(),
     },
   },

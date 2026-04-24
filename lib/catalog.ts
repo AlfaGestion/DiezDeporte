@@ -415,15 +415,19 @@ export async function getAdminProductsByIds(productIds: string[]) {
   return buildAdminProductImageEntries(result.recordset, settings);
 }
 
-export async function searchProductsForAdmin(
-  query: string,
-  limit = 60,
-) {
+export async function searchProductsForAdmin(input: {
+  query: string;
+  brandId?: string;
+  categoryId?: string;
+  limit?: number;
+}) {
   const settings = await getServerSettings();
   const pool = await getConnection();
   const request = createRequest(pool);
-  const safeLimit = Math.max(1, Math.min(120, Math.trunc(limit)));
-  const normalizedQuery = query.trim();
+  const safeLimit = Math.max(1, Math.min(120, Math.trunc(input.limit ?? 60)));
+  const normalizedQuery = input.query.trim();
+  const brandId = input.brandId || "";
+  const categoryId = input.categoryId || "";
   const searchLike = normalizedQuery ? `%${normalizedQuery}%` : "";
   const searchPrefix = normalizedQuery ? `${normalizedQuery}%` : "";
 
@@ -431,6 +435,8 @@ export async function searchProductsForAdmin(
   setInput(request, "search", normalizedQuery);
   setInput(request, "searchLike", searchLike);
   setInput(request, "searchPrefix", searchPrefix);
+  setInput(request, "brandId", brandId);
+  setInput(request, "categoryId", categoryId);
 
   const result: IResult<ProductRecord> = await request.query(`
     WITH StockActual AS (
@@ -472,6 +478,8 @@ export async function searchProductsForAdmin(
       ON LTRIM(RTRIM(rubro.IdRubro)) = LTRIM(RTRIM(a.IDRUBRO))
     WHERE ISNULL(a.SUSPENDIDO, 0) = 0
       AND ISNULL(a.SuspendidoV, 0) = 0
+      AND (@brandId = '' OR ISNULL(a.IDTIPO, '') = @brandId)
+      AND (@categoryId = '' OR ISNULL(a.IDRUBRO, '') = @categoryId)
       AND (
         @search = ''
         OR a.IDARTICULO LIKE @searchLike

@@ -96,6 +96,8 @@ type GalleryManifestItem =
   | { type: "url"; value: string }
   | { type: "upload"; value: string };
 
+type PreviewSurface = "checker" | "light" | "dark";
+
 const CLIPBOARD_EXTENSION_BY_TYPE: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/png": "png",
@@ -103,6 +105,15 @@ const CLIPBOARD_EXTENSION_BY_TYPE: Record<string, string> = {
   "image/gif": "gif",
   "image/avif": "avif",
 };
+
+const PREVIEW_SURFACE_OPTIONS: Array<{
+  value: PreviewSurface;
+  label: string;
+}> = [
+  { value: "checker", label: "Damero" },
+  { value: "light", label: "Claro" },
+  { value: "dark", label: "Oscuro" },
+];
 
 function formatPriceInput(value: number) {
   return new Intl.NumberFormat("es-AR", {
@@ -249,6 +260,7 @@ export function AdminSystemArticleImageEditorFrame(props: {
   const [replaceTargetIndex, setReplaceTargetIndex] = useState<number | null>(null);
   const [pasteMessage, setPasteMessage] = useState<string | null>(null);
   const [isBackgroundRemoving, setIsBackgroundRemoving] = useState(false);
+  const [previewSurface, setPreviewSurface] = useState<PreviewSurface>("checker");
   const [submitMode, setSubmitMode] = useState<"save" | "clear" | null>(null);
   const [feedback, setFeedback] = useState<{
     tone: "success" | "error";
@@ -358,6 +370,11 @@ export function AdminSystemArticleImageEditorFrame(props: {
   }
 
   const currentGalleryItem = galleryItems[activeImageIndex] || null;
+  const previewImageSrc = currentGalleryItem
+    ? buildImageProxyUrl(currentGalleryItem.src, {
+        transparentBackground: true,
+      }) || currentGalleryItem.src
+    : null;
   const uploadItems = galleryItems.filter(
     (item): item is Extract<GalleryItem, { type: "upload" }> => item.type === "upload",
   );
@@ -863,24 +880,50 @@ export function AdminSystemArticleImageEditorFrame(props: {
                       Una sola vista a la vez, sin repetir la galeria completa.
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    className={cn(adminSecondaryButtonClass, "h-10 shrink-0")}
-                    onClick={handleRemoveBackground}
-                    disabled={!currentGalleryItem || isBackgroundRemoving}
-                  >
-                    {isBackgroundRemoving ? "Procesando..." : "Quitar fondo"}
-                  </button>
+                  <div className="flex flex-col items-stretch gap-2 sm:items-end">
+                    <div
+                      className="admin-editor-preview-toggle"
+                      role="group"
+                      aria-label="Fondo de previsualizacion"
+                    >
+                      {PREVIEW_SURFACE_OPTIONS.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          className={cn(
+                            "admin-editor-preview-toggle-button",
+                            previewSurface === option.value && "is-active",
+                          )}
+                          aria-pressed={previewSurface === option.value}
+                          onClick={() => setPreviewSurface(option.value)}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <button
+                      type="button"
+                      className={cn(adminSecondaryButtonClass, "h-10 shrink-0")}
+                      onClick={handleRemoveBackground}
+                      disabled={!currentGalleryItem || isBackgroundRemoving}
+                    >
+                      {isBackgroundRemoving ? "Procesando..." : "Quitar fondo"}
+                    </button>
+                  </div>
                 </div>
 
-                <div className="flex min-h-[380px] items-center justify-center rounded-[22px] border border-[color:var(--admin-card-line)] bg-[color:var(--admin-pane-bg)] p-5">
+                <div
+                  className={cn(
+                    "admin-editor-preview-stage",
+                    previewSurface === "checker" && "is-checker",
+                    previewSurface === "light" && "is-light",
+                    previewSurface === "dark" && "is-dark",
+                  )}
+                >
                   {currentGalleryItem ? (
                     <img
-                      src={
-                        buildImageProxyUrl(currentGalleryItem.src, {
-                          transparentBackground: true,
-                        }) || currentGalleryItem.src
-                      }
+                      src={previewImageSrc || currentGalleryItem.src}
                       alt={description || entry.baseProduct.description}
                       className="max-h-[380px] max-w-full object-contain"
                     />
