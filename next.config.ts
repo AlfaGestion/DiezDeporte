@@ -17,8 +17,22 @@ function readAllowedDevOrigins() {
   );
 }
 
+function readAllowedServerActionOrigins() {
+  const configured =
+    process.env.NEXT_SERVER_ACTIONS_ALLOWED_ORIGINS?.split(",")
+      .map((value) => value.trim())
+      .filter(Boolean) || [];
+
+  return Array.from(new Set(configured));
+}
+
 const nextConfig: NextConfig = {
   allowedDevOrigins: readAllowedDevOrigins(),
+  experimental: {
+    serverActions: {
+      allowedOrigins: readAllowedServerActionOrigins(),
+    },
+  },
 };
 
 export default nextConfig;
