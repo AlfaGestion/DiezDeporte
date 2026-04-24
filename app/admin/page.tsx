@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -12,6 +13,7 @@ import { AdminHelpWorkspace } from "@/components/admin/admin-help-workspace";
 import { AdminPageHeader } from "@/components/admin/admin-page-header";
 import { AdminConfigWorkspace } from "@/components/admin/admin-config-workspace";
 import { AdminLiveOrderWatcher } from "@/components/admin/admin-live-order-watcher";
+import { AdminSystemArticleImageEditorFrame } from "@/components/admin/admin-system-article-image-editor-frame";
 import { AdminThemeToggle } from "@/components/admin-theme-toggle";
 import { cn } from "@/components/admin/admin-ui";
 import { EmptyState } from "@/components/admin/empty-state";
@@ -19,7 +21,21 @@ import { OrderFiltersBar } from "@/components/admin/order-filters-bar";
 import { PickupDeskPane } from "@/components/admin/pickup-desk-pane";
 import { OrdersTable } from "@/components/admin/orders-table";
 import { OrderTabs } from "@/components/admin/order-tabs";
+import {
+  getAdminProductsByIds,
+  searchProductsForAdmin,
+  type AdminProductImageEntry,
+} from "@/lib/catalog";
+import { ensureProductImageStorageReady } from "@/lib/product-image-storage";
+import {
+  ADMIN_SYSTEM_SECTIONS,
+  getAdminSystemSectionLabel,
+  normalizeAdminSystemSection,
+  type AdminSystemSection,
+} from "@/lib/admin-system";
+import { formatCurrency } from "@/lib/commerce";
 import { getWatchSnapshot } from "@/lib/repositories/orderRepository";
+import { ensureProductImageSchemaReady } from "@/lib/repositories/productImageRepository";
 import {
   ADMIN_SESSION_COOKIE,
   getAdminSessionUser,
@@ -63,14 +79,49 @@ type AdminPageProps = {
     tipo_pedido?: string;
     fecha_desde?: string;
     fecha_hasta?: string;
+    system?: string;
+    system_q?: string;
+    system_article?: string;
     config?: string;
     error?: string;
     create?: string;
     editUser?: string;
+    productQ?: string;
+    product?: string;
   }>;
 };
 
-type AdminView = "orders" | "pickups" | "users" | "config" | "help";
+type AdminView = "orders" | "pickups" | "users" | "system" | "config" | "help";
+
+type AdminProductImageGroup = {
+  parentCode: string;
+  parentEntry: AdminProductImageEntry | null;
+  displayEntry: AdminProductImageEntry;
+  editEntry: AdminProductImageEntry;
+  imageEntry: AdminProductImageEntry;
+  children: AdminProductImageEntry[];
+  members: AdminProductImageEntry[];
+  groupStock: number;
+  sizeLabels: string[];
+  colorLabels: string[];
+  firstIndex: number;
+};
+
+const ADMIN_VARIANT_LABEL_COLLATOR = new Intl.Collator("es", {
+  numeric: true,
+  sensitivity: "base",
+});
+const ADMIN_APPAREL_SIZE_ORDER = [
+  "xxxs",
+  "xxs",
+  "xs",
+  "s",
+  "m",
+  "l",
+  "xl",
+  "xxl",
+  "xxxl",
+];
 
 type AdminHrefInput = {
   view?: AdminView;
@@ -81,6 +132,9 @@ type AdminHrefInput = {
   tipo_pedido?: string | null;
   fecha_desde?: string | null;
   fecha_hasta?: string | null;
+  system?: AdminSystemSection;
+  system_q?: string | null;
+  system_article?: string | null;
   config?: string;
   create?: boolean;
   editUser?: number;
@@ -97,6 +151,15 @@ function normalizeView(rawValue: string | undefined): AdminView {
 
   if (rawValue === "config" || rawValue === "general") {
     return "config";
+  }
+
+  if (
+    rawValue === "system" ||
+    rawValue === "sistema" ||
+    rawValue === "products" ||
+    rawValue === "articulos"
+  ) {
+    return "system";
   }
 
   if (rawValue === "help" || rawValue === "ayuda") {
@@ -128,6 +191,229 @@ function formatDateTime(value: string | null | undefined) {
   }).format(date);
 }
 
+function normalizeAdminFilterValue(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeAdminText(value: string | null | undefined) {
+  return (value || "").replace(/\s+/g, " ").trim();
+}
+
+function getAdminParentProductCode(code: string) {
+  return code.split("|")[0]?.trim() || code.trim();
+}
+
+function isAdminChildProductCode(code: string) {
+  return code.includes("|");
+}
+
+function getAdminVariantLabel(product: AdminProductImageEntry["product"]) {
+  if (product.defaultSize) {
+    return product.defaultSize;
+  }
+
+  const variantSegments = product.code
+    .split("|")
+    .slice(1)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment && segment !== "-");
+
+  if (variantSegments.length > 0) {
+    return variantSegments.join(" / ");
+  }
+
+  return product.presentation || product.unitId || product.code;
+}
+
+function getAdminVariantSortRank(label: string) {
+  const firstSegment = label.split("/")[0]?.trim() || label.trim();
+  const normalizedSegment = normalizeAdminFilterValue(firstSegment).replace(/\s+/g, "");
+  const apparelIndex = ADMIN_APPAREL_SIZE_ORDER.indexOf(normalizedSegment);
+
+  if (apparelIndex !== -1) {
+    return {
+      group: 0,
+      value: apparelIndex,
+    };
+  }
+
+  const numericMatch = firstSegment.replace(",", ".").match(/-?\d+(?:\.\d+)?/);
+  if (numericMatch) {
+    return {
+      group: 1,
+      value: Number(numericMatch[0]),
+    };
+  }
+
+  return {
+    group: 2,
+    value: 0,
+  };
+}
+
+function compareAdminVariantEntries(
+  left: AdminProductImageEntry,
+  right: AdminProductImageEntry,
+) {
+  const leftLabel = getAdminVariantLabel(left.product);
+  const rightLabel = getAdminVariantLabel(right.product);
+  const leftRank = getAdminVariantSortRank(leftLabel);
+  const rightRank = getAdminVariantSortRank(rightLabel);
+
+  if (leftRank.group !== rightRank.group) {
+    return leftRank.group - rightRank.group;
+  }
+
+  if (leftRank.group !== 2 && leftRank.value !== rightRank.value) {
+    return leftRank.value - rightRank.value;
+  }
+
+  return ADMIN_VARIANT_LABEL_COLLATOR.compare(leftLabel, rightLabel);
+}
+
+function compareAdminLabels(left: string, right: string) {
+  const leftRank = getAdminVariantSortRank(left);
+  const rightRank = getAdminVariantSortRank(right);
+
+  if (leftRank.group !== rightRank.group) {
+    return leftRank.group - rightRank.group;
+  }
+
+  if (leftRank.group !== 2 && leftRank.value !== rightRank.value) {
+    return leftRank.value - rightRank.value;
+  }
+
+  return ADMIN_VARIANT_LABEL_COLLATOR.compare(left, right);
+}
+
+function extractAdminVariantColor(params: {
+  childEntry: AdminProductImageEntry;
+  parentDescription: string;
+}) {
+  const { childEntry, parentDescription } = params;
+  let remainder = normalizeAdminText(childEntry.product.description);
+  const normalizedParentDescription = normalizeAdminText(parentDescription);
+
+  if (
+    normalizedParentDescription &&
+    normalizeAdminFilterValue(remainder).startsWith(
+      normalizeAdminFilterValue(normalizedParentDescription),
+    )
+  ) {
+    remainder = normalizeAdminText(remainder.slice(normalizedParentDescription.length));
+  }
+
+  const childSegments = childEntry.product.code
+    .split("|")
+    .slice(1)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  const audienceSegment = childSegments[0] || "";
+
+  if (/^(m|f|u|k|b|g|d)$/i.test(audienceSegment)) {
+    remainder = normalizeAdminText(
+      remainder.replace(new RegExp(`^${escapeRegExp(audienceSegment)}\\b`, "i"), ""),
+    );
+  }
+
+  const sizeLabel = getAdminVariantLabel(childEntry.product);
+  if (sizeLabel) {
+    remainder = normalizeAdminText(
+      remainder.replace(new RegExp(escapeRegExp(sizeLabel), "i"), ""),
+    );
+  }
+
+  remainder = normalizeAdminText(remainder.replace(/^[-/|]+|[-/|]+$/g, ""));
+  return remainder || null;
+}
+
+function buildAdminProductImageGroups(entries: AdminProductImageEntry[]) {
+  const groups = new Map<
+    string,
+    {
+      parentEntry: AdminProductImageEntry | null;
+      children: AdminProductImageEntry[];
+      members: AdminProductImageEntry[];
+      firstIndex: number;
+    }
+  >();
+
+  entries.forEach((entry, index) => {
+    const parentCode = getAdminParentProductCode(entry.product.code);
+    const currentGroup = groups.get(parentCode) || {
+      parentEntry: null,
+      children: [],
+      members: [],
+      firstIndex: index,
+    };
+
+    currentGroup.members.push(entry);
+    currentGroup.firstIndex = Math.min(currentGroup.firstIndex, index);
+
+    if (isAdminChildProductCode(entry.product.code)) {
+      currentGroup.children.push(entry);
+    } else if (!currentGroup.parentEntry) {
+      currentGroup.parentEntry = entry;
+    }
+
+    groups.set(parentCode, currentGroup);
+  });
+
+  return Array.from(groups.entries())
+    .map(([parentCode, group]) => {
+      const children = [...group.children].sort(compareAdminVariantEntries);
+      const displayEntry = group.parentEntry || children[0] || group.members[0];
+      const editEntry = group.parentEntry || displayEntry;
+      const imageEntry =
+        [group.parentEntry, ...children, ...group.members]
+          .filter((entry): entry is AdminProductImageEntry => Boolean(entry))
+          .find((entry) => Boolean(entry.product.imageUrl) || entry.product.imageGalleryUrls.length > 0)
+        || displayEntry;
+      const stockPool = children.length > 0 ? children : group.members;
+      const groupStock = stockPool.reduce(
+        (sum, entry) => sum + Math.max(0, entry.product.stock),
+        0,
+      );
+      const sizeLabels = Array.from(
+        new Set(children.map((child) => getAdminVariantLabel(child.product)).filter(Boolean)),
+      ).sort(compareAdminLabels);
+      const colorLabels = Array.from(
+        new Set(
+          children
+            .map((child) =>
+              extractAdminVariantColor({
+                childEntry: child,
+                parentDescription: displayEntry.product.description,
+              }),
+            )
+            .filter((value): value is string => Boolean(value)),
+        ),
+      ).sort((left, right) => ADMIN_VARIANT_LABEL_COLLATOR.compare(left, right));
+
+      return {
+        parentCode,
+        parentEntry: group.parentEntry,
+        displayEntry,
+        editEntry,
+        imageEntry,
+        children,
+        members: group.members,
+        groupStock,
+        sizeLabels,
+        colorLabels,
+        firstIndex: group.firstIndex,
+      } satisfies AdminProductImageGroup;
+    })
+    .sort((left, right) => left.firstIndex - right.firstIndex);
+}
+
 function buildAdminHref(input: AdminHrefInput) {
   const params = new URLSearchParams();
 
@@ -136,11 +422,20 @@ function buildAdminHref(input: AdminHrefInput) {
   }
 
   if (
-    input.view !== "users" &&
-    input.view !== "config" &&
-    input.view !== "pickups" &&
-    input.view !== "help"
+    input.view === "system"
   ) {
+    if (input.system && input.system !== "articulos") {
+      params.set("system", input.system);
+    }
+
+    if (input.system_q) {
+      params.set("system_q", input.system_q);
+    }
+
+    if (input.system_article) {
+      params.set("system_article", input.system_article);
+    }
+  } else if (!input.view || input.view === "orders") {
     if (input.vista && input.vista !== "pedidos") {
       params.set("vista", input.vista);
     }
@@ -207,6 +502,11 @@ function getViewMeta(view: AdminView) {
       return {
         label: "Configuracion",
         description: "Parametros del checkout y comportamiento comercial.",
+      };
+    case "system":
+      return {
+        label: "Sistema",
+        description: "Herramientas internas del catalogo y datos comerciales.",
       };
     case "help":
       return {
@@ -282,6 +582,14 @@ function FlashMessages({
 
   if (saved === "user-deleted") {
     return renderBanner("success", "Usuario admin eliminado.");
+  }
+
+  if (saved === "product-image" || saved === "product-updated") {
+    return renderBanner("success", "Articulo actualizado.");
+  }
+
+  if (saved === "product-image-cleared") {
+    return renderBanner("success", "Se elimino la personalizacion y se volvieron a usar las imagenes del sistema.");
   }
 
   if (error === "order-not-found") {
@@ -377,7 +685,389 @@ function FlashMessages({
     );
   }
 
+  if (error === "product-not-found") {
+    return renderBanner("error", "No se encontro el articulo seleccionado.");
+  }
+
+  if (error === "product-image-invalid") {
+    return renderBanner(
+      "error",
+      "Revisa las imagenes: usa URLs http(s) o rutas locales que empiecen con /.",
+    );
+  }
+
+  if (error === "product-invalid") {
+    return renderBanner(
+      "error",
+      "Revisa descripcion, precio, marca y categoria. El precio debe ser mayor a cero.",
+    );
+  }
+
+  if (error === "product-image-file") {
+    return renderBanner(
+      "error",
+      "No se pudieron procesar los archivos. Usa JPG, PNG, WEBP, GIF o AVIF de hasta 8 MB.",
+    );
+  }
+
+  if (error === "product-image-storage") {
+    return renderBanner(
+      "error",
+      "Falta configurar el almacenamiento de imagenes en .env: carpeta compartida o FTP.",
+    );
+  }
+
+  if (error === "product-image-save") {
+    return renderBanner(
+      "error",
+      "No se pudieron guardar las imagenes del articulo.",
+    );
+  }
+
   return null;
+}
+
+async function loadAdminProductsPaneData(
+  productSearchQuery: string | undefined,
+  selectedProductId: string | undefined,
+) {
+  const normalizedSearchQuery = (productSearchQuery || "").trim();
+  const normalizedSelectedProductId = (selectedProductId || "").trim();
+
+  try {
+    await ensureProductImageSchemaReady();
+
+    try {
+      await ensureProductImageStorageReady();
+    } catch (error) {
+      console.error(
+        "[admin-products] No se pudo preparar la carpeta de imagenes.",
+        error,
+      );
+    }
+
+    const initialResults = await searchProductsForAdmin(normalizedSearchQuery, 60);
+    const knownIds = new Set(initialResults.map((entry) => entry.product.id));
+    const supplementalIds = new Set<string>();
+
+    initialResults.forEach((entry) => {
+      if (!isAdminChildProductCode(entry.product.code)) {
+        return;
+      }
+
+      const parentCode = getAdminParentProductCode(entry.product.code);
+      if (parentCode && !knownIds.has(parentCode)) {
+        supplementalIds.add(parentCode);
+      }
+    });
+
+    if (normalizedSelectedProductId) {
+      if (!knownIds.has(normalizedSelectedProductId)) {
+        supplementalIds.add(normalizedSelectedProductId);
+      }
+
+      if (isAdminChildProductCode(normalizedSelectedProductId)) {
+        const selectedParentCode = getAdminParentProductCode(normalizedSelectedProductId);
+        if (selectedParentCode && !knownIds.has(selectedParentCode)) {
+          supplementalIds.add(selectedParentCode);
+        }
+      }
+    }
+
+    const supplementalResults =
+      supplementalIds.size > 0
+        ? await getAdminProductsByIds(Array.from(supplementalIds))
+        : [];
+    const searchResults = Array.from(
+      new Map(
+        [...initialResults, ...supplementalResults].map((entry) => [entry.product.id, entry]),
+      ).values(),
+    );
+    let selectedProduct =
+      searchResults.find((entry) => entry.product.id === normalizedSelectedProductId) || null;
+
+    if (selectedProduct && isAdminChildProductCode(selectedProduct.product.code)) {
+      const parentCode = getAdminParentProductCode(selectedProduct.product.code);
+      selectedProduct =
+        searchResults.find((entry) => entry.product.id === parentCode) || selectedProduct;
+    }
+
+    return {
+      searchResults,
+      selectedProduct,
+      loadError: null,
+    };
+  } catch (error) {
+    return {
+      searchResults: [] as AdminProductImageEntry[],
+      selectedProduct: null,
+      loadError:
+        error instanceof Error
+          ? error.message
+          : "No se pudieron cargar los articulos.",
+    };
+  }
+}
+
+function SystemPane(props: {
+  activeSection: AdminSystemSection;
+  productSearchQuery: string;
+  searchResults: AdminProductImageEntry[];
+  selectedProduct: AdminProductImageEntry | null;
+  loadError: string | null;
+}) {
+  const {
+    activeSection,
+    productSearchQuery,
+    searchResults,
+    selectedProduct,
+    loadError,
+  } = props;
+  const productGroups = buildAdminProductImageGroups(searchResults);
+  const selectedGroup =
+    selectedProduct
+      ? productGroups.find(
+          (group) =>
+            group.editEntry.product.id === selectedProduct.product.id ||
+            group.parentCode === getAdminParentProductCode(selectedProduct.product.code),
+        ) || null
+      : null;
+
+  const editorCloseHref = buildAdminHref({
+    view: "system",
+    system: activeSection,
+    system_q: productSearchQuery,
+  });
+  const editorReturnTo = selectedGroup
+    ? buildAdminHref({
+        view: "system",
+        system: activeSection,
+        system_q: productSearchQuery,
+        system_article: selectedGroup.editEntry.product.id,
+      })
+    : editorCloseHref;
+
+  return (
+    <section className="admin-pane space-y-4">
+      <nav
+        className="flex gap-2 overflow-x-auto rounded-[18px] border border-[color:var(--admin-pane-line)] bg-[color:var(--admin-pane-bg)] p-2"
+        aria-label="Secciones del sistema"
+      >
+        {ADMIN_SYSTEM_SECTIONS.map((section) => (
+          <Link
+            key={section}
+            href={buildAdminHref({
+              view: "system",
+              system: section,
+              system_q: section === activeSection ? productSearchQuery : null,
+              system_article:
+                section === activeSection && selectedProduct
+                  ? selectedProduct.product.id
+                  : null,
+            })}
+            className={cn(
+              "inline-flex min-w-[140px] items-center justify-between rounded-[14px] px-4 py-2.5 text-sm transition",
+              activeSection === section
+                ? "bg-[color:var(--admin-accent)] text-white"
+                : "text-[color:var(--admin-title)] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]",
+            )}
+          >
+            <span>{getAdminSystemSectionLabel(section)}</span>
+          </Link>
+        ))}
+      </nav>
+
+      <form action="/admin" className="space-y-4">
+        <input type="hidden" name="view" value="system" />
+        <input type="hidden" name="system" value={activeSection} />
+        <AdminPageHeader
+          title={getAdminSystemSectionLabel(activeSection)}
+          subtitle="Busca un articulo y edita descripcion, precio, marca, categoria e imagenes desde un solo panel."
+          searchDefaultValue={productSearchQuery}
+          resultCount={productGroups.length}
+          searchName="system_q"
+          searchPlaceholder="Buscar por codigo, descripcion o EAN"
+          eyebrow="Sistema"
+        />
+      </form>
+
+      {loadError ? (
+        <section className="admin-section-card">
+          <div className="message error">{loadError}</div>
+        </section>
+      ) : null}
+
+      <AdminSystemArticleImageEditorFrame
+        activeSection={activeSection}
+        productSearchQuery={productSearchQuery}
+        closeHref={editorCloseHref}
+        returnTo={editorReturnTo}
+        entry={selectedGroup?.editEntry || null}
+        publishedProduct={selectedGroup?.imageEntry.product || null}
+        variantSummary={
+          selectedGroup
+            ? {
+                parentCode: selectedGroup.parentCode,
+                hasRealParent: Boolean(selectedGroup.parentEntry),
+                variantCount: selectedGroup.children.length,
+                totalStock: selectedGroup.groupStock,
+                colorLabels: selectedGroup.colorLabels,
+                sizeLabels: selectedGroup.sizeLabels,
+                variants: selectedGroup.children.map((child) => ({
+                  id: child.product.id,
+                  code: child.product.code,
+                  description: child.product.description,
+                  sizeLabel: getAdminVariantLabel(child.product),
+                  colorLabel:
+                    extractAdminVariantColor({
+                      childEntry: child,
+                      parentDescription: selectedGroup.displayEntry.product.description,
+                    }) || "Sin dato",
+                  stock: child.product.stock,
+                })),
+              }
+            : null
+        }
+      />
+
+      <section className="admin-section-card">
+        <div className="admin-section-heading">
+          <div>
+            <span className="admin-pane-kicker">Listado</span>
+            <h3>Resultados del catalogo</h3>
+          </div>
+        </div>
+
+        {productGroups.length === 0 ? (
+          <EmptyState
+            title="Sin articulos"
+            message={
+              productSearchQuery
+                ? "No hubo coincidencias para la busqueda actual."
+                : "Todavia no se cargaron articulos para mostrar en esta vista."
+            }
+            compact
+          />
+        ) : (
+          <div className="admin-table-wrap">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>Articulo</th>
+                  <th>Imagen</th>
+                  <th>Precio</th>
+                  <th>Stock</th>
+                  <th>Accion</th>
+                </tr>
+              </thead>
+              <tbody>
+                {productGroups.map((group) => (
+                  <Fragment key={group.parentCode}>
+                    <tr key={group.parentCode}>
+                      <td>
+                        <strong>{group.displayEntry.product.description}</strong>
+                        <small>Cod. {group.editEntry.product.code}</small>
+                        {group.children.length > 0 ? (
+                          <small>
+                            {group.children.length} variante{group.children.length === 1 ? "" : "s"} disponible{group.children.length === 1 ? "" : "s"}
+                          </small>
+                        ) : null}
+                      </td>
+                      <td>
+                        {group.imageEntry.product.imageGalleryUrls.length > 0 ? (
+                          <>
+                            <strong>
+                              {group.imageEntry.product.imageMode === "illustrative"
+                                ? `Ilustrativa (${group.imageEntry.product.imageGalleryUrls.length})`
+                                : `${group.imageEntry.product.imageGalleryUrls.length} imagen${group.imageEntry.product.imageGalleryUrls.length === 1 ? "" : "es"}`}
+                            </strong>
+                            {group.imageEntry.product.imageMode === "illustrative" ? (
+                              <small>
+                                {group.imageEntry.product.imageNote || "Se esta usando una imagen ilustrativa."}
+                              </small>
+                            ) : (
+                              <small>
+                                {group.editEntry.imageOverride ? "Personalizada desde el admin." : "Imagen del sistema."}
+                              </small>
+                            )}
+                          </>
+                        ) : (
+                          <small>Sin imagen</small>
+                        )}
+                      </td>
+                      <td>{formatCurrency(group.displayEntry.product.price)}</td>
+                      <td>{group.groupStock.toFixed(0)}</td>
+                      <td>
+                        <Link
+                          href={buildAdminHref({
+                            view: "system",
+                            system: activeSection,
+                            system_q: productSearchQuery,
+                            system_article: group.editEntry.product.id,
+                          })}
+                          className="admin-ghost-button"
+                        >
+                          Editar
+                        </Link>
+                      </td>
+                    </tr>
+                    {group.children.length > 0 ? (
+                      <tr key={`${group.parentCode}-children`}>
+                        <td colSpan={5}>
+                          <details
+                            className="rounded-[16px] border border-dashed border-[color:var(--admin-card-line)] bg-[color:var(--admin-pane-bg)] px-4 py-3"
+                            open={selectedGroup?.parentCode === group.parentCode}
+                          >
+                            <summary className="cursor-pointer text-sm font-medium text-[color:var(--admin-title)]">
+                              Ver talles y colores
+                            </summary>
+                            <div className="mt-3 space-y-3">
+                              <div className="flex flex-wrap gap-2 text-xs text-[color:var(--admin-text)]">
+                                <span className="admin-inline-badge">
+                                  Colores: {group.colorLabels.length > 0 ? group.colorLabels.join(", ") : "Sin dato"}
+                                </span>
+                                <span className="admin-inline-badge">
+                                  Talles: {group.sizeLabels.length > 0 ? group.sizeLabels.join(", ") : "Sin dato"}
+                                </span>
+                              </div>
+                              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                                {group.children.map((child) => (
+                                  <article
+                                    key={child.product.id}
+                                    className="rounded-[14px] border border-[color:var(--admin-card-line)] bg-[color:var(--admin-card-bg)] px-3 py-3"
+                                  >
+                                    <strong className="block text-sm text-[color:var(--admin-title)]">
+                                      {getAdminVariantLabel(child.product)}
+                                    </strong>
+                                    <p className="mt-1 text-xs text-[color:var(--admin-text)]">
+                                      {extractAdminVariantColor({
+                                        childEntry: child,
+                                        parentDescription: group.displayEntry.product.description,
+                                      }) || "Sin color detectado"}
+                                    </p>
+                                    <p className="mt-1 text-xs text-[color:var(--admin-text)]">
+                                      Cod. {child.product.code}
+                                    </p>
+                                    <p className="mt-1 text-xs text-[color:var(--admin-text)]">
+                                      Stock {child.product.stock.toFixed(0)}
+                                    </p>
+                                  </article>
+                                ))}
+                              </div>
+                            </div>
+                          </details>
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </section>
+  );
 }
 
 function OrdersPane(props: {
@@ -780,10 +1470,15 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
       tipo_pedido,
       fecha_desde,
       fecha_hasta,
+      system,
+      system_q,
+      system_article,
       config,
       error,
       create,
       editUser,
+      productQ,
+      product,
     },
     cookieStore,
   ] = await Promise.all([searchParams, cookies()]);
@@ -795,6 +1490,11 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
   }
 
   const activeView = normalizeView(view);
+  const activeSystemSection = normalizeAdminSystemSection(
+    system || (activeView === "system" ? "articulos" : undefined),
+  );
+  const activeSystemQuery = (system_q || productQ || "").trim();
+  const activeSystemArticle = (system_article || product || "").trim();
   const activeOrderView = normalizeAdminOrderView(vista || status);
   const baseOrderFilters = normalizeOrderFilters({
     q,
@@ -814,6 +1514,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     adminUsers,
     stateColorStyle,
     initialWatchSnapshot,
+    productsPaneData,
   ] = await Promise.all([
     getPublicStoreSettings(),
     getServerSettings(),
@@ -831,6 +1532,13 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     listAdminUsers(),
     getAdminOrderStateCssVariables(),
     getWatchSnapshot(),
+    activeView === "system"
+      ? loadAdminProductsPaneData(activeSystemQuery, activeSystemArticle)
+      : Promise.resolve({
+          searchResults: [] as AdminProductImageEntry[],
+          selectedProduct: null,
+          loadError: null,
+        }),
   ]);
   const ordersSnapshot = buildAdminOrdersSnapshot({
     orders: filteredOrders,
@@ -969,6 +1677,25 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             </small>
           </Link>
           <Link
+            href={buildAdminHref({
+              view: "system",
+              system: activeSystemSection,
+              system_q: activeSystemQuery,
+              system_article: activeSystemArticle,
+            })}
+            className={cn(
+              "inline-flex min-w-[140px] items-center justify-between rounded-[14px] px-4 py-2.5 text-sm transition",
+              activeView === "system"
+                ? "bg-[color:var(--admin-accent)] text-white"
+                : "text-[color:var(--admin-title)] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]",
+            )}
+          >
+            <span>Sistema</span>
+            <small className={activeView === "system" ? "text-white/80" : "text-[color:var(--admin-text)]"}>
+              Catalogo
+            </small>
+          </Link>
+          <Link
             href={buildAdminHref({ view: "config", config: activeConfigSlug })}
             className={cn(
               "inline-flex min-w-[140px] items-center justify-between rounded-[14px] px-4 py-2.5 text-sm transition",
@@ -1017,6 +1744,14 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             showUserCreateForm={showUserCreateForm}
             showUserEditForm={showUserEditForm}
             editingUser={editingUser}
+          />
+        ) : activeView === "system" ? (
+          <SystemPane
+            activeSection={activeSystemSection}
+            productSearchQuery={activeSystemQuery}
+            searchResults={productsPaneData.searchResults}
+            selectedProduct={productsPaneData.selectedProduct}
+            loadError={productsPaneData.loadError}
           />
         ) : activeView === "help" ? (
           <HelpPane

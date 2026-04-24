@@ -28,7 +28,23 @@ import {
   getAdminUserErrorCode,
   updateAdminUser,
 } from "@/lib/admin-users";
+import { getAdminProductsByIds, getProductsByIds } from "@/lib/catalog";
 import { saveAdminConfig } from "@/lib/admin-config";
+import {
+  deleteManagedProductImages,
+  isManagedProductImageUrl,
+  saveUploadedProductImages,
+} from "@/lib/product-image-storage";
+import {
+  getProductImageOverridesByProductIds,
+  saveProductImageOverride,
+} from "@/lib/repositories/productImageRepository";
+import {
+  getProductAdminOverridesByProductIds,
+  saveProductAdminOverride,
+  type ProductAdminOverride,
+} from "@/lib/repositories/productOverrideRepository";
+import type { ProductImageMode } from "@/lib/types";
 import { resolvePendingPaymentStatus } from "@/lib/web-payments";
 
 async function requireAdminSession() {
@@ -63,6 +79,37 @@ function buildUsersRedirect(input: {
 
   if (input.editUser && Number.isFinite(input.editUser) && input.editUser > 0) {
     params.set("editUser", String(input.editUser));
+  }
+
+  return `/admin?${params.toString()}`;
+}
+
+function buildSystemRedirect(input: {
+  section?: string;
+  error?: string;
+  saved?: string;
+  query?: string;
+  articleCode?: string;
+}) {
+  const params = new URLSearchParams({
+    view: "system",
+    system: input.section || "articulos",
+  });
+
+  if (input.saved) {
+    params.set("saved", input.saved);
+  }
+
+  if (input.error) {
+    params.set("error", input.error);
+  }
+
+  if (input.query) {
+    params.set("system_q", input.query);
+  }
+
+  if (input.articleCode) {
+    params.set("system_article", input.articleCode);
   }
 
   return `/admin?${params.toString()}`;
@@ -106,6 +153,63 @@ function resolveAdminReturnTo(formData: FormData, fallback = "/admin") {
   }
 
   return fallback;
+}
+
+function parseProductImageUrlsInput(rawValue: string) {
+  return rawValue
+    .split(/\r?\n/g)
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function parseAdminPriceInput(rawValue: string) {
+  const trimmed = rawValue.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  let normalized = trimmed.replace(/\s+/g, "");
+  const lastComma = normalized.lastIndexOf(",");
+  const lastDot = normalized.lastIndexOf(".");
+
+  if (lastComma > lastDot) {
+    normalized = normalized.replace(/\./g, "").replace(",", ".");
+  } else {
+    normalized = normalized.replace(/,/g, "");
+  }
+
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error("product-price-invalid");
+  }
+
+  return Math.round(parsed * 100) / 100;
+}
+
+async function restoreProductAdminOverride(
+  productId: string,
+  previousOverride: ProductAdminOverride | null,
+) {
+  if (!previousOverride) {
+    await saveProductAdminOverride({
+      productId,
+      description: null,
+      price: null,
+      brand: null,
+      category: null,
+      updatedBy: null,
+    });
+    return;
+  }
+
+  await saveProductAdminOverride({
+    productId,
+    description: previousOverride.description,
+    price: previousOverride.price,
+    brand: previousOverride.brand,
+    category: previousOverride.category,
+    updatedBy: previousOverride.updatedBy,
+  });
 }
 
 export async function refreshAdminOrderMutation(input: {
@@ -416,6 +520,296 @@ export async function saveAdminSettingsAction(formData: FormData) {
     ? `?view=config&config=${encodeURIComponent(activeConfig)}&saved=config`
     : "?view=config&saved=config";
   redirect(`/admin${suffix}`);
+}
+
+export async function saveAdminProductImagesAction(formData: FormData) {
+  const sessionUser = await requireAdminSession();
+  const systemSection =
+    typeof formData.get("systemSection") === "string"
+      ? String(formData.get("systemSection")).trim() || "articulos"
+      : "articulos";
+  const systemQuery =
+    typeof formData.get("systemQuery") === "string"
+      ? String(formData.get("systemQuery")).trim()
+      : "";
+  const productId =
+    typeof formData.get("productId") === "string"
+      ? String(formData.get("productId")).trim()
+      : "";
+  const returnTo = resolveAdminReturnTo(
+    formData,
+    buildSystemRedirect({
+      section: systemSection,
+      query: systemQuery,
+      articleCode: productId,
+    }),
+  );
+  const imageUrlsInput =
+    typeof formData.get("imageUrls") === "string"
+      ? String(formData.get("imageUrls"))
+      : "";
+  const imageModeInput =
+    typeof formData.get("imageMode") === "string"
+      ? String(formData.get("imageMode")).trim().toLowerCase()
+      : "";
+  const imageMode: ProductImageMode =
+    imageModeInput === "illustrative" ? "illustrative" : "exact";
+  const imageNoteInput =
+    typeof formData.get("imageNote") === "string"
+      ? String(formData.get("imageNote")).trim()
+      : "";
+  const imageSourceUrlInput =
+    typeof formData.get("imageSourceUrl") === "string"
+      ? String(formData.get("imageSourceUrl")).trim()
+      : "";
+  const productDescriptionInput =
+    typeof formData.get("productDescription") === "string"
+      ? String(formData.get("productDescription")).trim()
+      : "";
+  const productPriceInput =
+    typeof formData.get("productPrice") === "string"
+      ? String(formData.get("productPrice")).trim()
+      : "";
+  const productBrandInput =
+    typeof formData.get("productBrand") === "string"
+      ? String(formData.get("productBrand")).trim()
+      : "";
+  const productCategoryInput =
+    typeof formData.get("productCategory") === "string"
+      ? String(formData.get("productCategory")).trim()
+      : "";
+  const requestedImageUrls = parseProductImageUrlsInput(imageUrlsInput);
+  const uploadedFiles = formData
+    .getAll("newImages")
+    .filter((value): value is File => value instanceof File);
+
+  if (!productId) {
+    redirect(
+      buildRedirectWithParams(returnTo, {
+        error: "product-not-found",
+      }),
+    );
+  }
+
+  let requestedPrice: number | null;
+
+  try {
+    requestedPrice = parseAdminPriceInput(productPriceInput);
+  } catch {
+    redirect(
+      buildRedirectWithParams(returnTo, {
+        error: "product-invalid",
+      }),
+    );
+  }
+
+  const [products, adminEntries, currentImageOverrides, currentDataOverrides] = await Promise.all([
+    getProductsByIds([productId]),
+    getAdminProductsByIds([productId]),
+    getProductImageOverridesByProductIds([productId]),
+    getProductAdminOverridesByProductIds([productId]),
+  ]);
+
+  if (products.length === 0) {
+    redirect(
+      buildRedirectWithParams(returnTo, {
+        error: "product-not-found",
+      }),
+    );
+  }
+
+  const currentImageOverride = currentImageOverrides.get(productId) || null;
+  const currentDataOverride = currentDataOverrides.get(productId) || null;
+  const currentEntry = adminEntries[0] || null;
+
+  if (!currentEntry) {
+    redirect(
+      buildRedirectWithParams(returnTo, {
+        error: "product-not-found",
+      }),
+    );
+  }
+
+  const baseProduct = currentEntry.baseProduct;
+  let uploadedImageUrls: string[] = [];
+
+  try {
+    uploadedImageUrls = await saveUploadedProductImages({
+      productId,
+      files: uploadedFiles,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    redirect(
+      buildRedirectWithParams(returnTo, {
+        error: /APP_PRODUCT_IMAGE_UPLOAD_DIRECTORY|configura/i.test(message)
+          ? "product-image-storage"
+          : "product-image-file",
+      }),
+    );
+  }
+
+  const finalImageUrls = [...requestedImageUrls, ...uploadedImageUrls];
+  let contentSaved = false;
+
+  try {
+    await saveProductAdminOverride({
+      productId,
+      description:
+        productDescriptionInput !== baseProduct.description
+          ? productDescriptionInput
+          : null,
+      price:
+        requestedPrice !== null &&
+        requestedPrice !== Math.round(baseProduct.price * 100) / 100
+          ? requestedPrice
+          : null,
+      brand:
+        productBrandInput !== baseProduct.brand
+          ? productBrandInput
+          : null,
+      category:
+        productCategoryInput !== baseProduct.category
+          ? productCategoryInput
+          : null,
+      updatedBy: sessionUser.username,
+    });
+    contentSaved = true;
+
+    await saveProductImageOverride({
+      productId,
+      imageUrls: finalImageUrls,
+      imageMode,
+      imageNote:
+        imageMode === "illustrative"
+          ? imageNoteInput || "Imagen ilustrativa cargada desde el admin."
+          : null,
+      imageSourceUrl: imageMode === "illustrative" ? imageSourceUrlInput || null : null,
+      updatedBy: sessionUser.username,
+    });
+  } catch (error) {
+    if (uploadedImageUrls.length > 0) {
+      await deleteManagedProductImages(uploadedImageUrls);
+    }
+
+    if (contentSaved) {
+      try {
+        await restoreProductAdminOverride(productId, currentDataOverride);
+      } catch (restoreError) {
+        console.error("[admin-products] No se pudo restaurar el override del articulo.", restoreError);
+      }
+    }
+
+    const message = error instanceof Error ? error.message : "";
+    const errorCode =
+      /product-price-invalid|precio|descripcion|marca|categoria/i.test(message)
+        ? "product-invalid"
+        : /http\(s\)|ruta local|permiten hasta|fuente de la imagen/i.test(message)
+          ? "product-image-invalid"
+        : "product-image-save";
+
+    redirect(
+      buildRedirectWithParams(returnTo, {
+        error: errorCode,
+      }),
+    );
+  }
+
+  const retainedUrls = new Set(finalImageUrls);
+  const oldManagedUrls =
+    currentImageOverride?.imageGalleryUrls.filter((url) => isManagedProductImageUrl(url)) || [];
+  const orphanManagedUrls = oldManagedUrls.filter((url) => !retainedUrls.has(url));
+
+  if (orphanManagedUrls.length > 0) {
+    try {
+      await deleteManagedProductImages(orphanManagedUrls);
+    } catch (error) {
+      console.error("[admin-products] No se pudieron borrar imagenes viejas.", error);
+    }
+  }
+
+  revalidatePath("/");
+  revalidatePath("/admin");
+
+  redirect(
+    buildRedirectWithParams(returnTo, {
+      saved: "product-updated",
+      error: null,
+      system_article: productId,
+    }),
+  );
+}
+
+export async function clearAdminProductImagesAction(formData: FormData) {
+  await requireAdminSession();
+
+  const systemSection =
+    typeof formData.get("systemSection") === "string"
+      ? String(formData.get("systemSection")).trim() || "articulos"
+      : "articulos";
+  const systemQuery =
+    typeof formData.get("systemQuery") === "string"
+      ? String(formData.get("systemQuery")).trim()
+      : "";
+  const productId =
+    typeof formData.get("productId") === "string"
+      ? String(formData.get("productId")).trim()
+      : "";
+  const returnTo = resolveAdminReturnTo(
+    formData,
+    buildSystemRedirect({
+      section: systemSection,
+      query: systemQuery,
+      articleCode: productId,
+    }),
+  );
+
+  if (!productId) {
+    redirect(
+      buildRedirectWithParams(returnTo, {
+        error: "product-not-found",
+      }),
+    );
+  }
+
+  const currentOverrides = await getProductImageOverridesByProductIds([productId]);
+  const currentOverride = currentOverrides.get(productId) || null;
+
+  try {
+    await saveProductImageOverride({
+      productId,
+      imageUrls: [],
+      updatedBy: null,
+    });
+  } catch {
+    redirect(
+      buildRedirectWithParams(returnTo, {
+        error: "product-image-save",
+      }),
+    );
+  }
+
+  const managedUrls =
+    currentOverride?.imageGalleryUrls.filter((url) => isManagedProductImageUrl(url)) || [];
+
+  if (managedUrls.length > 0) {
+    try {
+      await deleteManagedProductImages(managedUrls);
+    } catch (error) {
+      console.error("[admin-products] No se pudieron borrar imagenes personalizadas.", error);
+    }
+  }
+
+  revalidatePath("/");
+  revalidatePath("/admin");
+
+  redirect(
+    buildRedirectWithParams(returnTo, {
+      saved: "product-image-cleared",
+      error: null,
+      system_article: productId,
+    }),
+  );
 }
 
 export async function refreshAdminOrderAction(formData: FormData) {

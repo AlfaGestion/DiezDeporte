@@ -36,6 +36,7 @@ Copiar `.env.example` a `.env` y completar:
 - `SMTP_*` si quieren envío real de emails; si no, el sistema registra el intento sin cortar el flujo
 - cuenta cliente por defecto si no usan `CUENTACONSUMIDORFINAL` en `TA_CONFIGURACION`
 - `ODOO_SHOP_URL` si quieren tomar imagenes y logos del shop actual
+- `APP_PRODUCT_IMAGE_UPLOAD_DIRECTORY` si guardan imagenes en carpeta local/UNC, o `APP_PRODUCT_IMAGE_FTP_*` si las suben por FTP
 
 ## Correr
 

@@ -28,7 +28,6 @@ import type {
 
 const LOCAL_STORAGE_CART_KEY = "diezdeportes-cart";
 const LOCAL_STORAGE_THEME_KEY = "diezdeportes-theme";
-const LOCAL_STORAGE_WEB_IMAGE_KEY = "diezdeportes-web-images";
 const VARIANT_LABEL_COLLATOR = new Intl.Collator("es", {
   numeric: true,
   sensitivity: "base",
@@ -215,28 +214,6 @@ export function Storefront({
   }, [cart]);
 
   useEffect(() => {
-    const savedOverrides = window.localStorage.getItem(
-      LOCAL_STORAGE_WEB_IMAGE_KEY,
-    );
-    if (!savedOverrides) return;
-
-    try {
-      setWebImageOverrides(
-        JSON.parse(savedOverrides) as Record<string, WebImageOverride | null>,
-      );
-    } catch {
-      window.localStorage.removeItem(LOCAL_STORAGE_WEB_IMAGE_KEY);
-    }
-  }, []);
-
-  useEffect(() => {
-    window.localStorage.setItem(
-      LOCAL_STORAGE_WEB_IMAGE_KEY,
-      JSON.stringify(webImageOverrides),
-    );
-  }, [webImageOverrides]);
-
-  useEffect(() => {
     const savedTheme = window.localStorage.getItem(LOCAL_STORAGE_THEME_KEY);
     if (savedTheme === "light" || savedTheme === "dark") {
       setTheme(savedTheme);
@@ -330,9 +307,29 @@ export function Storefront({
       aliases: brand.aliases?.length ? brand.aliases : [label.toUpperCase()],
     };
   });
-  const brandOptions = normalizedBrandImages.filter((brand) =>
-    Boolean(brand.label),
-  );
+  const brandOptions = [
+    ...normalizedBrandImages.filter((brand) => Boolean(brand.label)),
+    ...Array.from(
+      new Set(
+        productGroups
+          .map((group) => group.catalogProduct.brand.trim())
+          .filter(Boolean),
+      ),
+    )
+      .filter(
+        (label) =>
+          !normalizedBrandImages.some(
+            (brand) =>
+              normalizeFilterValue(brand.label) === normalizeFilterValue(label),
+          ),
+      )
+      .map((label) => ({
+        src: "",
+        alt: label,
+        label,
+        aliases: [label.toUpperCase()],
+      })),
+  ];
   const activeBrand =
     selectedBrand === "all"
       ? null
@@ -347,10 +344,14 @@ export function Storefront({
             product.description,
           );
           const normalizedCode = normalizeFilterValue(product.code);
+          const normalizedBrand = normalizeFilterValue(product.brand);
+          const normalizedCategory = normalizeFilterValue(product.category);
 
           return (
             normalizedDescription.includes(normalizedSearch) ||
-            normalizedCode.includes(normalizedSearch)
+            normalizedCode.includes(normalizedSearch) ||
+            normalizedBrand.includes(normalizedSearch) ||
+            normalizedCategory.includes(normalizedSearch)
           );
         });
 
@@ -370,6 +371,7 @@ export function Storefront({
         matchesBrandFilter(
           normalizeFilterValue(product.description),
           normalizeFilterValue(product.code),
+          normalizeFilterValue(product.brand),
           activeBrand?.aliases || [],
         ),
       );
@@ -1137,7 +1139,7 @@ export function Storefront({
                 type="search"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Codigo o descripcion"
+                placeholder="Codigo, descripcion, marca o categoria"
               />
             </div>
 
@@ -1168,7 +1170,7 @@ export function Storefront({
                         className={`filter-chip ${selectedFamily === family ? "active" : ""}`}
                         onClick={() => setSelectedFamily(family)}
                       >
-                        Familia {family}
+                        {family}
                       </button>
                     ))}
                   </div>
@@ -1418,12 +1420,19 @@ export function Storefront({
                         ) : null}
                       </div>
 
+                      {product.brand ? (
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                          {product.brand}
+                        </p>
+                      ) : null}
+
                       <h3>{product.description}</h3>
 
                       <p className="catalog-card-subtitle">
                         {hasVariants
                           ? "Selecciona variante en el detalle"
-                          : product.defaultSize ||
+                          : product.category ||
+                            product.defaultSize ||
                             product.presentation ||
                             product.unitId ||
                             "Unidad"}
@@ -1704,6 +1713,12 @@ export function Storefront({
                     </div>
 
                     <div className="product-detail-tags">
+                      {selectedDetailProduct.brand ? (
+                        <span className="catalog-tag">{selectedDetailProduct.brand}</span>
+                      ) : null}
+                      {selectedDetailProduct.category ? (
+                        <span className="catalog-tag">{selectedDetailProduct.category}</span>
+                      ) : null}
                       <span
                         className={`catalog-tag ${getStockBadgeClass(selectedDetailProduct.stock)}`}
                       >
@@ -2630,6 +2645,9 @@ function buildProductGroups(products: Product[]) {
         .find((product) => Boolean(product.imageUrl)) || primaryProduct;
     const catalogProduct: Product = {
       ...primaryProduct,
+      brand: primaryProduct.brand || defaultSelectable.brand,
+      category: primaryProduct.category || defaultSelectable.category,
+      familyId: primaryProduct.familyId || defaultSelectable.familyId,
       price: defaultSelectable.price,
       netPrice: defaultSelectable.netPrice,
       taxAmount: defaultSelectable.taxAmount,
@@ -2829,6 +2847,7 @@ function matchesAudienceFilter(
 function matchesBrandFilter(
   normalizedDescription: string,
   normalizedCode: string,
+  normalizedBrand: string,
   aliases: string[],
 ) {
   if (aliases.length === 0) {
@@ -2839,7 +2858,8 @@ function matchesBrandFilter(
     const normalizedAlias = normalizeFilterValue(alias);
     return (
       normalizedDescription.includes(normalizedAlias) ||
-      normalizedCode.includes(normalizedAlias)
+      normalizedCode.includes(normalizedAlias) ||
+      normalizedBrand.includes(normalizedAlias)
     );
   });
 }

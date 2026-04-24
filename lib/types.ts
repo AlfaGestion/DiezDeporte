@@ -11,6 +11,8 @@ export type Product = {
   id: string;
   code: string;
   description: string;
+  brand: string;
+  category: string;
   price: number;
   netPrice: number;
   taxAmount: number;

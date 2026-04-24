@@ -5,17 +5,23 @@ export function AdminPageHeader({
   subtitle,
   searchDefaultValue,
   resultCount,
+  searchName,
+  searchPlaceholder,
+  eyebrow,
 }: {
   title: string;
   subtitle?: string;
   searchDefaultValue?: string | null;
   resultCount?: number;
+  searchName?: string;
+  searchPlaceholder?: string;
+  eyebrow?: string;
 }) {
   return (
     <div className={cn(adminPanelClass, "flex flex-col gap-4 px-5 py-5 lg:flex-row lg:items-center lg:justify-between")}>
       <div className="space-y-1">
         <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--admin-text)]">
-          Operacion
+          {eyebrow || "Operacion"}
         </div>
         <div className="flex items-center gap-3">
           <h1 className="text-[26px] font-semibold tracking-[-0.03em] text-[color:var(--admin-title)]">
@@ -36,9 +42,9 @@ export function AdminPageHeader({
         <div className="relative flex-1">
           <input
             type="search"
-            name="q"
+            name={searchName || "q"}
             defaultValue={searchDefaultValue || ""}
-            placeholder="Buscar por numero, cliente o email"
+            placeholder={searchPlaceholder || "Buscar por numero, cliente o email"}
             className={cn(adminInputClass, "pr-4")}
           />
         </div>
