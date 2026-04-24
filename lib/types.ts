@@ -13,6 +13,7 @@ export type Product = {
   description: string;
   brand: string;
   category: string;
+  categoryId: string;
   price: number;
   netPrice: number;
   taxAmount: number;
@@ -24,6 +25,7 @@ export type Product = {
   familyId: string;
   typeId: string;
   defaultSize: string;
+  defaultColor: string;
   presentation: string;
   supplierAccount: string;
   barcode: string | null;

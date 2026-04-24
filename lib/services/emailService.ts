@@ -1,5 +1,9 @@
 import "server-only";
 import { getProductsByIds } from "@/lib/catalog";
+import {
+  collectDistinctLegacyArticleIds,
+  getLegacyArticleId,
+} from "@/lib/legacy-article-id";
 import { getOrderStateAutomationConfig, renderOrderTemplate } from "@/lib/order-state-config";
 import { getServerSettings } from "@/lib/store-config";
 import { formatSqlServerLocalDateTime } from "@/lib/store-datetime";
@@ -153,18 +157,20 @@ async function hydrateOrderItemsForEmail(order: StoredOrder) {
     return order;
   }
 
-  const productIds = Array.from(new Set(items.map((item) => item.productId.trim()).filter(Boolean)));
+  const productIds = collectDistinctLegacyArticleIds(
+    items.map((item) => item.productId),
+  );
 
   if (productIds.length === 0) {
     return order;
   }
 
   const products = await getProductsByIds(productIds).catch(() => []);
-  const productMap = new Map(products.map((product) => [product.id.trim(), product]));
+  const productMap = new Map(products.map((product) => [product.id, product]));
   let didChange = false;
 
   const nextItems = items.map((item) => {
-    const product = productMap.get(item.productId.trim());
+    const product = productMap.get(getLegacyArticleId(item.productId));
     const currentName = normalizeOptionalString(item.productName);
     const currentSize = buildFallbackSizeLabel(item.selectedSize);
     const resolvedName =

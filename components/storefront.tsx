@@ -13,6 +13,7 @@ import {
   LOCAL_STORE_LOGO_DARK_URL,
   LOCAL_STORE_LOGO_URL,
 } from "@/lib/site-assets";
+import { getLegacyArticleParentId } from "@/lib/legacy-article-id";
 import { ThemeToggleIcon, getThemeToggleLabel } from "@/components/theme-toggle-icon";
 import type {
   BrandImage,
@@ -185,6 +186,7 @@ export function Storefront({
   const [mobileCartOpen, setMobileCartOpen] = useState(false);
   const [checkoutStep, setCheckoutStep] = useState<CheckoutStep>("cart");
   const [theme, setTheme] = useState<ThemeMode>("light");
+  const [themeReady, setThemeReady] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(
     null,
@@ -193,6 +195,9 @@ export function Storefront({
     null,
   );
   const [detailQuantity, setDetailQuantity] = useState(1);
+  const [catalogPreviewImageIndexes, setCatalogPreviewImageIndexes] = useState<
+    Record<string, number>
+  >({});
   const [webImageOverrides, setWebImageOverrides] = useState<
     Record<string, WebImageOverride | null>
   >({});
@@ -217,21 +222,24 @@ export function Storefront({
     const savedTheme = window.localStorage.getItem(LOCAL_STORAGE_THEME_KEY);
     if (savedTheme === "light" || savedTheme === "dark") {
       setTheme(savedTheme);
-      return;
-    }
-
-    if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+    } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
       setTheme("dark");
     }
+
+    setThemeReady(true);
   }, []);
 
   useEffect(() => {
+    if (!themeReady) {
+      return;
+    }
+
     document.documentElement.dataset.theme = theme;
     document.documentElement.style.colorScheme = theme;
     document.body.dataset.theme = theme;
     document.body.style.colorScheme = theme;
     window.localStorage.setItem(LOCAL_STORAGE_THEME_KEY, theme);
-  }, [theme]);
+  }, [theme, themeReady]);
 
   useEffect(() => {
     if (cart.length === 0) {
@@ -510,6 +518,9 @@ export function Storefront({
     selectedDetailGallery.includes(selectedDetailImageUrl)
       ? selectedDetailImageUrl
       : selectedDetailGallery[0] || null;
+  const activeDetailImageIndex = activeDetailImageUrl
+    ? Math.max(selectedDetailGallery.indexOf(activeDetailImageUrl), 0)
+    : 0;
   const selectedProductCartItem = selectedDetailProduct
     ? cart.find((item) => item.id === selectedDetailProduct.id) || null
     : null;
@@ -704,9 +715,78 @@ export function Storefront({
     setSelectedVariantId(null);
   }
 
+  function getCatalogCardGallery(product: Product) {
+    if (product.imageGalleryUrls.length > 0) {
+      return product.imageGalleryUrls;
+    }
+
+    return product.imageUrl ? [product.imageUrl] : [];
+  }
+
+  function getCatalogPreviewImageIndex(parentCode: string, galleryLength: number) {
+    if (galleryLength <= 1) {
+      return 0;
+    }
+
+    const rawIndex = catalogPreviewImageIndexes[parentCode] ?? 0;
+    return Math.max(0, Math.min(rawIndex, galleryLength - 1));
+  }
+
+  function moveCatalogPreviewImage(
+    parentCode: string,
+    galleryLength: number,
+    direction: -1 | 1,
+  ) {
+    if (galleryLength <= 1) {
+      return;
+    }
+
+    setCatalogPreviewImageIndexes((current) => {
+      const currentIndex = current[parentCode] ?? 0;
+      const nextIndex = (currentIndex + direction + galleryLength) % galleryLength;
+
+      if (currentIndex === nextIndex) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [parentCode]: nextIndex,
+      };
+    });
+  }
+
+  function resetCatalogPreviewImage(parentCode: string) {
+    setCatalogPreviewImageIndexes((current) => {
+      if (!(parentCode in current)) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[parentCode];
+      return next;
+    });
+  }
+
   function closeProductDetail() {
     setSelectedProduct(null);
     setSelectedVariantId(null);
+  }
+
+  function moveDetailImage(direction: -1 | 1) {
+    if (selectedDetailGallery.length <= 1) {
+      return;
+    }
+
+    setSelectedDetailImageUrl((current) => {
+      const currentIndex = current ? selectedDetailGallery.indexOf(current) : 0;
+      const safeIndex = currentIndex >= 0 ? currentIndex : 0;
+      const nextIndex =
+        (safeIndex + direction + selectedDetailGallery.length) %
+        selectedDetailGallery.length;
+
+      return selectedDetailGallery[nextIndex] || selectedDetailGallery[0] || null;
+    });
   }
 
   function handleProductCardKeyDown(
@@ -1358,6 +1438,13 @@ export function Storefront({
             <div className="catalog-grid">
               {filteredProductGroups.map((group) => {
                 const product = group.catalogProduct;
+                const gallery = getCatalogCardGallery(product);
+                const activeGalleryIndex = getCatalogPreviewImageIndex(
+                  group.parentCode,
+                  gallery.length,
+                );
+                const activeGalleryImageUrl =
+                  gallery[activeGalleryIndex] || product.imageUrl;
                 const hasVariants = group.children.length > 0;
                 const variantPreview = group.children.slice(0, 4);
                 const hiddenVariantCount = Math.max(
@@ -1373,6 +1460,7 @@ export function Storefront({
                   <article
                     className="catalog-card"
                     key={group.parentCode}
+                    onMouseLeave={() => resetCatalogPreviewImage(group.parentCode)}
                     onClick={() => openProductDetail(product)}
                     onKeyDown={(event) =>
                       handleProductCardKeyDown(event, product)
@@ -1382,13 +1470,13 @@ export function Storefront({
                     aria-label={`Ver detalle de ${product.description}`}
                   >
                     <div className="catalog-card-media">
-                      {product.imageUrl ? (
+                      {activeGalleryImageUrl ? (
                         <img
                           src={
-                            buildImageProxyUrl(product.imageUrl, {
+                            buildImageProxyUrl(activeGalleryImageUrl, {
                               transparentBackground: true,
                             }) ||
-                            product.imageUrl
+                            activeGalleryImageUrl
                           }
                           alt={product.description}
                           loading="lazy"
@@ -1398,6 +1486,75 @@ export function Storefront({
                           {product.code.slice(0, 3)}
                         </div>
                       )}
+
+                      {gallery.length > 1 ? (
+                        <>
+                          <div className="catalog-card-gallery-controls">
+                            <button
+                              type="button"
+                              className="catalog-card-gallery-button"
+                              aria-label={`Ver foto anterior de ${product.description}`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                moveCatalogPreviewImage(
+                                  group.parentCode,
+                                  gallery.length,
+                                  -1,
+                                );
+                              }}
+                              onKeyDown={(event) => {
+                                event.stopPropagation();
+                              }}
+                            >
+                              {"<"}
+                            </button>
+                            <button
+                              type="button"
+                              className="catalog-card-gallery-button"
+                              aria-label={`Ver foto siguiente de ${product.description}`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                moveCatalogPreviewImage(
+                                  group.parentCode,
+                                  gallery.length,
+                                  1,
+                                );
+                              }}
+                              onKeyDown={(event) => {
+                                event.stopPropagation();
+                              }}
+                            >
+                              {">"}
+                            </button>
+                          </div>
+
+                          <div className="catalog-card-gallery-footer">
+                            <span className="catalog-card-gallery-count">
+                              {activeGalleryIndex + 1}/{gallery.length}
+                            </span>
+                            <div
+                              className="catalog-card-gallery-dots"
+                              aria-label={`${gallery.length} fotos disponibles`}
+                            >
+                              {gallery.slice(0, 5).map((imageUrl, index) => (
+                                <span
+                                  className={`catalog-card-gallery-dot ${
+                                    index === Math.min(activeGalleryIndex, 4)
+                                      ? "active"
+                                      : ""
+                                  }`}
+                                  key={`${group.parentCode}-${imageUrl}`}
+                                />
+                              ))}
+                              {gallery.length > 5 ? (
+                                <span className="catalog-card-gallery-more">
+                                  +{gallery.length - 5}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                        </>
+                      ) : null}
                     </div>
 
                     <div className="catalog-card-body">
@@ -1636,61 +1793,94 @@ export function Storefront({
 
             <div className="product-detail-layout">
               <div className="product-detail-top">
-                  <div
-                    className="product-detail-media"
-                    key={selectedDetailProduct.id}
-                  >
-                    {activeDetailImageUrl ? (
-                      <div className="product-detail-media-stack">
+                <div className="product-detail-media" key={selectedDetailProduct.id}>
+                  <div className="product-detail-media-stack">
+                    <div className="product-detail-stage">
+                      {activeDetailImageUrl ? (
                         <img
                           src={
                             buildImageProxyUrl(activeDetailImageUrl, {
                               transparentBackground: true,
-                            }) ||
-                            activeDetailImageUrl
+                            }) || activeDetailImageUrl
                           }
                           alt={selectedDetailProduct.description}
                           loading="eager"
                         />
-                        {selectedDetailGallery.length > 1 ? (
-                          <div className="product-detail-gallery" aria-label="Mas fotos del producto">
-                            {selectedDetailGallery.map((imageUrl, index) => {
-                              const isActive = imageUrl === activeDetailImageUrl;
-
-                              return (
-                                <button
-                                  key={`${selectedDetailProduct.id}-${imageUrl}`}
-                                  type="button"
-                                  className={[
-                                    "product-detail-thumb",
-                                    isActive ? "active" : "",
-                                  ]
-                                    .filter(Boolean)
-                                    .join(" ")}
-                                  onClick={() => setSelectedDetailImageUrl(imageUrl)}
-                                  aria-label={`Ver foto ${index + 1} de ${selectedDetailProduct.description}`}
-                                  aria-pressed={isActive}
-                                >
-                                  <img
-                                    src={
-                                      buildImageProxyUrl(imageUrl, {
-                                        transparentBackground: true,
-                                      }) || imageUrl
-                                    }
-                                    alt={`${selectedDetailProduct.description} - foto ${index + 1}`}
-                                    loading="lazy"
-                                  />
-                                </button>
-                              );
-                            })}
+                      ) : (
+                        <div className="catalog-card-placeholder product-detail-placeholder">
+                          {selectedDetailProduct.code.slice(0, 3)}
+                        </div>
+                      )}
+                      {selectedDetailGallery.length > 1 ? (
+                        <>
+                          <div className="product-detail-stage-controls">
+                            <button
+                              type="button"
+                              className="product-detail-stage-button"
+                              aria-label={`Ver foto anterior de ${selectedDetailProduct.description}`}
+                              onClick={() => moveDetailImage(-1)}
+                            >
+                              {"<"}
+                            </button>
+                            <button
+                              type="button"
+                              className="product-detail-stage-button"
+                              aria-label={`Ver foto siguiente de ${selectedDetailProduct.description}`}
+                              onClick={() => moveDetailImage(1)}
+                            >
+                              {">"}
+                            </button>
                           </div>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <div className="catalog-card-placeholder product-detail-placeholder">
-                        {selectedDetailProduct.code.slice(0, 3)}
+                          <div
+                            className="product-detail-stage-count"
+                            aria-label={`${selectedDetailGallery.length} fotos disponibles`}
+                          >
+                            {activeDetailImageIndex + 1}/{selectedDetailGallery.length}
+                          </div>
+                        </>
+                      ) : null}
                     </div>
-                  )}
+
+                    {selectedDetailGallery.length > 1 ? (
+                      <div className="product-detail-gallery-wrap">
+                        <span className="product-detail-gallery-label">Galeria</span>
+                        <div
+                          className="product-detail-gallery"
+                          aria-label="Mas fotos del producto"
+                        >
+                          {selectedDetailGallery.map((imageUrl, index) => {
+                            const isActive = imageUrl === activeDetailImageUrl;
+
+                            return (
+                              <button
+                                key={`${selectedDetailProduct.id}-${imageUrl}`}
+                                type="button"
+                                className={[
+                                  "product-detail-thumb",
+                                  isActive ? "active" : "",
+                                ]
+                                  .filter(Boolean)
+                                  .join(" ")}
+                                onClick={() => setSelectedDetailImageUrl(imageUrl)}
+                                aria-label={`Ver foto ${index + 1} de ${selectedDetailProduct.description}`}
+                                aria-pressed={isActive}
+                              >
+                                <img
+                                  src={
+                                    buildImageProxyUrl(imageUrl, {
+                                      transparentBackground: true,
+                                    }) || imageUrl
+                                  }
+                                  alt={`${selectedDetailProduct.description} - foto ${index + 1}`}
+                                  loading="lazy"
+                                />
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
 
                 <div className="product-detail-summary">
@@ -2647,6 +2837,7 @@ function buildProductGroups(products: Product[]) {
       ...primaryProduct,
       brand: primaryProduct.brand || defaultSelectable.brand,
       category: primaryProduct.category || defaultSelectable.category,
+      categoryId: primaryProduct.categoryId || defaultSelectable.categoryId,
       familyId: primaryProduct.familyId || defaultSelectable.familyId,
       price: defaultSelectable.price,
       netPrice: defaultSelectable.netPrice,
@@ -2656,6 +2847,7 @@ function buildProductGroups(products: Product[]) {
       currency: defaultSelectable.currency,
       unitId: defaultSelectable.unitId || primaryProduct.unitId,
       defaultSize: defaultSelectable.defaultSize || primaryProduct.defaultSize,
+      defaultColor: defaultSelectable.defaultColor || primaryProduct.defaultColor,
       presentation:
         primaryProduct.presentation || defaultSelectable.presentation,
       barcode: primaryProduct.barcode || defaultSelectable.barcode,
@@ -2679,7 +2871,7 @@ function buildProductGroups(products: Product[]) {
 }
 
 function getParentProductCode(code: string) {
-  return code.split("|")[0]?.trim() || code.trim();
+  return getLegacyArticleParentId(code);
 }
 
 function isChildProduct(product: Product) {

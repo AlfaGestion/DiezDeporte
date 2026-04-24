@@ -109,6 +109,9 @@ async function loadStoredSettingValues() {
 export async function getServerSettings(): Promise<ServerSettings> {
   const storedValues = await loadStoredSettingValues();
   const priceColumn = readSetting(storedValues, "APP_PRICE_COLUMN", "PRECIO1").toUpperCase();
+  const productImageDirectory =
+    readSetting(storedValues, "APP_PRODUCT_IMAGE_DIRECTORY")
+    || readSetting(storedValues, "APP_PRODUCT_IMAGE_UPLOAD_DIRECTORY");
 
   return {
     priceColumn: priceColumns.has(priceColumn) ? priceColumn : "PRECIO1",
@@ -162,10 +165,7 @@ export async function getServerSettings(): Promise<ServerSettings> {
       false,
     ),
     imageBaseUrl: readSetting(storedValues, "NEXT_PUBLIC_PRODUCT_IMAGE_BASE_URL"),
-    productImageDirectory: readSetting(
-      storedValues,
-      "APP_PRODUCT_IMAGE_DIRECTORY",
-    ),
+    productImageDirectory,
     productImageSuffixes: readListSetting(
       storedValues,
       "APP_PRODUCT_IMAGE_SUFFIXES",

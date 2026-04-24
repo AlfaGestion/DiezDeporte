@@ -68,7 +68,15 @@ export function resolveImageUrl(
   if (/^https?:\/\//i.test(imagePath)) {
     return isLegacyOdooImageUrl(imagePath) ? null : imagePath;
   }
-  if (!imageBaseUrl) return null;
+
+  const normalizedFileName = imagePath.replace(/^\/+/, "");
+  if (!imageBaseUrl) {
+    if (/^[^\\/]+$/.test(normalizedFileName)) {
+      return `/api/product-images/${encodeURIComponent(normalizedFileName)}`;
+    }
+
+    return null;
+  }
 
   const base = imageBaseUrl.endsWith("/") ? imageBaseUrl.slice(0, -1) : imageBaseUrl;
   const cleanPath = imagePath.startsWith("/") ? imagePath : `/${imagePath}`;

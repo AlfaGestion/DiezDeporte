@@ -1,6 +1,4 @@
 import "server-only";
-import { existsSync } from "node:fs";
-import path from "node:path";
 import type { ConnectionPool, IResult, Transaction } from "mssql";
 import {
   formatSizeLabel,
@@ -9,6 +7,11 @@ import {
   toNumber,
 } from "@/lib/commerce";
 import { getConnection, sql } from "@/lib/db";
+import {
+  collectDistinctLegacyArticleIds,
+  getLegacyArticleId,
+} from "@/lib/legacy-article-id";
+import { resolveManagedProductImageUrls } from "@/lib/product-image-storage";
 import {
   getProductImageOverridesByProductIds,
   type ProductImageOverride,
@@ -34,12 +37,16 @@ type ProductRecord = {
   IDUNIDAD: string | null;
   IdFamilia: string | null;
   IDTIPO: string | null;
+  IDRUBRO: string | null;
   TalleDefault: string | null;
+  ColorDefault: string | null;
   Presentacion: string | null;
   CUENTAPROVEEDOR: string | null;
   CODIGOBARRA: string | null;
   RutaImagen: string | null;
   URL1: string | null;
+  BrandDescription: string | null;
+  CategoryDescription: string | null;
 };
 
 export type AdminProductImageEntry = {
@@ -71,18 +78,14 @@ function setInput(
   request.input(name, value);
 }
 
-function buildProductImageGallery(productCode: string, settings: ServerSettings) {
-  const imageBaseUrl = settings.imageBaseUrl.trim().replace(/\/+$/, "");
-  const imageDirectory = settings.productImageDirectory.trim();
-  const baseCode = productCode.split("||")[0]?.trim();
+async function buildProductImageGallery(productCode: string, settings: ServerSettings) {
+  const baseCode = productCode.split("||")[0] || productCode;
 
-  if (!imageBaseUrl || !imageDirectory || !baseCode) {
+  if (!baseCode) {
     return [];
   }
 
   const cacheKey = [
-    imageBaseUrl,
-    imageDirectory,
     settings.productImageSuffixes.join(","),
     settings.productImageExtensions.join(","),
     baseCode,
@@ -93,47 +96,24 @@ function buildProductImageGallery(productCode: string, settings: ServerSettings)
     return cached;
   }
 
-  const safeBaseCode = baseCode.replace(/[\\/:*?"<>|]/g, "").trim();
-  if (!safeBaseCode) {
+  try {
+    const urls = await resolveManagedProductImageUrls({
+      productId: baseCode,
+      suffixes: settings.productImageSuffixes,
+      extensions: settings.productImageExtensions,
+    });
+
+    cache.set(cacheKey, urls);
+    return urls;
+  } catch (error) {
+    console.error("[catalog] No se pudo resolver la galeria de imagenes.", error);
     cache.set(cacheKey, []);
     return [];
   }
-
-  const suffixes = settings.productImageSuffixes.length > 0
-    ? settings.productImageSuffixes
-    : ["a"];
-  const extensions = settings.productImageExtensions.length > 0
-    ? settings.productImageExtensions
-    : ["jpg", "jpeg", "png", "webp"];
-  const urls: string[] = [];
-
-  for (const rawSuffix of suffixes) {
-    const suffix = rawSuffix.startsWith("-") ? rawSuffix : `-${rawSuffix}`;
-
-    for (const rawExtension of extensions) {
-      const extension = rawExtension.replace(/^\./, "").trim().toLowerCase();
-      if (!extension) continue;
-
-      const fileName = `${safeBaseCode}${suffix}.${extension}`;
-      const filePath = path.join(
-        /*turbopackIgnore: true*/ imageDirectory,
-        fileName,
-      );
-
-      if (!existsSync(filePath)) {
-        continue;
-      }
-
-      urls.push(`${imageBaseUrl}/${encodeURIComponent(fileName)}`);
-      break;
-    }
-  }
-
-  cache.set(cacheKey, urls);
-  return urls;
 }
 
-function mapBaseProduct(record: ProductRecord, settings: ServerSettings) {
+async function mapBaseProduct(record: ProductRecord, settings: ServerSettings) {
+  const articleId = getLegacyArticleId(record.IDARTICULO);
   const taxRate = toNumber(record.TasaIVA, settings.defaultTaxRate);
   const pricing = getPriceBreakdown(
     toNumber(record.RawPrice),
@@ -147,15 +127,16 @@ function mapBaseProduct(record: ProductRecord, settings: ServerSettings) {
   );
   const imageGalleryUrls = resolvedImageUrl
     ? [resolvedImageUrl]
-    : buildProductImageGallery(record.IDARTICULO?.trim() || "", settings);
+    : await buildProductImageGallery(articleId, settings);
   const primaryImageUrl = imageGalleryUrls[0] || resolvedImageUrl || null;
 
   return {
-    id: record.IDARTICULO.trim(),
-    code: record.IDARTICULO.trim(),
+    id: articleId,
+    code: articleId,
     description: record.DESCRIPCION.trim(),
-    brand: "",
-    category: record.IdFamilia?.trim() || "",
+    brand: record.BrandDescription?.trim() || "",
+    category: record.CategoryDescription?.trim() || "",
+    categoryId: record.IDRUBRO?.trim() || "",
     price: pricing.grossPrice,
     netPrice: pricing.netPrice,
     taxAmount: pricing.taxAmount,
@@ -167,6 +148,7 @@ function mapBaseProduct(record: ProductRecord, settings: ServerSettings) {
     familyId: record.IdFamilia?.trim() || "",
     typeId: record.IDTIPO?.trim() || "",
     defaultSize: formatSizeLabel(record.TalleDefault),
+    defaultColor: record.ColorDefault?.trim() || "",
     presentation: record.Presentacion?.trim() || "",
     supplierAccount: record.CUENTAPROVEEDOR?.trim() || "",
     barcode: record.CODIGOBARRA?.trim() || null,
@@ -193,7 +175,6 @@ function applyProductContentOverride(
     description: override.description || product.description,
     brand: override.brand || product.brand,
     category: override.category || product.category,
-    familyId: override.category || product.familyId,
   };
 
   if (override.price !== null) {
@@ -234,7 +215,9 @@ async function buildAdminProductImageEntries(
   records: ProductRecord[],
   settings: ServerSettings,
 ) {
-  const baseProducts = records.map((record) => mapBaseProduct(record, settings));
+  const baseProducts = await Promise.all(
+    records.map((record) => mapBaseProduct(record, settings)),
+  );
   const [imageOverrides, contentOverrides] = await Promise.all([
     getProductImageOverridesByProductIds(baseProducts.map((product) => product.id)),
     getProductAdminOverridesByProductIds(baseProducts.map((product) => product.id)),
@@ -269,12 +252,12 @@ export async function listProducts() {
   const result = await request.query<ProductRecord>(`
     WITH StockActual AS (
       SELECT
-        LTRIM(RTRIM(IDArticulo)) AS IDArticulo,
+        ISNULL(IDArticulo, '') AS IDArticulo,
         SUM(ISNULL(CantidadUD, 0)) AS StockActual
       FROM dbo.V_MV_Stock WITH (NOLOCK)
       WHERE (Anulado = 0 OR Anulado IS NULL)
         AND (@depositId IS NULL OR LTRIM(RTRIM(ISNULL(IdDeposito, ''))) = @depositId)
-      GROUP BY LTRIM(RTRIM(IDArticulo))
+      GROUP BY ISNULL(IDArticulo, '')
     )
     SELECT TOP (${safeLimit})
       a.IDARTICULO,
@@ -287,15 +270,23 @@ export async function listProducts() {
       a.IDUNIDAD,
       a.IdFamilia,
       a.IDTIPO,
+      a.IDRUBRO,
       a.TalleDefault,
+      a.ColorDefault,
       a.Presentacion,
       a.CUENTAPROVEEDOR,
       a.CODIGOBARRA,
       a.RutaImagen,
-      a.URL1
+      a.URL1,
+      tipo.Descripcion AS BrandDescription,
+      rubro.Descripcion AS CategoryDescription
     FROM dbo.V_MA_ARTICULOS a WITH (NOLOCK)
     LEFT JOIN StockActual s
-      ON s.IDArticulo = LTRIM(RTRIM(a.IDARTICULO))
+      ON s.IDArticulo = ISNULL(a.IDARTICULO, '')
+    LEFT JOIN dbo.V_TA_TipoArticulo tipo WITH (NOLOCK)
+      ON LTRIM(RTRIM(tipo.IdTipo)) = LTRIM(RTRIM(a.IDTIPO))
+    LEFT JOIN dbo.V_TA_Rubros rubro WITH (NOLOCK)
+      ON LTRIM(RTRIM(rubro.IdRubro)) = LTRIM(RTRIM(a.IDRUBRO))
     WHERE ISNULL(a.SUSPENDIDO, 0) = 0
       AND ISNULL(a.SuspendidoV, 0) = 0
     ORDER BY a.DESCRIPCION ASC;
@@ -309,27 +300,28 @@ export async function getProductsByIds(
   productIds: string[],
   executor?: Executor,
 ) {
-  if (productIds.length === 0) return [];
+  const requestedIds = collectDistinctLegacyArticleIds(productIds);
+  if (requestedIds.length === 0) return [];
 
   const settings = await getServerSettings();
   const connection = executor || (await getConnection());
   const request = createRequest(connection);
   setInput(request, "depositId", settings.stockDepositId || null);
 
-  const placeholders = productIds.map((_, index) => `@productId${index}`);
-  productIds.forEach((productId, index) => {
-    setInput(request, `productId${index}`, productId.trim());
+  const placeholders = requestedIds.map((_, index) => `@productId${index}`);
+  requestedIds.forEach((productId, index) => {
+    setInput(request, `productId${index}`, productId);
   });
 
   const result: IResult<ProductRecord> = await request.query(`
     WITH StockActual AS (
       SELECT
-        LTRIM(RTRIM(IDArticulo)) AS IDArticulo,
+        ISNULL(IDArticulo, '') AS IDArticulo,
         SUM(ISNULL(CantidadUD, 0)) AS StockActual
       FROM dbo.V_MV_Stock WITH (NOLOCK)
       WHERE (Anulado = 0 OR Anulado IS NULL)
         AND (@depositId IS NULL OR LTRIM(RTRIM(ISNULL(IdDeposito, ''))) = @depositId)
-      GROUP BY LTRIM(RTRIM(IDArticulo))
+      GROUP BY ISNULL(IDArticulo, '')
     )
     SELECT
       a.IDARTICULO,
@@ -350,8 +342,8 @@ export async function getProductsByIds(
       a.URL1
     FROM dbo.V_MA_ARTICULOS a WITH (NOLOCK)
     LEFT JOIN StockActual s
-      ON s.IDArticulo = LTRIM(RTRIM(a.IDARTICULO))
-    WHERE LTRIM(RTRIM(a.IDARTICULO)) IN (${placeholders.join(", ")})
+      ON s.IDArticulo = ISNULL(a.IDARTICULO, '')
+    WHERE a.IDARTICULO IN (${placeholders.join(", ")})
       AND ISNULL(a.SUSPENDIDO, 0) = 0
       AND ISNULL(a.SuspendidoV, 0) = 0;
   `);
@@ -361,7 +353,8 @@ export async function getProductsByIds(
 }
 
 export async function getAdminProductsByIds(productIds: string[]) {
-  if (productIds.length === 0) {
+  const requestedIds = collectDistinctLegacyArticleIds(productIds);
+  if (requestedIds.length === 0) {
     return [];
   }
 
@@ -369,26 +362,22 @@ export async function getAdminProductsByIds(productIds: string[]) {
   const pool = await getConnection();
   const request = createRequest(pool);
 
-  const normalizedIds = Array.from(
-    new Set(productIds.map((productId) => productId.trim()).filter(Boolean)),
-  );
-
-  normalizedIds.forEach((productId, index) => {
+  requestedIds.forEach((productId, index) => {
     setInput(request, `productId${index}`, productId);
   });
 
   setInput(request, "depositId", settings.stockDepositId || null);
 
-  const placeholders = normalizedIds.map((_, index) => `@productId${index}`);
+  const placeholders = requestedIds.map((_, index) => `@productId${index}`);
   const result: IResult<ProductRecord> = await request.query(`
     WITH StockActual AS (
       SELECT
-        LTRIM(RTRIM(IDArticulo)) AS IDArticulo,
+        ISNULL(IDArticulo, '') AS IDArticulo,
         SUM(ISNULL(CantidadUD, 0)) AS StockActual
       FROM dbo.V_MV_Stock WITH (NOLOCK)
       WHERE (Anulado = 0 OR Anulado IS NULL)
         AND (@depositId IS NULL OR LTRIM(RTRIM(ISNULL(IdDeposito, ''))) = @depositId)
-      GROUP BY LTRIM(RTRIM(IDArticulo))
+      GROUP BY ISNULL(IDArticulo, '')
     )
     SELECT
       a.IDARTICULO,
@@ -401,16 +390,24 @@ export async function getAdminProductsByIds(productIds: string[]) {
       a.IDUNIDAD,
       a.IdFamilia,
       a.IDTIPO,
+      a.IDRUBRO,
       a.TalleDefault,
+      a.ColorDefault,
       a.Presentacion,
       a.CUENTAPROVEEDOR,
       a.CODIGOBARRA,
       a.RutaImagen,
-      a.URL1
+      a.URL1,
+      tipo.Descripcion AS BrandDescription,
+      rubro.Descripcion AS CategoryDescription
     FROM dbo.V_MA_ARTICULOS a WITH (NOLOCK)
     LEFT JOIN StockActual s
-      ON s.IDArticulo = LTRIM(RTRIM(a.IDARTICULO))
-    WHERE LTRIM(RTRIM(a.IDARTICULO)) IN (${placeholders.join(", ")})
+      ON s.IDArticulo = ISNULL(a.IDARTICULO, '')
+    LEFT JOIN dbo.V_TA_TipoArticulo tipo WITH (NOLOCK)
+      ON LTRIM(RTRIM(tipo.IdTipo)) = LTRIM(RTRIM(a.IDTIPO))
+    LEFT JOIN dbo.V_TA_Rubros rubro WITH (NOLOCK)
+      ON LTRIM(RTRIM(rubro.IdRubro)) = LTRIM(RTRIM(a.IDRUBRO))
+    WHERE a.IDARTICULO IN (${placeholders.join(", ")})
       AND ISNULL(a.SUSPENDIDO, 0) = 0
       AND ISNULL(a.SuspendidoV, 0) = 0;
   `);
@@ -438,12 +435,12 @@ export async function searchProductsForAdmin(
   const result: IResult<ProductRecord> = await request.query(`
     WITH StockActual AS (
       SELECT
-        LTRIM(RTRIM(IDArticulo)) AS IDArticulo,
+        ISNULL(IDArticulo, '') AS IDArticulo,
         SUM(ISNULL(CantidadUD, 0)) AS StockActual
       FROM dbo.V_MV_Stock WITH (NOLOCK)
       WHERE (Anulado = 0 OR Anulado IS NULL)
         AND (@depositId IS NULL OR LTRIM(RTRIM(ISNULL(IdDeposito, ''))) = @depositId)
-      GROUP BY LTRIM(RTRIM(IDArticulo))
+      GROUP BY ISNULL(IDArticulo, '')
     )
     SELECT TOP (${safeLimit})
       a.IDARTICULO,
@@ -456,27 +453,35 @@ export async function searchProductsForAdmin(
       a.IDUNIDAD,
       a.IdFamilia,
       a.IDTIPO,
+      a.IDRUBRO,
       a.TalleDefault,
+      a.ColorDefault,
       a.Presentacion,
       a.CUENTAPROVEEDOR,
       a.CODIGOBARRA,
       a.RutaImagen,
-      a.URL1
+      a.URL1,
+      tipo.Descripcion AS BrandDescription,
+      rubro.Descripcion AS CategoryDescription
     FROM dbo.V_MA_ARTICULOS a WITH (NOLOCK)
     LEFT JOIN StockActual s
-      ON s.IDArticulo = LTRIM(RTRIM(a.IDARTICULO))
+      ON s.IDArticulo = ISNULL(a.IDARTICULO, '')
+    LEFT JOIN dbo.V_TA_TipoArticulo tipo WITH (NOLOCK)
+      ON LTRIM(RTRIM(tipo.IdTipo)) = LTRIM(RTRIM(a.IDTIPO))
+    LEFT JOIN dbo.V_TA_Rubros rubro WITH (NOLOCK)
+      ON LTRIM(RTRIM(rubro.IdRubro)) = LTRIM(RTRIM(a.IDRUBRO))
     WHERE ISNULL(a.SUSPENDIDO, 0) = 0
       AND ISNULL(a.SuspendidoV, 0) = 0
       AND (
         @search = ''
-        OR LTRIM(RTRIM(a.IDARTICULO)) LIKE @searchLike
+        OR a.IDARTICULO LIKE @searchLike
         OR a.DESCRIPCION LIKE @searchLike
         OR ISNULL(a.CODIGOBARRA, '') LIKE @searchLike
       )
     ORDER BY
       CASE
-        WHEN @search <> '' AND LTRIM(RTRIM(a.IDARTICULO)) = @search THEN 0
-        WHEN @search <> '' AND LTRIM(RTRIM(a.IDARTICULO)) LIKE @searchPrefix THEN 1
+        WHEN @search <> '' AND a.IDARTICULO = @search THEN 0
+        WHEN @search <> '' AND a.IDARTICULO LIKE @searchLike THEN 1
         WHEN @search <> '' AND a.DESCRIPCION LIKE @searchPrefix THEN 2
         ELSE 3
       END,

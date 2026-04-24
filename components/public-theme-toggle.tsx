@@ -9,26 +9,30 @@ type ThemeMode = "light" | "dark";
 
 export function PublicThemeToggle() {
   const [theme, setTheme] = useState<ThemeMode>("light");
+  const [themeReady, setThemeReady] = useState(false);
 
   useEffect(() => {
     const savedTheme = window.localStorage.getItem(LOCAL_STORAGE_THEME_KEY);
     if (savedTheme === "light" || savedTheme === "dark") {
       setTheme(savedTheme);
-      return;
-    }
-
-    if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+    } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
       setTheme("dark");
     }
+
+    setThemeReady(true);
   }, []);
 
   useEffect(() => {
+    if (!themeReady) {
+      return;
+    }
+
     document.documentElement.dataset.theme = theme;
     document.documentElement.style.colorScheme = theme;
     document.body.dataset.theme = theme;
     document.body.style.colorScheme = theme;
     window.localStorage.setItem(LOCAL_STORAGE_THEME_KEY, theme);
-  }, [theme]);
+  }, [theme, themeReady]);
 
   return (
     <button

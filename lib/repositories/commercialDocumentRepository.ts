@@ -194,7 +194,7 @@ async function createLine(
 ) {
   const request = new sql.Request(transaction);
   request.input("pIdCpte", sql.Int, input.headerId);
-  request.input("pIdArticulo", sql.NVarChar(25), input.line.articleId.trim());
+  request.input("pIdArticulo", sql.NVarChar(25), input.line.articleId);
   request.input("pCantidad", sql.Float, input.line.quantity);
   request.input("pImporteUnitario", sql.Money, input.line.unitPrice);
   request.input("pPorcDescuento", sql.Float, 0);

@@ -1,5 +1,9 @@
 import "server-only";
 import { getConnection } from "@/lib/db";
+import {
+  collectDistinctLegacyArticleIds,
+  getLegacyArticleId,
+} from "@/lib/legacy-article-id";
 
 const PRODUCT_OVERRIDES_TABLE = "dbo.WEB_MA_ARTICULOS_OVERRIDES";
 const PRODUCT_OVERRIDES_SCHEMA_VERSION = 1;
@@ -33,7 +37,7 @@ export type ProductAdminOverride = {
 };
 
 function normalizeProductId(value: string) {
-  return value.trim();
+  return getLegacyArticleId(value);
 }
 
 function toIsoString(value: Date | null) {
@@ -163,8 +167,8 @@ export async function ensureProductOverrideSchemaReady() {
 }
 
 export async function getProductAdminOverridesByProductIds(productIds: string[]) {
-  const normalizedIds = Array.from(
-    new Set(productIds.map((productId) => normalizeProductId(productId)).filter(Boolean)),
+  const normalizedIds = collectDistinctLegacyArticleIds(
+    productIds.map((productId) => normalizeProductId(productId)),
   );
 
   if (normalizedIds.length === 0) {
@@ -183,7 +187,7 @@ export async function getProductAdminOverridesByProductIds(productIds: string[])
     IF OBJECT_ID('${PRODUCT_OVERRIDES_TABLE}', 'U') IS NOT NULL
     BEGIN
       SELECT
-        LTRIM(RTRIM(IDARTICULO)) AS IDARTICULO,
+        IDARTICULO,
         DESCRIPCION_OVERRIDE,
         CAST(PRECIO_OVERRIDE AS float) AS PRECIO_OVERRIDE,
         MARCA_OVERRIDE,
@@ -192,7 +196,7 @@ export async function getProductAdminOverridesByProductIds(productIds: string[])
         FECHA_CREACION,
         FECHA_ACTUALIZACION
       FROM ${PRODUCT_OVERRIDES_TABLE} WITH (NOLOCK)
-      WHERE LTRIM(RTRIM(IDARTICULO)) IN (${placeholders});
+      WHERE IDARTICULO IN (${placeholders});
     END
     ELSE
     BEGIN
@@ -251,7 +255,7 @@ export async function saveProductAdminOverride(input: {
   if (!description && price === null && !brand && !category) {
     await request.query(`
       DELETE FROM ${PRODUCT_OVERRIDES_TABLE}
-      WHERE LTRIM(RTRIM(IDARTICULO)) = @productId;
+      WHERE IDARTICULO = @productId;
     `);
 
     return null;
@@ -261,7 +265,7 @@ export async function saveProductAdminOverride(input: {
     IF EXISTS (
       SELECT 1
       FROM ${PRODUCT_OVERRIDES_TABLE}
-      WHERE LTRIM(RTRIM(IDARTICULO)) = @productId
+      WHERE IDARTICULO = @productId
     )
     BEGIN
       UPDATE ${PRODUCT_OVERRIDES_TABLE}
@@ -272,7 +276,7 @@ export async function saveProductAdminOverride(input: {
         CATEGORIA_OVERRIDE = @category,
         ACTUALIZADO_POR = @updatedBy,
         FECHA_ACTUALIZACION = SYSDATETIME()
-      WHERE LTRIM(RTRIM(IDARTICULO)) = @productId;
+      WHERE IDARTICULO = @productId;
     END
     ELSE
     BEGIN

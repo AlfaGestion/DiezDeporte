@@ -4,6 +4,7 @@ import {
   normalizeOrderType,
   OrderValidationError,
 } from "@/lib/models/order";
+import { getLegacyArticleId } from "@/lib/legacy-article-id";
 import { getServerSettings } from "@/lib/store-config";
 import type { CheckoutCustomer, CreateOrderPayload } from "@/lib/types";
 import type { CreateOrderInput, OrderItem } from "@/lib/types/order";
@@ -74,7 +75,7 @@ function normalizeCheckoutItems(
   const aggregated = new Map<string, NormalizedCheckoutItem>();
 
   for (const item of items) {
-    const productId = trimValue(item.productId);
+    const productId = getLegacyArticleId(item.productId);
     const quantity = Math.max(0, Math.trunc(Number(item.quantity) || 0));
 
     if (!productId || quantity <= 0) {
@@ -162,7 +163,7 @@ export async function buildCheckoutOrderDraft(
   const products = await getProductsByIds(
     requestedItems.map((item) => item.productId),
   );
-  const productMap = new Map(products.map((product) => [product.id.trim(), product]));
+  const productMap = new Map(products.map((product) => [product.id, product]));
 
   const snapshotItems: OrderItem[] = requestedItems.map((item) => {
     const product = productMap.get(item.productId);

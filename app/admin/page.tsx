@@ -1,4 +1,3 @@
-import { Fragment } from "react";
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -13,6 +12,7 @@ import { AdminHelpWorkspace } from "@/components/admin/admin-help-workspace";
 import { AdminPageHeader } from "@/components/admin/admin-page-header";
 import { AdminConfigWorkspace } from "@/components/admin/admin-config-workspace";
 import { AdminLiveOrderWatcher } from "@/components/admin/admin-live-order-watcher";
+import { AdminArticleListGallery } from "@/components/admin/admin-article-list-gallery";
 import { AdminSystemArticleImageEditorFrame } from "@/components/admin/admin-system-article-image-editor-frame";
 import { AdminThemeToggle } from "@/components/admin-theme-toggle";
 import { cn } from "@/components/admin/admin-ui";
@@ -26,6 +26,10 @@ import {
   searchProductsForAdmin,
   type AdminProductImageEntry,
 } from "@/lib/catalog";
+import {
+  listAdminArticleBrandOptions,
+  listAdminArticleCategoryOptions,
+} from "@/lib/admin-product-editor";
 import { ensureProductImageStorageReady } from "@/lib/product-image-storage";
 import {
   ADMIN_SYSTEM_SECTIONS,
@@ -55,6 +59,7 @@ import {
   normalizeAdminOrderView,
 } from "@/lib/order-admin";
 import { getAdminOrderStateCssVariables } from "@/lib/order-state-config";
+import { getLegacyArticleParentId } from "@/lib/legacy-article-id";
 import { normalizeOrderFilters } from "@/lib/models/order";
 import { getOrders } from "@/lib/services/orderService";
 import { getPublicStoreSettings, getServerSettings } from "@/lib/store-config";
@@ -122,6 +127,9 @@ const ADMIN_APPAREL_SIZE_ORDER = [
   "xxl",
   "xxxl",
 ];
+const ADMIN_INTEGER_FORMATTER = new Intl.NumberFormat("es-AR", {
+  maximumFractionDigits: 0,
+});
 
 type AdminHrefInput = {
   view?: AdminView;
@@ -207,7 +215,7 @@ function normalizeAdminText(value: string | null | undefined) {
 }
 
 function getAdminParentProductCode(code: string) {
-  return code.split("|")[0]?.trim() || code.trim();
+  return getLegacyArticleParentId(code);
 }
 
 function isAdminChildProductCode(code: string) {
@@ -298,6 +306,10 @@ function extractAdminVariantColor(params: {
   parentDescription: string;
 }) {
   const { childEntry, parentDescription } = params;
+  if (childEntry.product.defaultColor) {
+    return childEntry.product.defaultColor;
+  }
+
   let remainder = normalizeAdminText(childEntry.product.description);
   const normalizedParentDescription = normalizeAdminText(parentDescription);
 
@@ -412,6 +424,438 @@ function buildAdminProductImageGroups(entries: AdminProductImageEntry[]) {
       } satisfies AdminProductImageGroup;
     })
     .sort((left, right) => left.firstIndex - right.firstIndex);
+}
+
+function getAdminArticleGallery(product: AdminProductImageEntry["product"]) {
+  const gallery = product.imageGalleryUrls.length
+    ? product.imageGalleryUrls
+    : product.imageUrl
+      ? [product.imageUrl]
+      : [];
+
+  return Array.from(new Set(gallery.filter(Boolean)));
+}
+
+function formatAdminInteger(value: number) {
+  return ADMIN_INTEGER_FORMATTER.format(value);
+}
+
+function summarizeAdminLabels(labels: string[], limit = 4) {
+  if (labels.length === 0) {
+    return "Sin dato";
+  }
+
+  if (labels.length <= limit) {
+    return labels.join(", ");
+  }
+
+  return `${labels.slice(0, limit).join(", ")} +${labels.length - limit}`;
+}
+
+function getAdminArticleBadgeToneClasses(
+  tone: "neutral" | "accent" | "warning" | "success" | "danger",
+) {
+  switch (tone) {
+    case "accent":
+      return "border-[color:var(--admin-accent)]/20 bg-[color:var(--admin-accent-soft)] text-[color:var(--admin-accent-strong)]";
+    case "warning":
+      return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-400/20 dark:bg-amber-500/10 dark:text-amber-200";
+    case "success":
+      return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/20 dark:bg-emerald-500/10 dark:text-emerald-200";
+    case "danger":
+      return "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-400/20 dark:bg-rose-500/10 dark:text-rose-200";
+    default:
+      return "border-[color:var(--admin-card-line)] bg-[color:var(--admin-pane-bg)] text-[color:var(--admin-title)]";
+  }
+}
+
+function getAdminArticleStockTone(stock: number) {
+  if (stock <= 0) {
+    return "danger" as const;
+  }
+
+  if (stock < 5) {
+    return "warning" as const;
+  }
+
+  return "success" as const;
+}
+
+function getAdminArticleStockLabel(stock: number) {
+  if (stock <= 0) {
+    return "Sin stock";
+  }
+
+  if (stock < 5) {
+    return "Stock bajo";
+  }
+
+  return "Disponible";
+}
+
+function getAdminArticleImageSummary(entry: AdminProductImageEntry) {
+  const imageCount = getAdminArticleGallery(entry.product).length;
+
+  if (imageCount === 0) {
+    return {
+      label: "Sin imagen",
+      note: "Pendiente de carga en el sistema.",
+      tone: "neutral" as const,
+    };
+  }
+
+  if (entry.product.imageMode === "illustrative") {
+    return {
+      label: `Ilustrativa · ${imageCount}`,
+      note: entry.product.imageNote || "Se esta usando una imagen ilustrativa.",
+      tone: "warning" as const,
+    };
+  }
+
+  return {
+    label: `${imageCount} imagen${imageCount === 1 ? "" : "es"}`,
+    note: entry.imageOverride
+      ? "Personalizada desde el admin."
+      : "Imagen del sistema.",
+    tone: entry.imageOverride ? ("accent" as const) : ("neutral" as const),
+  };
+}
+
+function getAdminGroupDisplayEntries(group: AdminProductImageGroup) {
+  const primaryEntry = group.parentEntry || group.displayEntry;
+  const secondaryEntries = group.parentEntry
+    ? group.children
+    : group.children.filter((child) => child.product.id !== primaryEntry.product.id);
+
+  return {
+    primaryEntry,
+    secondaryEntries,
+    allEntries: [primaryEntry, ...secondaryEntries],
+  };
+}
+
+function AdminArticleListCard(props: {
+  group: AdminProductImageGroup;
+  activeSection: AdminSystemSection;
+  productSearchQuery: string;
+  isSelectedGroup: boolean;
+  selectedProductId: string | null;
+}) {
+  const { group, activeSection, productSearchQuery, isSelectedGroup, selectedProductId } = props;
+  const { primaryEntry, secondaryEntries } = getAdminGroupDisplayEntries(group);
+  const imageGallery = getAdminArticleGallery(primaryEntry.product);
+  const imageSummary = getAdminArticleImageSummary(primaryEntry);
+  const stockTone = getAdminArticleStockTone(group.groupStock);
+  const editHref = buildAdminHref({
+    view: "system",
+    system: activeSection,
+    system_q: productSearchQuery,
+    system_article: primaryEntry.product.id,
+  });
+  const isPrimarySelected = selectedProductId === primaryEntry.product.id;
+
+  return (
+    <article
+      className={cn(
+        "overflow-hidden rounded-[24px] border transition",
+        isSelectedGroup
+          ? "border-[color:var(--admin-accent)]/35 bg-[color:var(--admin-pane-bg)] shadow-[0_20px_44px_rgba(13,109,216,0.12)]"
+          : "border-[color:var(--admin-card-line)] bg-[color:var(--admin-card-bg)] shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]",
+      )}
+    >
+      <div className="grid gap-4 p-4 xl:grid-cols-[220px_minmax(0,1fr)_220px] xl:p-5">
+        <div className="space-y-3">
+          <AdminArticleListGallery
+            description={primaryEntry.product.description}
+            code={primaryEntry.product.code}
+            images={imageGallery}
+          />
+          <div className="rounded-[18px] border border-[color:var(--admin-card-line)] bg-[color:var(--admin-pane-bg)] px-4 py-3">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--admin-text)]">
+              Codigo
+            </div>
+            <div className="mt-1 break-all text-sm font-semibold text-[color:var(--admin-title)]">
+              {primaryEntry.product.code}
+            </div>
+          </div>
+        </div>
+
+        <div className="min-w-0 space-y-4">
+          <div className="flex flex-wrap gap-2">
+            <span
+              className={cn(
+                "inline-flex min-h-8 items-center rounded-full border px-3 py-1 text-xs font-semibold",
+                isPrimarySelected
+                  ? getAdminArticleBadgeToneClasses("accent")
+                  : getAdminArticleBadgeToneClasses("neutral"),
+              )}
+            >
+              {isPrimarySelected ? "En edicion" : group.parentEntry ? "Articulo base" : "Articulo"}
+            </span>
+            <span
+              className={cn(
+                "inline-flex min-h-8 items-center rounded-full border px-3 py-1 text-xs font-semibold",
+                getAdminArticleBadgeToneClasses(imageSummary.tone),
+              )}
+            >
+              {imageSummary.label}
+            </span>
+            <span
+              className={cn(
+                "inline-flex min-h-8 items-center rounded-full border px-3 py-1 text-xs font-semibold",
+                group.children.length > 0
+                  ? getAdminArticleBadgeToneClasses("accent")
+                  : getAdminArticleBadgeToneClasses("neutral"),
+              )}
+            >
+              {group.children.length > 0
+                ? `${group.children.length} variante${group.children.length === 1 ? "" : "s"}`
+                : "Sin variantes"}
+            </span>
+          </div>
+
+          <div className="space-y-1">
+            <h4 className="text-lg font-semibold leading-tight text-[color:var(--admin-title)]">
+              {primaryEntry.product.description}
+            </h4>
+            <p className="text-sm text-[color:var(--admin-text)]">
+              {group.parentEntry
+                ? "Este articulo tiene su propia galeria y abajo se muestran los hijos por separado."
+                : "Articulo simple o variante unica con galeria propia."}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {primaryEntry.product.brand ? (
+              <span className="admin-inline-badge">
+                Marca: {primaryEntry.product.brand}
+              </span>
+            ) : null}
+            {primaryEntry.product.category ? (
+              <span className="admin-inline-badge">
+                Categoria: {primaryEntry.product.category}
+              </span>
+            ) : null}
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="rounded-[18px] border border-[color:var(--admin-card-line)] bg-[color:var(--admin-pane-bg)] px-4 py-4">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--admin-text)]">
+                Precio
+              </span>
+              <strong className="mt-2 block text-base text-[color:var(--admin-title)]">
+                {formatCurrency(primaryEntry.product.price)}
+              </strong>
+              <small className="mt-1 block text-xs text-[color:var(--admin-text)]">
+                {group.children.length > 0 ? "Precio principal del grupo." : "Precio visible en catalogo."}
+              </small>
+            </div>
+
+            <div className="rounded-[18px] border border-[color:var(--admin-card-line)] bg-[color:var(--admin-pane-bg)] px-4 py-4">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--admin-text)]">
+                Stock
+              </span>
+              <strong className="mt-2 block text-base text-[color:var(--admin-title)]">
+                {formatAdminInteger(group.groupStock)}
+              </strong>
+              <small
+                className={cn(
+                  "mt-1 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold",
+                  getAdminArticleBadgeToneClasses(stockTone),
+                )}
+              >
+                {getAdminArticleStockLabel(group.groupStock)}
+              </small>
+            </div>
+
+            <div className="rounded-[18px] border border-[color:var(--admin-card-line)] bg-[color:var(--admin-pane-bg)] px-4 py-4">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--admin-text)]">
+                Imagenes
+              </span>
+              <strong className="mt-2 block text-base text-[color:var(--admin-title)]">
+                {formatAdminInteger(imageGallery.length)}
+              </strong>
+              <small className="mt-1 block text-xs leading-5 text-[color:var(--admin-text)]">
+                {imageSummary.note}
+              </small>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-3">
+          <div className="rounded-[18px] border border-[color:var(--admin-card-line)] bg-[color:var(--admin-pane-bg)] px-4 py-4">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--admin-text)]">
+              Datos rapidos
+            </div>
+            <div className="mt-3 grid gap-3 text-sm">
+              <div>
+                <div className="text-[color:var(--admin-text)]">ID heredado</div>
+                <div className="mt-1 break-all font-semibold text-[color:var(--admin-title)]">
+                  {primaryEntry.product.id}
+                </div>
+              </div>
+              <div>
+                <div className="text-[color:var(--admin-text)]">Colores</div>
+                <div className="mt-1 font-semibold text-[color:var(--admin-title)]">
+                  {summarizeAdminLabels(group.colorLabels)}
+                </div>
+              </div>
+              <div>
+                <div className="text-[color:var(--admin-text)]">Talles</div>
+                <div className="mt-1 font-semibold text-[color:var(--admin-title)]">
+                  {summarizeAdminLabels(group.sizeLabels)}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <Link
+            href={editHref}
+            scroll={false}
+            className="inline-flex h-11 items-center justify-center rounded-[16px] bg-[color:var(--admin-accent)] px-4 text-sm font-semibold text-white shadow-[0_14px_28px_rgba(13,109,216,0.2)] transition hover:-translate-y-px hover:bg-[color:var(--admin-accent-strong)]"
+          >
+            {isPrimarySelected ? "Seguir editando" : "Editar articulo"}
+          </Link>
+        </div>
+      </div>
+
+      {secondaryEntries.length > 0 ? (
+        <details
+          className="border-t border-dashed border-[color:var(--admin-card-line)] px-4 pb-4 pt-4 xl:px-5 xl:pb-5"
+          open={isSelectedGroup}
+        >
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-[color:var(--admin-title)] [&::-webkit-details-marker]:hidden">
+            <span>{group.parentEntry ? "Ver articulos hijos" : "Ver articulos relacionados"}</span>
+            <span className="text-xs font-medium text-[color:var(--admin-text)]">
+              {secondaryEntries.length} articulo{secondaryEntries.length === 1 ? "" : "s"}
+            </span>
+          </summary>
+
+          <div className="mt-4 flex flex-wrap gap-2 text-xs text-[color:var(--admin-text)]">
+            <span className="admin-inline-badge">
+              Colores: {summarizeAdminLabels(group.colorLabels)}
+            </span>
+            <span className="admin-inline-badge">
+              Talles: {summarizeAdminLabels(group.sizeLabels)}
+            </span>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+            {secondaryEntries.map((child) => {
+              const childImageGallery = getAdminArticleGallery(child.product);
+              const childImageSummary = getAdminArticleImageSummary(child);
+              const childEditHref = buildAdminHref({
+                view: "system",
+                system: activeSection,
+                system_q: productSearchQuery,
+                system_article: child.product.id,
+              });
+              const isChildSelected = selectedProductId === child.product.id;
+
+              return (
+                <article
+                  key={child.product.id}
+                  className={cn(
+                    "rounded-[18px] border px-4 py-4 transition",
+                    isChildSelected
+                      ? "border-[color:var(--admin-accent)]/35 bg-[color:var(--admin-pane-bg)] shadow-[0_14px_28px_rgba(13,109,216,0.12)]"
+                      : "border-[color:var(--admin-card-line)] bg-[color:var(--admin-card-bg)]",
+                  )}
+                >
+                  <div className="space-y-4">
+                    <AdminArticleListGallery
+                      description={child.product.description}
+                      code={child.product.code}
+                      images={childImageGallery}
+                    />
+
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap gap-2">
+                          <span
+                            className={cn(
+                              "inline-flex min-h-8 items-center rounded-full border px-3 py-1 text-xs font-semibold",
+                              isChildSelected
+                                ? getAdminArticleBadgeToneClasses("accent")
+                                : getAdminArticleBadgeToneClasses("neutral"),
+                            )}
+                          >
+                            {isChildSelected ? "En edicion" : "Hijo"}
+                          </span>
+                          <span
+                            className={cn(
+                              "inline-flex min-h-8 items-center rounded-full border px-3 py-1 text-xs font-semibold",
+                              getAdminArticleBadgeToneClasses(childImageSummary.tone),
+                            )}
+                          >
+                            {childImageSummary.label}
+                          </span>
+                        </div>
+
+                        <strong className="mt-3 block text-sm text-[color:var(--admin-title)]">
+                          {child.product.description}
+                        </strong>
+                        <p className="mt-1 text-xs text-[color:var(--admin-text)]">
+                          {getAdminVariantLabel(child.product)}
+                          {" · "}
+                          {extractAdminVariantColor({
+                            childEntry: child,
+                            parentDescription: group.displayEntry.product.description,
+                          }) || "Sin color detectado"}
+                        </p>
+                      </div>
+                      <span
+                        className={cn(
+                          "inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold",
+                          getAdminArticleBadgeToneClasses(
+                            getAdminArticleStockTone(child.product.stock),
+                          ),
+                        )}
+                      >
+                        Stock {formatAdminInteger(child.product.stock)}
+                      </span>
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="rounded-[16px] border border-[color:var(--admin-card-line)] bg-[color:var(--admin-pane-bg)] px-3 py-3">
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--admin-text)]">
+                          Codigo
+                        </div>
+                        <div className="mt-1 break-all text-sm font-semibold text-[color:var(--admin-title)]">
+                          {child.product.code}
+                        </div>
+                      </div>
+                      <div className="rounded-[16px] border border-[color:var(--admin-card-line)] bg-[color:var(--admin-pane-bg)] px-3 py-3">
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--admin-text)]">
+                          Precio
+                        </div>
+                        <div className="mt-1 text-sm font-semibold text-[color:var(--admin-title)]">
+                          {formatCurrency(child.baseProduct.price)}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-xs text-[color:var(--admin-text)]">
+                        {childImageSummary.note}
+                      </div>
+                      <Link
+                        href={childEditHref}
+                        scroll={false}
+                        className="inline-flex h-10 items-center justify-center rounded-[14px] bg-[color:var(--admin-accent)] px-4 text-sm font-semibold text-white transition hover:-translate-y-px hover:bg-[color:var(--admin-accent-strong)]"
+                      >
+                        {isChildSelected ? "Seguir editando" : "Editar hijo"}
+                      </Link>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </details>
+      ) : null}
+    </article>
+  );
 }
 
 function buildAdminHref(input: AdminHrefInput) {
@@ -699,7 +1143,7 @@ function FlashMessages({
   if (error === "product-invalid") {
     return renderBanner(
       "error",
-      "Revisa descripcion, precio, marca y categoria. El precio debe ser mayor a cero.",
+      "Revisa descripcion, precio, marca, categoria y variantes. Los precios deben ser mayores a cero.",
     );
   }
 
@@ -732,7 +1176,7 @@ async function loadAdminProductsPaneData(
   selectedProductId: string | undefined,
 ) {
   const normalizedSearchQuery = (productSearchQuery || "").trim();
-  const normalizedSelectedProductId = (selectedProductId || "").trim();
+  const normalizedSelectedProductId = selectedProductId || "";
 
   try {
     await ensureProductImageSchemaReady();
@@ -783,14 +1227,8 @@ async function loadAdminProductsPaneData(
         [...initialResults, ...supplementalResults].map((entry) => [entry.product.id, entry]),
       ).values(),
     );
-    let selectedProduct =
+    const selectedProduct =
       searchResults.find((entry) => entry.product.id === normalizedSelectedProductId) || null;
-
-    if (selectedProduct && isAdminChildProductCode(selectedProduct.product.code)) {
-      const parentCode = getAdminParentProductCode(selectedProduct.product.code);
-      selectedProduct =
-        searchResults.find((entry) => entry.product.id === parentCode) || selectedProduct;
-    }
 
     return {
       searchResults,
@@ -815,6 +1253,8 @@ function SystemPane(props: {
   searchResults: AdminProductImageEntry[];
   selectedProduct: AdminProductImageEntry | null;
   loadError: string | null;
+  brandOptions: Awaited<ReturnType<typeof listAdminArticleBrandOptions>>;
+  categoryOptions: Awaited<ReturnType<typeof listAdminArticleCategoryOptions>>;
 }) {
   const {
     activeSection,
@@ -822,28 +1262,41 @@ function SystemPane(props: {
     searchResults,
     selectedProduct,
     loadError,
+    brandOptions,
+    categoryOptions,
   } = props;
   const productGroups = buildAdminProductImageGroups(searchResults);
+  const visibleArticleCount = productGroups.reduce(
+    (sum, group) => sum + getAdminGroupDisplayEntries(group).allEntries.length,
+    0,
+  );
   const selectedGroup =
     selectedProduct
       ? productGroups.find(
-          (group) =>
-            group.editEntry.product.id === selectedProduct.product.id ||
-            group.parentCode === getAdminParentProductCode(selectedProduct.product.code),
+          (group) => group.members.some((entry) => entry.product.id === selectedProduct.product.id),
         ) || null
       : null;
+  const selectedEntry =
+    selectedProduct && selectedGroup
+      ? selectedGroup.members.find((entry) => entry.product.id === selectedProduct.product.id)
+        || selectedProduct
+      : selectedProduct;
+  const shouldShowLinkedVariants =
+    Boolean(selectedGroup?.parentEntry)
+    && Boolean(selectedEntry)
+    && selectedGroup?.parentEntry?.product.id === selectedEntry?.product.id;
 
   const editorCloseHref = buildAdminHref({
     view: "system",
     system: activeSection,
     system_q: productSearchQuery,
   });
-  const editorReturnTo = selectedGroup
+  const editorReturnTo = selectedEntry
     ? buildAdminHref({
         view: "system",
         system: activeSection,
         system_q: productSearchQuery,
-        system_article: selectedGroup.editEntry.product.id,
+        system_article: selectedEntry.product.id,
       })
     : editorCloseHref;
 
@@ -884,7 +1337,7 @@ function SystemPane(props: {
           title={getAdminSystemSectionLabel(activeSection)}
           subtitle="Busca un articulo y edita descripcion, precio, marca, categoria e imagenes desde un solo panel."
           searchDefaultValue={productSearchQuery}
-          resultCount={productGroups.length}
+          resultCount={visibleArticleCount}
           searchName="system_q"
           searchPlaceholder="Buscar por codigo, descripcion o EAN"
           eyebrow="Sistema"
@@ -902,10 +1355,18 @@ function SystemPane(props: {
         productSearchQuery={productSearchQuery}
         closeHref={editorCloseHref}
         returnTo={editorReturnTo}
-        entry={selectedGroup?.editEntry || null}
-        publishedProduct={selectedGroup?.imageEntry.product || null}
+        entry={selectedEntry || null}
+        publishedProduct={selectedEntry?.product || null}
+        brandOptions={brandOptions.map((option) => ({
+          id: option.id,
+          label: option.label,
+        }))}
+        categoryOptions={categoryOptions.map((option) => ({
+          id: option.id,
+          label: option.label,
+        }))}
         variantSummary={
-          selectedGroup
+          selectedGroup && shouldShowLinkedVariants
             ? {
                 parentCode: selectedGroup.parentCode,
                 hasRealParent: Boolean(selectedGroup.parentEntry),
@@ -917,12 +1378,13 @@ function SystemPane(props: {
                   id: child.product.id,
                   code: child.product.code,
                   description: child.product.description,
-                  sizeLabel: getAdminVariantLabel(child.product),
+                  sizeLabel: child.baseProduct.defaultSize || getAdminVariantLabel(child.product),
                   colorLabel:
-                    extractAdminVariantColor({
+                    child.baseProduct.defaultColor || extractAdminVariantColor({
                       childEntry: child,
                       parentDescription: selectedGroup.displayEntry.product.description,
                     }) || "Sin dato",
+                  price: child.baseProduct.price,
                   stock: child.product.stock,
                 })),
               }
@@ -936,6 +1398,11 @@ function SystemPane(props: {
             <span className="admin-pane-kicker">Listado</span>
             <h3>Resultados del catalogo</h3>
           </div>
+          {visibleArticleCount > 0 ? (
+            <div className="text-sm text-[color:var(--admin-text)]">
+              {visibleArticleCount} articulo{visibleArticleCount === 1 ? "" : "s"} visible{visibleArticleCount === 1 ? "" : "s"}
+            </div>
+          ) : null}
         </div>
 
         {productGroups.length === 0 ? (
@@ -949,120 +1416,64 @@ function SystemPane(props: {
             compact
           />
         ) : (
-          <div className="admin-table-wrap">
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Articulo</th>
-                  <th>Imagen</th>
-                  <th>Precio</th>
-                  <th>Stock</th>
-                  <th>Accion</th>
-                </tr>
-              </thead>
-              <tbody>
-                {productGroups.map((group) => (
-                  <Fragment key={group.parentCode}>
-                    <tr key={group.parentCode}>
-                      <td>
-                        <strong>{group.displayEntry.product.description}</strong>
-                        <small>Cod. {group.editEntry.product.code}</small>
-                        {group.children.length > 0 ? (
-                          <small>
-                            {group.children.length} variante{group.children.length === 1 ? "" : "s"} disponible{group.children.length === 1 ? "" : "s"}
-                          </small>
-                        ) : null}
-                      </td>
-                      <td>
-                        {group.imageEntry.product.imageGalleryUrls.length > 0 ? (
-                          <>
-                            <strong>
-                              {group.imageEntry.product.imageMode === "illustrative"
-                                ? `Ilustrativa (${group.imageEntry.product.imageGalleryUrls.length})`
-                                : `${group.imageEntry.product.imageGalleryUrls.length} imagen${group.imageEntry.product.imageGalleryUrls.length === 1 ? "" : "es"}`}
-                            </strong>
-                            {group.imageEntry.product.imageMode === "illustrative" ? (
-                              <small>
-                                {group.imageEntry.product.imageNote || "Se esta usando una imagen ilustrativa."}
-                              </small>
-                            ) : (
-                              <small>
-                                {group.editEntry.imageOverride ? "Personalizada desde el admin." : "Imagen del sistema."}
-                              </small>
-                            )}
-                          </>
-                        ) : (
-                          <small>Sin imagen</small>
-                        )}
-                      </td>
-                      <td>{formatCurrency(group.displayEntry.product.price)}</td>
-                      <td>{group.groupStock.toFixed(0)}</td>
-                      <td>
-                        <Link
-                          href={buildAdminHref({
-                            view: "system",
-                            system: activeSection,
-                            system_q: productSearchQuery,
-                            system_article: group.editEntry.product.id,
-                          })}
-                          className="admin-ghost-button"
-                        >
-                          Editar
-                        </Link>
-                      </td>
-                    </tr>
-                    {group.children.length > 0 ? (
-                      <tr key={`${group.parentCode}-children`}>
-                        <td colSpan={5}>
-                          <details
-                            className="rounded-[16px] border border-dashed border-[color:var(--admin-card-line)] bg-[color:var(--admin-pane-bg)] px-4 py-3"
-                            open={selectedGroup?.parentCode === group.parentCode}
-                          >
-                            <summary className="cursor-pointer text-sm font-medium text-[color:var(--admin-title)]">
-                              Ver talles y colores
-                            </summary>
-                            <div className="mt-3 space-y-3">
-                              <div className="flex flex-wrap gap-2 text-xs text-[color:var(--admin-text)]">
-                                <span className="admin-inline-badge">
-                                  Colores: {group.colorLabels.length > 0 ? group.colorLabels.join(", ") : "Sin dato"}
-                                </span>
-                                <span className="admin-inline-badge">
-                                  Talles: {group.sizeLabels.length > 0 ? group.sizeLabels.join(", ") : "Sin dato"}
-                                </span>
-                              </div>
-                              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                                {group.children.map((child) => (
-                                  <article
-                                    key={child.product.id}
-                                    className="rounded-[14px] border border-[color:var(--admin-card-line)] bg-[color:var(--admin-card-bg)] px-3 py-3"
-                                  >
-                                    <strong className="block text-sm text-[color:var(--admin-title)]">
-                                      {getAdminVariantLabel(child.product)}
-                                    </strong>
-                                    <p className="mt-1 text-xs text-[color:var(--admin-text)]">
-                                      {extractAdminVariantColor({
-                                        childEntry: child,
-                                        parentDescription: group.displayEntry.product.description,
-                                      }) || "Sin color detectado"}
-                                    </p>
-                                    <p className="mt-1 text-xs text-[color:var(--admin-text)]">
-                                      Cod. {child.product.code}
-                                    </p>
-                                    <p className="mt-1 text-xs text-[color:var(--admin-text)]">
-                                      Stock {child.product.stock.toFixed(0)}
-                                    </p>
-                                  </article>
-                                ))}
-                              </div>
-                            </div>
-                          </details>
-                        </td>
-                      </tr>
-                    ) : null}
-                  </Fragment>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-4">
+            <div className="admin-overview-grid">
+              <article className="admin-overview-card">
+                <span>Resultados</span>
+                <strong>{formatAdminInteger(visibleArticleCount)}</strong>
+                <small>Articulos individuales visibles para edicion.</small>
+              </article>
+              <article className="admin-overview-card tone-success">
+                <span>Con imagen</span>
+                <strong>
+                  {formatAdminInteger(
+                    productGroups.reduce(
+                      (sum, group) =>
+                        sum
+                        + getAdminGroupDisplayEntries(group).allEntries.filter(
+                          (entry) => getAdminArticleGallery(entry.product).length > 0,
+                        ).length,
+                      0,
+                    ),
+                  )}
+                </strong>
+                <small>Articulos que ya tienen al menos una imagen asociada.</small>
+              </article>
+              <article className="admin-overview-card">
+                <span>Variantes</span>
+                <strong>
+                  {formatAdminInteger(
+                    productGroups.reduce(
+                      (sum, group) => sum + getAdminGroupDisplayEntries(group).secondaryEntries.length,
+                      0,
+                    ),
+                  )}
+                </strong>
+                <small>Articulos hijos o relacionados visibles bajo cada grupo.</small>
+              </article>
+              <article className="admin-overview-card tone-warning">
+                <span>Stock total</span>
+                <strong>
+                  {formatAdminInteger(
+                    productGroups.reduce((sum, group) => sum + group.groupStock, 0),
+                  )}
+                </strong>
+                <small>Unidades sumadas de los grupos listados.</small>
+              </article>
+            </div>
+
+            <div className="space-y-4">
+              {productGroups.map((group) => (
+                <AdminArticleListCard
+                  key={group.parentCode}
+                  group={group}
+                  activeSection={activeSection}
+                  productSearchQuery={productSearchQuery}
+                  isSelectedGroup={selectedGroup?.parentCode === group.parentCode}
+                  selectedProductId={selectedEntry?.product.id || null}
+                />
+              ))}
+            </div>
           </div>
         )}
       </section>
@@ -1494,7 +1905,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     system || (activeView === "system" ? "articulos" : undefined),
   );
   const activeSystemQuery = (system_q || productQ || "").trim();
-  const activeSystemArticle = (system_article || product || "").trim();
+  const activeSystemArticle = system_article || product || "";
   const activeOrderView = normalizeAdminOrderView(vista || status);
   const baseOrderFilters = normalizeOrderFilters({
     q,
@@ -1515,6 +1926,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
     stateColorStyle,
     initialWatchSnapshot,
     productsPaneData,
+    articleBrandOptions,
+    articleCategoryOptions,
   ] = await Promise.all([
     getPublicStoreSettings(),
     getServerSettings(),
@@ -1539,6 +1952,12 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           selectedProduct: null,
           loadError: null,
         }),
+    activeView === "system"
+      ? listAdminArticleBrandOptions()
+      : Promise.resolve([]),
+    activeView === "system"
+      ? listAdminArticleCategoryOptions()
+      : Promise.resolve([]),
   ]);
   const ordersSnapshot = buildAdminOrdersSnapshot({
     orders: filteredOrders,
@@ -1752,6 +2171,8 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             searchResults={productsPaneData.searchResults}
             selectedProduct={productsPaneData.selectedProduct}
             loadError={productsPaneData.loadError}
+            brandOptions={articleBrandOptions}
+            categoryOptions={articleCategoryOptions}
           />
         ) : activeView === "help" ? (
           <HelpPane

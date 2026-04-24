@@ -32,6 +32,7 @@ import { getOrderStateAutomationConfig } from "@/lib/order-state-config";
 import { getServerSettings } from "@/lib/store-config";
 import type { CreateOrderPayload } from "@/lib/types";
 import { normalizeNumber } from "@/lib/commerce";
+import { getLegacyArticleId } from "@/lib/legacy-article-id";
 import type {
   CreateOrderInput,
   Order,
@@ -292,8 +293,10 @@ async function ensureOrderNoteDocument(order: StoredOrder) {
   }
 
   const products = await getProductsByIds(itemInputs.map((item) => item.productId));
-  const productMap = new Map(products.map((product) => [product.id.trim(), product]));
-  const missingProduct = itemInputs.find((item) => !productMap.has(item.productId.trim()));
+  const productMap = new Map(products.map((product) => [product.id, product]));
+  const missingProduct = itemInputs.find(
+    (item) => !productMap.has(getLegacyArticleId(item.productId)),
+  );
 
   if (missingProduct) {
     throw new OrderValidationError(
@@ -306,7 +309,7 @@ async function ensureOrderNoteDocument(order: StoredOrder) {
     order,
     settings,
     lines: itemInputs.map((item) => {
-      const product = productMap.get(item.productId.trim());
+      const product = productMap.get(getLegacyArticleId(item.productId));
 
       if (!product) {
         throw new OrderValidationError(

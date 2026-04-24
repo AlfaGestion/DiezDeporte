@@ -1,9 +1,9 @@
 import "server-only";
 import { promises as fs } from "node:fs";
-import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { Readable, Writable } from "node:stream";
 import { Client } from "basic-ftp";
+import { getLegacyArticleDisplayId } from "@/lib/legacy-article-id";
 
 const PRODUCT_UPLOAD_PUBLIC_PREFIX = "/api/product-images";
 const MAX_IMAGE_FILE_SIZE_BYTES = 8 * 1024 * 1024;
@@ -44,17 +44,51 @@ declare global {
   var __diezDeportesProductImageStorageReady:
     | { key: string; promise: Promise<void> }
     | undefined;
+  var __diezDeportesProductImageFileIndex:
+    | { key: string; promise: Promise<Set<string>> }
+    | undefined;
 }
 
 function sanitizeProductFolderName(productId: string) {
-  const normalized = productId
-    .trim()
+  const normalized = getLegacyArticleDisplayId(productId)
     .replace(/[\\/:*?"<>|]+/g, "-")
     .replace(/\s+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
 
   return normalized || "articulo";
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function buildAlphabeticSequenceLabel(index: number) {
+  let current = Math.max(0, Math.trunc(index));
+  let label = "";
+
+  do {
+    label = String.fromCharCode(65 + (current % 26)) + label;
+    current = Math.floor(current / 26) - 1;
+  } while (current >= 0);
+
+  return label;
+}
+
+function parseAlphabeticSequenceLabel(value: string) {
+  const normalized = value.trim().toUpperCase();
+
+  if (!normalized || /[^A-Z]/.test(normalized)) {
+    return null;
+  }
+
+  let sequence = 0;
+
+  for (const character of normalized) {
+    sequence = (sequence * 26) + (character.charCodeAt(0) - 64);
+  }
+
+  return sequence - 1;
 }
 
 function getFileExtension(file: File) {
@@ -174,7 +208,11 @@ function getStorageCacheKey(config: ProductImageStorageConfig) {
   ].join(":");
 }
 
-function buildManagedProductImageUrl(fileName: string) {
+function invalidateManagedProductImageFileIndexCache() {
+  global.__diezDeportesProductImageFileIndex = undefined;
+}
+
+export function buildManagedProductImageUrl(fileName: string) {
   return `${PRODUCT_UPLOAD_PUBLIC_PREFIX}/${encodeURIComponent(fileName)}`;
 }
 
@@ -231,7 +269,23 @@ function toManagedLocalFilePathFromFileName(fileName: string) {
 
 function buildStoredFileName(productId: string, index: number, extension: string) {
   const safeProductId = sanitizeProductFolderName(productId);
-  return `${safeProductId}-${Date.now()}-${index}-${randomUUID().slice(0, 8)}.${extension}`;
+  const suffix = buildAlphabeticSequenceLabel(index);
+
+  return `${safeProductId}-${suffix}.${extension}`;
+}
+
+function getStoredFileSequenceIndex(fileName: string, productId: string) {
+  const safeProductId = sanitizeProductFolderName(productId);
+  const match = new RegExp(
+    `^${escapeRegExp(safeProductId)}-([A-Z]+)\\.[a-z0-9]+$`,
+    "i",
+  ).exec(fileName);
+
+  if (!match) {
+    return null;
+  }
+
+  return parseAlphabeticSequenceLabel(match[1] || "");
 }
 
 function buildFtpRemoteFilePath(fileName: string) {
@@ -290,6 +344,115 @@ async function readManagedProductImageFromFtp(fileName: string) {
     await client.downloadTo(writable, remotePath);
     return Buffer.concat(chunks);
   });
+}
+
+async function listManagedProductImageFileNames() {
+  const config = getProductImageStorageConfig();
+
+  if (config.type === "local") {
+    const entries = await fs.readdir(config.root, { withFileTypes: true });
+    return entries.map((entry) => entry.name);
+  }
+
+  return withFtpClient(async (client) => {
+    const entries = await client.list();
+    return entries.map((entry) => entry.name);
+  });
+}
+
+async function getManagedProductImageFileIndex() {
+  const config = getProductImageStorageConfig();
+  const cacheKey = getStorageCacheKey(config);
+
+  if (
+    global.__diezDeportesProductImageFileIndex &&
+    global.__diezDeportesProductImageFileIndex.key === cacheKey
+  ) {
+    return global.__diezDeportesProductImageFileIndex.promise;
+  }
+
+  const promise = (async () => {
+    const fileNames = await listManagedProductImageFileNames();
+
+    return new Set(
+      fileNames
+        .map((fileName) => fileName.trim().toLowerCase())
+        .filter(Boolean),
+    );
+  })();
+
+  global.__diezDeportesProductImageFileIndex = {
+    key: cacheKey,
+    promise,
+  };
+
+  try {
+    return await promise;
+  } catch (error) {
+    if (global.__diezDeportesProductImageFileIndex?.promise === promise) {
+      global.__diezDeportesProductImageFileIndex = undefined;
+    }
+
+    throw error;
+  }
+}
+
+async function getNextStoredFileIndex(productId: string) {
+  const fileIndex = await getManagedProductImageFileIndex();
+  let nextIndex = 0;
+
+  for (const fileName of fileIndex) {
+    const storedIndex = getStoredFileSequenceIndex(fileName, productId);
+
+    if (storedIndex === null) {
+      continue;
+    }
+
+    nextIndex = Math.max(nextIndex, storedIndex + 1);
+  }
+
+  return nextIndex;
+}
+
+export async function resolveManagedProductImageUrls(input: {
+  productId: string;
+  suffixes?: string[];
+  extensions?: string[];
+}) {
+  const safeProductId = sanitizeProductFolderName(input.productId);
+  if (!safeProductId) {
+    return [];
+  }
+
+  const suffixes = input.suffixes && input.suffixes.length > 0
+    ? input.suffixes
+    : ["a"];
+  const extensions = input.extensions && input.extensions.length > 0
+    ? input.extensions
+    : ["jpg", "jpeg", "png", "webp"];
+  const fileIndex = await getManagedProductImageFileIndex();
+  const urls: string[] = [];
+
+  for (const rawSuffix of suffixes) {
+    const suffix = rawSuffix.startsWith("-") ? rawSuffix : `-${rawSuffix}`;
+
+    for (const rawExtension of extensions) {
+      const extension = rawExtension.replace(/^\./, "").trim().toLowerCase();
+      if (!extension) {
+        continue;
+      }
+
+      const fileName = `${safeProductId}${suffix}.${extension}`;
+      if (!fileIndex.has(fileName.toLowerCase())) {
+        continue;
+      }
+
+      urls.push(buildManagedProductImageUrl(fileName));
+      break;
+    }
+  }
+
+  return urls;
 }
 
 export async function ensureProductImageStorageReady() {
@@ -366,7 +529,7 @@ export async function saveUploadedProductImages(input: {
 
   const config = getProductImageStorageConfig();
   const uploadedUrls: string[] = [];
-  let fileIndex = 0;
+  let fileIndex = await getNextStoredFileIndex(input.productId);
 
   const preparedFiles: Array<{
     buffer: Buffer;
@@ -405,6 +568,7 @@ export async function saveUploadedProductImages(input: {
         uploadedUrls.push(file.publicUrl);
       }
 
+      invalidateManagedProductImageFileIndexCache();
       return uploadedUrls;
     }
 
@@ -416,6 +580,7 @@ export async function saveUploadedProductImages(input: {
       }
     });
 
+    invalidateManagedProductImageFileIndexCache();
     return uploadedUrls;
   } catch (error) {
     if (uploadedUrls.length > 0) {
@@ -467,6 +632,7 @@ export async function deleteManagedProductImages(urls: string[]) {
       }),
     );
 
+    invalidateManagedProductImageFileIndexCache();
     return;
   }
 
@@ -481,6 +647,8 @@ export async function deleteManagedProductImages(urls: string[]) {
       }
     }
   });
+
+  invalidateManagedProductImageFileIndexCache();
 }
 
 export function isMissingManagedProductImageError(error: unknown) {

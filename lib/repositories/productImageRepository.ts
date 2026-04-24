@@ -1,5 +1,9 @@
 import "server-only";
 import { getConnection } from "@/lib/db";
+import {
+  collectDistinctLegacyArticleIds,
+  getLegacyArticleId,
+} from "@/lib/legacy-article-id";
 import type { ProductImageMode } from "@/lib/types";
 
 const PRODUCT_IMAGES_TABLE = "dbo.WEB_MA_ARTICULOS_IMAGENES";
@@ -41,7 +45,7 @@ function toIsoString(value: Date | null) {
 }
 
 function normalizeProductId(value: string) {
-  return value.trim();
+  return getLegacyArticleId(value);
 }
 
 function normalizeImageUrl(value: string) {
@@ -257,8 +261,8 @@ export async function ensureProductImageSchemaReady() {
 }
 
 export async function getProductImageOverridesByProductIds(productIds: string[]) {
-  const normalizedIds = Array.from(
-    new Set(productIds.map((productId) => normalizeProductId(productId)).filter(Boolean)),
+  const normalizedIds = collectDistinctLegacyArticleIds(
+    productIds.map((productId) => normalizeProductId(productId)),
   );
 
   if (normalizedIds.length === 0) {
@@ -277,7 +281,7 @@ export async function getProductImageOverridesByProductIds(productIds: string[])
     IF OBJECT_ID('${PRODUCT_IMAGES_TABLE}', 'U') IS NOT NULL
     BEGIN
       SELECT
-        LTRIM(RTRIM(IDARTICULO)) AS IDARTICULO,
+        IDARTICULO,
         IMAGEN_PRINCIPAL_URL,
         GALERIA_JSON,
         IMAGEN_TIPO,
@@ -287,7 +291,7 @@ export async function getProductImageOverridesByProductIds(productIds: string[])
         FECHA_CREACION,
         FECHA_ACTUALIZACION
       FROM ${PRODUCT_IMAGES_TABLE} WITH (NOLOCK)
-      WHERE LTRIM(RTRIM(IDARTICULO)) IN (${placeholders});
+      WHERE IDARTICULO IN (${placeholders});
     END
     ELSE
     BEGIN
@@ -350,7 +354,7 @@ export async function saveProductImageOverride(input: {
   if (imageUrls.length === 0) {
     await request.query(`
       DELETE FROM ${PRODUCT_IMAGES_TABLE}
-      WHERE LTRIM(RTRIM(IDARTICULO)) = @productId;
+      WHERE IDARTICULO = @productId;
     `);
 
     return null;
@@ -360,7 +364,7 @@ export async function saveProductImageOverride(input: {
     IF EXISTS (
       SELECT 1
       FROM ${PRODUCT_IMAGES_TABLE}
-      WHERE LTRIM(RTRIM(IDARTICULO)) = @productId
+      WHERE IDARTICULO = @productId
     )
     BEGIN
       UPDATE ${PRODUCT_IMAGES_TABLE}
@@ -372,7 +376,7 @@ export async function saveProductImageOverride(input: {
         IMAGEN_SOURCE_URL = @imageSourceUrl,
         ACTUALIZADO_POR = @updatedBy,
         FECHA_ACTUALIZACION = SYSDATETIME()
-      WHERE LTRIM(RTRIM(IDARTICULO)) = @productId;
+      WHERE IDARTICULO = @productId;
     END
     ELSE
     BEGIN
@@ -414,6 +418,6 @@ export async function deleteProductImageOverride(productId: string) {
 
   await request.query(`
     DELETE FROM ${PRODUCT_IMAGES_TABLE}
-    WHERE LTRIM(RTRIM(IDARTICULO)) = @productId;
+    WHERE IDARTICULO = @productId;
   `);
 }
