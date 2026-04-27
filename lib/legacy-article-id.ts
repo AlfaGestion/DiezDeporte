@@ -13,6 +13,14 @@ export function getLegacyArticleParentId(value: string | null | undefined) {
   return separatorIndex === -1 ? articleId : articleId.slice(0, separatorIndex);
 }
 
+export function getLegacyArticleRelationKey(value: string | null | undefined) {
+  const parentId = getLegacyArticleParentId(value);
+
+  // Solo para vincular registros en pantalla cuando la base heredada mezcla
+  // formato fijo con variantes sin padding. No usar este valor para guardar.
+  return parentId.replace(/^\s+|\s+$/g, "");
+}
+
 export function collectDistinctLegacyArticleIds(
   values: Iterable<string | null | undefined>,
 ) {

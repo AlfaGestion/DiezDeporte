@@ -1074,6 +1074,46 @@ svg {
   align-items: stretch;
 }
 
+.catalog-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.catalog-pagination-button {
+  min-height: 42px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--text);
+  font-weight: 700;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background-color 160ms ease,
+    opacity 160ms ease;
+}
+
+.catalog-pagination-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: var(--input-focus-line);
+}
+
+.catalog-pagination-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.catalog-pagination-status {
+  color: var(--text-soft);
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
 .catalog-card {
   display: flex;
   flex-direction: column;
@@ -3679,14 +3719,35 @@ html[data-theme="dark"] .admin-header-actions .submit-order-button {
   gap: 0.9rem;
 }
 
-.admin-filter-accordion {
-  border-top: 1px solid var(--admin-card-line);
-  padding-top: 0.9rem;
+.admin-store-filters-panel {
+  gap: 1rem;
 }
 
-.admin-filter-accordion:first-child {
-  border-top: 0;
-  padding-top: 0;
+.admin-store-filters-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  justify-content: space-between;
+  gap: 0.9rem;
+}
+
+.admin-store-active-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.admin-store-filter-block {
+  border: 1px solid var(--admin-card-line);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--admin-pane-bg) 90%, var(--surface-soft) 10%);
+  padding: 0.95rem 1rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.admin-filter-accordion {
+  display: grid;
+  gap: 0.85rem;
 }
 
 .admin-filter-accordion-summary {
@@ -3720,6 +3781,7 @@ html[data-theme="dark"] .admin-header-actions .submit-order-button {
   max-width: min(100%, 14rem);
   min-height: 2rem;
   align-items: center;
+  gap: 0.4rem;
   padding: 0 0.78rem;
   overflow: hidden;
   border-radius: 999px;
@@ -3731,6 +3793,33 @@ html[data-theme="dark"] .admin-header-actions .submit-order-button {
   text-transform: uppercase;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.admin-filter-current-chip-removable {
+  border: 1px solid color-mix(in srgb, var(--admin-accent) 22%, var(--admin-card-line));
+  text-decoration: none;
+  transition:
+    transform 140ms ease,
+    border-color 140ms ease,
+    background-color 140ms ease;
+}
+
+.admin-filter-current-chip-removable:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--admin-accent) 42%, var(--admin-card-line));
+  background: color-mix(in srgb, var(--admin-accent) 16%, var(--surface) 84%);
+}
+
+.admin-filter-current-chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-filter-current-chip-remove {
+  flex-shrink: 0;
+  font-size: 0.82rem;
+  font-weight: 900;
 }
 
 .admin-filter-accordion-chevron {
@@ -3754,7 +3843,6 @@ html[data-theme="dark"] .admin-header-actions .submit-order-button {
   flex-wrap: wrap;
   gap: 0.65rem;
   max-height: 18rem;
-  padding-top: 0.9rem;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -5463,6 +5551,216 @@ html[data-theme="dark"] .admin-header-actions .submit-order-button {
 
 .admin-section-card-hidden {
   display: none;
+}
+
+.admin-article-catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+.admin-article-catalog-card {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--admin-card-line);
+  border-radius: 24px;
+  background: var(--admin-card-bg);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    border-color 160ms ease,
+    background-color 160ms ease;
+}
+
+.admin-article-catalog-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--admin-accent) 35%, var(--admin-card-line));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 20px 44px rgba(13, 109, 216, 0.1);
+}
+
+.admin-article-catalog-card.is-selected {
+  border-color: color-mix(in srgb, var(--admin-accent) 42%, var(--admin-card-line));
+  background: var(--admin-pane-bg);
+  box-shadow: 0 22px 46px rgba(13, 109, 216, 0.14);
+}
+
+.admin-article-catalog-main {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.admin-article-catalog-media {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.admin-article-catalog-body {
+  display: grid;
+  gap: 0.9rem;
+  min-width: 0;
+}
+
+.admin-article-catalog-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-content: flex-start;
+  min-height: 2.5rem;
+}
+
+.admin-article-catalog-title {
+  margin: 0;
+  color: var(--admin-title);
+  font-size: 1rem;
+  line-height: 1.45;
+  min-height: calc(1.45em * 3);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+.admin-article-catalog-subtitle,
+.admin-article-catalog-tax {
+  margin: 0;
+  color: var(--admin-text);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.admin-article-catalog-subtitle {
+  min-height: calc(1.45em * 2);
+}
+
+.admin-article-catalog-price-row {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.admin-article-catalog-price {
+  color: var(--admin-title);
+  font-family: var(--display-font);
+  font-size: 1.55rem;
+  line-height: 1;
+}
+
+.admin-article-catalog-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.admin-article-catalog-meta-card {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid var(--admin-card-line);
+  border-radius: 16px;
+  background: var(--admin-pane-bg);
+}
+
+.admin-article-catalog-meta-card span {
+  color: var(--admin-text);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.admin-article-catalog-meta-card strong {
+  color: var(--admin-title);
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
+.admin-article-catalog-meta-card small {
+  color: var(--admin-text);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.admin-article-catalog-action {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 16px;
+  background: var(--admin-accent);
+  padding: 0.7rem 1rem;
+  color: #fff;
+  font-size: 0.92rem;
+  font-weight: 700;
+  box-shadow: 0 14px 28px rgba(13, 109, 216, 0.2);
+  transition:
+    transform 160ms ease,
+    background-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.admin-article-catalog-action:hover {
+  transform: translateY(-1px);
+  background: var(--admin-accent-strong);
+}
+
+.admin-article-catalog-details {
+  display: grid;
+  gap: 0.9rem;
+  border-top: 1px dashed var(--admin-card-line);
+  padding: 1rem;
+}
+
+.admin-article-catalog-variant-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.75rem;
+}
+
+.admin-article-catalog-variant-card {
+  border: 1px solid var(--admin-card-line);
+  border-radius: 18px;
+  background: var(--admin-card-bg);
+  padding: 1rem;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    border-color 160ms ease;
+}
+
+.admin-article-catalog-variant-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--admin-accent) 30%, var(--admin-card-line));
+}
+
+.admin-article-catalog-variant-card.is-selected {
+  border-color: color-mix(in srgb, var(--admin-accent) 42%, var(--admin-card-line));
+  background: var(--admin-pane-bg);
+  box-shadow: 0 14px 28px rgba(13, 109, 216, 0.12);
+}
+
+@media (max-width: 640px) {
+  .admin-article-catalog-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-article-catalog-price-row {
+    flex-direction: column;
+    align-items: start;
+  }
+
+  .admin-article-catalog-meta-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-article-catalog-variant-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .admin-config-grid {

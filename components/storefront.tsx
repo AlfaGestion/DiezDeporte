@@ -13,7 +13,10 @@ import {
   LOCAL_STORE_LOGO_DARK_URL,
   LOCAL_STORE_LOGO_URL,
 } from "@/lib/site-assets";
-import { getLegacyArticleParentId } from "@/lib/legacy-article-id";
+import {
+  getLegacyArticleParentId,
+  getLegacyArticleRelationKey,
+} from "@/lib/legacy-article-id";
 import { ThemeToggleIcon, getThemeToggleLabel } from "@/components/theme-toggle-icon";
 import type {
   BrandImage,
@@ -50,6 +53,7 @@ const APPAREL_SIZE_ORDER = [
   "xxxl",
 ];
 const UNNAMED_COLOR_OPTION_KEY = "__sin-color__";
+const PRODUCTS_PER_PAGE = 60;
 
 type SortOption = "featured" | "name-asc" | "price-asc" | "price-desc";
 type ThemeMode = "light" | "dark";
@@ -178,6 +182,12 @@ export function Storefront({
   const [selectedAudience, setSelectedAudience] =
     useState<AudienceFilter>("all");
   const [selectedBrand, setSelectedBrand] = useState("all");
+  const [catalogProducts, setCatalogProducts] = useState<Product[]>(initialProducts);
+  const [catalogLoadError, setCatalogLoadError] = useState<string | null>(
+    loadError || null,
+  );
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogPage, setCatalogPage] = useState(1);
   const [categoriesOpen, setCategoriesOpen] = useState(false);
   const [audienceOpen, setAudienceOpen] = useState(false);
   const [brandsOpen, setBrandsOpen] = useState(false);
@@ -210,6 +220,7 @@ export function Storefront({
     Record<string, WebImageOverride | null>
   >({});
   const pendingWebImageSearchesRef = useRef(new Set<string>());
+  const latestCatalogRequestRef = useRef(0);
 
   useEffect(() => {
     const savedCart = window.localStorage.getItem(LOCAL_STORAGE_CART_KEY);
@@ -284,10 +295,21 @@ export function Storefront({
   }, [mobileCartOpen, selectedProduct]);
 
   const resolvedInitialProducts = initialProducts.map(resolveProductImage);
-  const productGroups = buildProductGroups(resolvedInitialProducts);
+  const resolvedCatalogProducts = catalogProducts.map(resolveProductImage);
+  const filterOptionGroups = buildProductGroups(
+    Array.from(
+      new Map(
+        [...resolvedInitialProducts, ...resolvedCatalogProducts].map((product) => [
+          product.id,
+          product,
+        ]),
+      ).values(),
+    ),
+  );
+  const productGroups = buildProductGroups(resolvedCatalogProducts);
   const categories = Array.from(
     new Set(
-      productGroups
+      filterOptionGroups
         .flatMap((group) => group.members.map((product) => product.category))
         .filter(Boolean),
     ),
@@ -329,7 +351,7 @@ export function Storefront({
     ...normalizedBrandImages.filter((brand) => Boolean(brand.label)),
     ...Array.from(
       new Set(
-        productGroups
+        filterOptionGroups
           .map((group) => group.catalogProduct.brand.trim())
           .filter(Boolean),
       ),
@@ -363,6 +385,9 @@ export function Storefront({
   const activePriceLabel = hasActivePriceFilter
     ? `${formatCurrency(effectiveMinPrice)} a ${formatCurrency(effectiveMaxPrice)}`
     : null;
+  const hasServerFilters = Boolean(
+    search.trim() || selectedCategory !== "all" || selectedBrand !== "all",
+  );
   const filteredProductGroups = productGroups
     .filter((group) => {
       const matchesSearch =
@@ -445,6 +470,15 @@ export function Storefront({
         leftProduct.description.localeCompare(rightProduct.description)
       );
     });
+  const totalCatalogPages = Math.max(
+    1,
+    Math.ceil(filteredProductGroups.length / PRODUCTS_PER_PAGE),
+  );
+  const safeCatalogPage = Math.min(catalogPage, totalCatalogPages);
+  const paginatedProductGroups = filteredProductGroups.slice(
+    (safeCatalogPage - 1) * PRODUCTS_PER_PAGE,
+    safeCatalogPage * PRODUCTS_PER_PAGE,
+  );
 
   const subtotal = cart.reduce(
     (sum, item) => sum + item.netPrice * item.quantity,
@@ -604,6 +638,119 @@ export function Storefront({
       void fetchWebImageForProduct(product);
     });
   }, [filteredProductGroups, selectedDetailProduct, selectedProductGroup]);
+
+  useEffect(() => {
+    if (!hasServerFilters) {
+      latestCatalogRequestRef.current += 1;
+      setCatalogProducts(initialProducts);
+      setCatalogLoadError(loadError || null);
+      setCatalogLoading(false);
+      return;
+    }
+
+    const requestId = latestCatalogRequestRef.current + 1;
+    latestCatalogRequestRef.current = requestId;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(async () => {
+      setCatalogLoading(true);
+
+      try {
+        const params = new URLSearchParams();
+
+        if (search.trim()) {
+          params.set("q", search.trim());
+        }
+
+        if (selectedCategory !== "all") {
+          params.set("category", selectedCategory);
+        }
+
+        if (selectedBrand !== "all") {
+          params.set("brand", selectedBrand);
+        }
+
+        const response = await fetch(`/api/products?${params.toString()}`, {
+          signal: controller.signal,
+        });
+        const result = await readJsonResponse<{
+          products?: Product[];
+          error?: string;
+        }>(response);
+
+        if (!response.ok) {
+          throw new Error(result?.error || "No se pudieron obtener los productos.");
+        }
+
+        if (latestCatalogRequestRef.current !== requestId) {
+          return;
+        }
+
+        setCatalogProducts(result?.products || []);
+        setCatalogLoadError(null);
+      } catch (error) {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        if (latestCatalogRequestRef.current !== requestId) {
+          return;
+        }
+
+        setCatalogLoadError(
+          error instanceof Error
+            ? error.message
+            : "No se pudieron obtener los productos.",
+        );
+      } finally {
+        if (latestCatalogRequestRef.current === requestId) {
+          setCatalogLoading(false);
+        }
+      }
+    }, 250);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    hasServerFilters,
+    initialProducts,
+    loadError,
+    search,
+    selectedCategory,
+    selectedBrand,
+  ]);
+
+  useEffect(() => {
+    if (!selectedProduct) {
+      return;
+    }
+
+    const selectedStillVisible = productGroups.some((group) =>
+      group.members.some((product) => product.id === selectedProduct.id),
+    );
+
+    if (!selectedStillVisible) {
+      setSelectedProduct(null);
+    }
+  }, [productGroups, selectedProduct]);
+
+  useEffect(() => {
+    setCatalogPage(1);
+  }, [
+    search,
+    selectedCategory,
+    selectedBrand,
+    selectedAudience,
+    effectiveMinPrice,
+    effectiveMaxPrice,
+  ]);
+
+  useEffect(() => {
+    if (catalogPage > totalCatalogPages) {
+      setCatalogPage(totalCatalogPages);
+    }
+  }, [catalogPage, totalCatalogPages]);
 
   useEffect(() => {
     if (!selectedProductGroup) {
@@ -1577,9 +1724,9 @@ export function Storefront({
               </label>
             </div>
 
-            {loadError ? (
+            {catalogLoadError ? (
               <div className="message error">
-                {loadError}
+                {catalogLoadError}
                 <div className="message-detail">
                   Revisa la configuracion de `.env` y la conectividad a SQL
                   Server.
@@ -1587,14 +1734,18 @@ export function Storefront({
               </div>
             ) : null}
 
-            {!loadError && filteredProductGroups.length === 0 ? (
+            {catalogLoading ? (
+              <div className="empty-state">Actualizando catalogo...</div>
+            ) : null}
+
+            {!catalogLoadError && !catalogLoading && filteredProductGroups.length === 0 ? (
               <div className="empty-state">
                 No hay productos para mostrar con los filtros actuales.
               </div>
             ) : null}
 
-            <div className="catalog-grid">
-              {filteredProductGroups.map((group) => {
+              <div className="catalog-grid">
+              {paginatedProductGroups.map((group) => {
                 const product = group.catalogProduct;
                 const gallery = getCatalogCardGallery(product);
                 const activeGalleryIndex = getCatalogPreviewImageIndex(
@@ -1816,6 +1967,40 @@ export function Storefront({
                 );
               })}
             </div>
+
+            {!catalogLoadError && !catalogLoading && totalCatalogPages > 1 ? (
+              <div className="catalog-pagination">
+                <button
+                  type="button"
+                  className="catalog-pagination-button"
+                  onClick={() => {
+                    setCatalogPage((current) => Math.max(1, current - 1));
+                    scrollToCatalog();
+                  }}
+                  disabled={safeCatalogPage <= 1}
+                >
+                  Anterior
+                </button>
+
+                <div className="catalog-pagination-status">
+                  Pagina {safeCatalogPage} de {totalCatalogPages}
+                </div>
+
+                <button
+                  type="button"
+                  className="catalog-pagination-button"
+                  onClick={() => {
+                    setCatalogPage((current) =>
+                      Math.min(totalCatalogPages, current + 1),
+                    );
+                    scrollToCatalog();
+                  }}
+                  disabled={safeCatalogPage >= totalCatalogPages}
+                >
+                  Siguiente
+                </button>
+              </div>
+            ) : null}
           </section>
         </div>
 
@@ -3160,7 +3345,7 @@ function buildProductGroups(products: Product[]) {
 }
 
 function getParentProductCode(code: string) {
-  return getLegacyArticleParentId(code);
+  return getLegacyArticleRelationKey(code) || getLegacyArticleParentId(code);
 }
 
 function isChildProduct(product: Product) {

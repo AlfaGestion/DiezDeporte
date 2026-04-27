@@ -245,7 +245,6 @@ export async function listProducts() {
   const settings = await getServerSettings();
   const pool = await getConnection();
   const request = pool.request();
-  const safeLimit = Math.max(1, Math.min(1000, Math.trunc(settings.productLimit)));
 
   setInput(request, "depositId", settings.stockDepositId || null);
 
@@ -259,7 +258,7 @@ export async function listProducts() {
         AND (@depositId IS NULL OR LTRIM(RTRIM(ISNULL(IdDeposito, ''))) = @depositId)
       GROUP BY ISNULL(IDArticulo, '')
     )
-    SELECT TOP (${safeLimit})
+    SELECT
       a.IDARTICULO,
       a.DESCRIPCION,
       CAST(ISNULL(a.${settings.priceColumn}, 0) AS float) AS RawPrice,
@@ -424,7 +423,10 @@ export async function searchProductsForAdmin(input: {
   const settings = await getServerSettings();
   const pool = await getConnection();
   const request = createRequest(pool);
-  const safeLimit = Math.max(1, Math.min(120, Math.trunc(input.limit ?? 60)));
+  const safeLimit = Math.max(
+    1,
+    Math.min(1000, Math.trunc(input.limit ?? settings.productLimit)),
+  );
   const normalizedQuery = input.query.trim();
   const brandId = input.brandId || "";
   const categoryId = input.categoryId || "";
@@ -448,7 +450,7 @@ export async function searchProductsForAdmin(input: {
         AND (@depositId IS NULL OR LTRIM(RTRIM(ISNULL(IdDeposito, ''))) = @depositId)
       GROUP BY ISNULL(IDArticulo, '')
     )
-    SELECT TOP (${safeLimit})
+    SELECT
       a.IDARTICULO,
       a.DESCRIPCION,
       CAST(ISNULL(a.${settings.priceColumn}, 0) AS float) AS RawPrice,
@@ -497,6 +499,113 @@ export async function searchProductsForAdmin(input: {
   `);
 
   return buildAdminProductImageEntries(result.recordset, settings);
+}
+
+function normalizeStoreFilterText(value: string | null | undefined) {
+  return (value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export async function searchStoreProducts(input: {
+  query?: string;
+  brand?: string;
+  category?: string;
+}) {
+  const settings = await getServerSettings();
+  const pool = await getConnection();
+  const request = createRequest(pool);
+  const normalizedQuery = (input.query || "").trim();
+  const normalizedBrand = normalizeStoreFilterText(input.brand);
+  const normalizedCategory = normalizeStoreFilterText(input.category);
+  const searchLike = normalizedQuery ? `%${normalizedQuery}%` : "";
+  const searchPrefix = normalizedQuery ? `${normalizedQuery}%` : "";
+
+  setInput(request, "depositId", settings.stockDepositId || null);
+  setInput(request, "search", normalizedQuery);
+  setInput(request, "searchLike", searchLike);
+  setInput(request, "searchPrefix", searchPrefix);
+
+  const result: IResult<ProductRecord> = await request.query(`
+    WITH StockActual AS (
+      SELECT
+        ISNULL(IDArticulo, '') AS IDArticulo,
+        SUM(ISNULL(CantidadUD, 0)) AS StockActual
+      FROM dbo.V_MV_Stock WITH (NOLOCK)
+      WHERE (Anulado = 0 OR Anulado IS NULL)
+        AND (@depositId IS NULL OR LTRIM(RTRIM(ISNULL(IdDeposito, ''))) = @depositId)
+      GROUP BY ISNULL(IDArticulo, '')
+    )
+    SELECT
+      a.IDARTICULO,
+      a.DESCRIPCION,
+      CAST(ISNULL(a.${settings.priceColumn}, 0) AS float) AS RawPrice,
+      CAST(ISNULL(a.COSTO, 0) AS float) AS COSTO,
+      CAST(ISNULL(s.StockActual, 0) AS float) AS StockActual,
+      CAST(ISNULL(a.TasaIVA, ${settings.defaultTaxRate}) AS float) AS TasaIVA,
+      a.Moneda,
+      a.IDUNIDAD,
+      a.IdFamilia,
+      a.IDTIPO,
+      a.IDRUBRO,
+      a.TalleDefault,
+      a.ColorDefault,
+      a.Presentacion,
+      a.CUENTAPROVEEDOR,
+      a.CODIGOBARRA,
+      a.RutaImagen,
+      a.URL1,
+      tipo.Descripcion AS BrandDescription,
+      rubro.Descripcion AS CategoryDescription
+    FROM dbo.V_MA_ARTICULOS a WITH (NOLOCK)
+    LEFT JOIN StockActual s
+      ON s.IDArticulo = ISNULL(a.IDARTICULO, '')
+    LEFT JOIN dbo.V_TA_TipoArticulo tipo WITH (NOLOCK)
+      ON LTRIM(RTRIM(tipo.IdTipo)) = LTRIM(RTRIM(a.IDTIPO))
+    LEFT JOIN dbo.V_TA_Rubros rubro WITH (NOLOCK)
+      ON LTRIM(RTRIM(rubro.IdRubro)) = LTRIM(RTRIM(a.IDRUBRO))
+    WHERE ISNULL(a.SUSPENDIDO, 0) = 0
+      AND ISNULL(a.SuspendidoV, 0) = 0
+      AND (
+        @search = ''
+        OR a.IDARTICULO LIKE @searchLike
+        OR a.DESCRIPCION LIKE @searchLike
+        OR ISNULL(a.CODIGOBARRA, '') LIKE @searchLike
+      )
+    ORDER BY
+      CASE
+        WHEN @search <> '' AND a.IDARTICULO = @search THEN 0
+        WHEN @search <> '' AND a.IDARTICULO LIKE @searchLike THEN 1
+        WHEN @search <> '' AND a.DESCRIPCION LIKE @searchPrefix THEN 2
+        ELSE 3
+      END,
+      a.DESCRIPCION ASC;
+  `);
+
+  const entries = await buildAdminProductImageEntries(result.recordset, settings);
+
+  return entries
+    .map((entry) => entry.product)
+    .filter((product) => {
+      if (
+        normalizedBrand
+        && normalizeStoreFilterText(product.brand) !== normalizedBrand
+      ) {
+        return false;
+      }
+
+      if (
+        normalizedCategory
+        && normalizeStoreFilterText(product.category) !== normalizedCategory
+      ) {
+        return false;
+      }
+
+      return true;
+    });
 }
 
 function createRequest(executor: Executor) {
