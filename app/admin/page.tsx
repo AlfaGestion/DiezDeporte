@@ -62,7 +62,10 @@ import {
   normalizeAdminOrderView,
 } from "@/lib/order-admin";
 import { getAdminOrderStateCssVariables } from "@/lib/order-state-config";
-import { getLegacyArticleParentId } from "@/lib/legacy-article-id";
+import {
+  getLegacyArticleParentId,
+  getLegacyArticleRelationKey,
+} from "@/lib/legacy-article-id";
 import { normalizeOrderFilters } from "@/lib/models/order";
 import { getOrders } from "@/lib/services/orderService";
 import { getPublicStoreSettings, getServerSettings } from "@/lib/store-config";
@@ -114,6 +117,13 @@ type AdminProductImageGroup = {
   groupStock: number;
   sizeLabels: string[];
   colorLabels: string[];
+  firstIndex: number;
+};
+
+type AdminProductImageGroupDraft = {
+  parentEntry: AdminProductImageEntry | null;
+  children: AdminProductImageEntry[];
+  members: AdminProductImageEntry[];
   firstIndex: number;
 };
 
@@ -222,7 +232,11 @@ function normalizeAdminText(value: string | null | undefined) {
 }
 
 function getAdminParentProductCode(code: string) {
-  return getLegacyArticleParentId(code);
+  return getLegacyArticleRelationKey(code) || getLegacyArticleParentId(code);
+}
+
+function getAdminArticleRelationKey(code: string) {
+  return getLegacyArticleRelationKey(code);
 }
 
 function isAdminChildProductCode(code: string) {
@@ -354,15 +368,7 @@ function extractAdminVariantColor(params: {
 }
 
 function buildAdminProductImageGroups(entries: AdminProductImageEntry[]) {
-  const groups = new Map<
-    string,
-    {
-      parentEntry: AdminProductImageEntry | null;
-      children: AdminProductImageEntry[];
-      members: AdminProductImageEntry[];
-      firstIndex: number;
-    }
-  >();
+  const groups = new Map<string, AdminProductImageGroupDraft>();
 
   entries.forEach((entry, index) => {
     const parentCode = getAdminParentProductCode(entry.product.code);
@@ -383,6 +389,49 @@ function buildAdminProductImageGroups(entries: AdminProductImageEntry[]) {
     }
 
     groups.set(parentCode, currentGroup);
+  });
+
+  const parentGroupsByRelationKey = new Map<
+    string,
+    AdminProductImageGroupDraft | null
+  >();
+
+  groups.forEach((group) => {
+    if (!group.parentEntry) {
+      return;
+    }
+
+    const relationKey = getAdminArticleRelationKey(group.parentEntry.product.code);
+    if (!relationKey) {
+      return;
+    }
+
+    parentGroupsByRelationKey.set(
+      relationKey,
+      parentGroupsByRelationKey.has(relationKey)
+        ? null
+        : group,
+    );
+  });
+
+  Array.from(groups.entries()).forEach(([parentCode, group]) => {
+    if (group.parentEntry || group.children.length === 0) {
+      return;
+    }
+
+    const relationKey = getAdminArticleRelationKey(parentCode);
+    const parentGroup = relationKey
+      ? parentGroupsByRelationKey.get(relationKey)
+      : null;
+
+    if (!parentGroup || parentGroup === group) {
+      return;
+    }
+
+    parentGroup.children.push(...group.children);
+    parentGroup.members.push(...group.members);
+    parentGroup.firstIndex = Math.min(parentGroup.firstIndex, group.firstIndex);
+    groups.delete(parentCode);
   });
 
   return Array.from(groups.entries())
@@ -482,35 +531,44 @@ function AdminSystemFilterSection(props: {
   const hasSelection = Boolean(selectedId);
 
   return (
-    <details className="admin-filter-accordion" open={hasSelection || options.length <= 14}>
-      <summary className="admin-filter-accordion-summary">
-        <span className="admin-filter-accordion-title">{title}</span>
-        <span className="admin-filter-accordion-trailing">
-          {selectedLabel ? (
-            <span className="admin-filter-current-chip" title={selectedLabel}>
-              {selectedLabel}
-            </span>
-          ) : null}
-          <span className="admin-filter-accordion-chevron" aria-hidden="true" />
-        </span>
-      </summary>
+    <div className="admin-store-filter-block">
+      <details className="admin-filter-accordion" open={hasSelection || options.length <= 14}>
+        <summary className="admin-filter-accordion-summary">
+          <span className="admin-filter-accordion-title">{title}</span>
+          <span className="admin-filter-accordion-trailing">
+            {selectedLabel ? (
+              <Link
+                href={allHref}
+                className="admin-filter-current-chip admin-filter-current-chip-removable"
+                title={`Quitar filtro de ${title.toLowerCase()}: ${selectedLabel}`}
+              >
+                <span className="admin-filter-current-chip-text">{selectedLabel}</span>
+                <span className="admin-filter-current-chip-remove" aria-hidden="true">
+                  X
+                </span>
+              </Link>
+            ) : null}
+            <span className="admin-filter-accordion-chevron" aria-hidden="true" />
+          </span>
+        </summary>
 
-      <div className="admin-filter-chip-list">
-        <Link href={allHref} className={cn("admin-filter-chip", !hasSelection && "is-active")}>
-          Todas
-        </Link>
-        {options.map((option) => (
-          <Link
-            key={option.id}
-            href={getOptionHref(option.id)}
-            className={cn("admin-filter-chip", option.id === selectedId && "is-active")}
-            title={option.label}
-          >
-            {option.label}
+        <div className="admin-filter-chip-list">
+          <Link href={allHref} className={cn("admin-filter-chip", !hasSelection && "is-active")}>
+            Todas
           </Link>
-        ))}
-      </div>
-    </details>
+          {options.map((option) => (
+            <Link
+              key={option.id}
+              href={getOptionHref(option.id)}
+              className={cn("admin-filter-chip", option.id === selectedId && "is-active")}
+              title={option.label}
+            >
+              {option.label}
+            </Link>
+          ))}
+        </div>
+      </details>
+    </div>
   );
 }
 
@@ -631,31 +689,21 @@ function AdminArticleListCard(props: {
   return (
     <article
       className={cn(
-        "overflow-hidden rounded-[24px] border transition",
-        isSelectedGroup
-          ? "border-[color:var(--admin-accent)]/35 bg-[color:var(--admin-pane-bg)] shadow-[0_20px_44px_rgba(13,109,216,0.12)]"
-          : "border-[color:var(--admin-card-line)] bg-[color:var(--admin-card-bg)] shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]",
+        "admin-article-catalog-card",
+        isSelectedGroup && "is-selected",
       )}
     >
-      <div className="grid gap-4 p-4 xl:grid-cols-[220px_minmax(0,1fr)_220px] xl:p-5">
-        <div className="space-y-3">
+      <div className="admin-article-catalog-main">
+        <div className="admin-article-catalog-media">
           <AdminArticleListGallery
             description={primaryEntry.product.description}
             code={primaryEntry.product.code}
             images={imageGallery}
           />
-          <div className="rounded-[18px] border border-[color:var(--admin-card-line)] bg-[color:var(--admin-pane-bg)] px-4 py-3">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--admin-text)]">
-              Codigo
-            </div>
-            <div className="mt-1 break-all text-sm font-semibold text-[color:var(--admin-title)]">
-              {primaryEntry.product.code}
-            </div>
-          </div>
         </div>
 
-        <div className="min-w-0 space-y-4">
-          <div className="flex flex-wrap gap-2">
+        <div className="admin-article-catalog-body">
+          <div className="admin-article-catalog-tags">
             <span
               className={cn(
                 "inline-flex min-h-8 items-center rounded-full border px-3 py-1 text-xs font-semibold",
@@ -674,6 +722,7 @@ function AdminArticleListCard(props: {
             >
               {imageSummary.label}
             </span>
+            <span className="admin-inline-badge">Cod. {primaryEntry.product.code}</span>
             <span
               className={cn(
                 "inline-flex min-h-8 items-center rounded-full border px-3 py-1 text-xs font-semibold",
@@ -686,16 +735,34 @@ function AdminArticleListCard(props: {
                 ? `${group.children.length} variante${group.children.length === 1 ? "" : "s"}`
                 : "Sin variantes"}
             </span>
+            <span
+              className={cn(
+                "inline-flex min-h-8 items-center rounded-full border px-3 py-1 text-xs font-semibold",
+                getAdminArticleBadgeToneClasses(stockTone),
+              )}
+            >
+              Stock {formatAdminInteger(group.groupStock)}
+            </span>
           </div>
 
-          <div className="space-y-1">
-            <h4 className="text-lg font-semibold leading-tight text-[color:var(--admin-title)]">
+          {primaryEntry.product.brand ? (
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--admin-text)]">
+              {primaryEntry.product.brand}
+            </p>
+          ) : null}
+
+          <div className="space-y-2">
+            <h4 className="admin-article-catalog-title">
               {primaryEntry.product.description}
             </h4>
-            <p className="text-sm text-[color:var(--admin-text)]">
-              {group.parentEntry
-                ? "Este articulo tiene su propia galeria y abajo se muestran los hijos por separado."
-                : "Articulo simple o variante unica con galeria propia."}
+            <p className="admin-article-catalog-subtitle">
+              {group.children.length > 0
+                ? `Grupo con ${group.children.length} variante${group.children.length === 1 ? "" : "s"} para editar desde el mismo panel.`
+                : primaryEntry.product.category ||
+                  primaryEntry.product.defaultSize ||
+                  primaryEntry.product.presentation ||
+                  primaryEntry.product.unitId ||
+                  "Articulo individual con galeria propia."}
             </p>
           </div>
 
@@ -712,81 +779,49 @@ function AdminArticleListCard(props: {
             ) : null}
           </div>
 
-          <div className="grid gap-3 md:grid-cols-3">
-            <div className="rounded-[18px] border border-[color:var(--admin-card-line)] bg-[color:var(--admin-pane-bg)] px-4 py-4">
-              <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--admin-text)]">
-                Precio
-              </span>
-              <strong className="mt-2 block text-base text-[color:var(--admin-title)]">
+          <div className="admin-article-catalog-price-row">
+            <div>
+              <div className="admin-article-catalog-price">
                 {formatCurrency(primaryEntry.product.price)}
-              </strong>
-              <small className="mt-1 block text-xs text-[color:var(--admin-text)]">
+              </div>
+              <p className="admin-article-catalog-tax">
                 {group.children.length > 0 ? "Precio principal del grupo." : "Precio visible en catalogo."}
-              </small>
+              </p>
             </div>
-
-            <div className="rounded-[18px] border border-[color:var(--admin-card-line)] bg-[color:var(--admin-pane-bg)] px-4 py-4">
-              <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--admin-text)]">
-                Stock
-              </span>
-              <strong className="mt-2 block text-base text-[color:var(--admin-title)]">
-                {formatAdminInteger(group.groupStock)}
-              </strong>
-              <small
-                className={cn(
-                  "mt-1 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold",
-                  getAdminArticleBadgeToneClasses(stockTone),
-                )}
-              >
-                {getAdminArticleStockLabel(group.groupStock)}
-              </small>
-            </div>
-
-            <div className="rounded-[18px] border border-[color:var(--admin-card-line)] bg-[color:var(--admin-pane-bg)] px-4 py-4">
-              <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--admin-text)]">
-                Imagenes
-              </span>
-              <strong className="mt-2 block text-base text-[color:var(--admin-title)]">
-                {formatAdminInteger(imageGallery.length)}
-              </strong>
-              <small className="mt-1 block text-xs leading-5 text-[color:var(--admin-text)]">
-                {imageSummary.note}
-              </small>
-            </div>
+            <span
+              className={cn(
+                "inline-flex min-h-8 items-center rounded-full border px-3 py-1 text-xs font-semibold",
+                getAdminArticleBadgeToneClasses(stockTone),
+              )}
+            >
+              {getAdminArticleStockLabel(group.groupStock)}
+            </span>
           </div>
-        </div>
 
-        <div className="grid gap-3">
-          <div className="rounded-[18px] border border-[color:var(--admin-card-line)] bg-[color:var(--admin-pane-bg)] px-4 py-4">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--admin-text)]">
-              Datos rapidos
+          <div className="admin-article-catalog-meta-grid">
+            <div className="admin-article-catalog-meta-card">
+              <span>ID heredado</span>
+              <strong className="break-all">{primaryEntry.product.id}</strong>
             </div>
-            <div className="mt-3 grid gap-3 text-sm">
-              <div>
-                <div className="text-[color:var(--admin-text)]">ID heredado</div>
-                <div className="mt-1 break-all font-semibold text-[color:var(--admin-title)]">
-                  {primaryEntry.product.id}
-                </div>
-              </div>
-              <div>
-                <div className="text-[color:var(--admin-text)]">Colores</div>
-                <div className="mt-1 font-semibold text-[color:var(--admin-title)]">
-                  {summarizeAdminLabels(group.colorLabels)}
-                </div>
-              </div>
-              <div>
-                <div className="text-[color:var(--admin-text)]">Talles</div>
-                <div className="mt-1 font-semibold text-[color:var(--admin-title)]">
-                  {summarizeAdminLabels(group.sizeLabels)}
-                </div>
-              </div>
+            <div className="admin-article-catalog-meta-card">
+              <span>Imagenes</span>
+              <strong>{formatAdminInteger(imageGallery.length)}</strong>
+              <small>{imageSummary.note}</small>
+            </div>
+            <div className="admin-article-catalog-meta-card">
+              <span>Colores</span>
+              <strong>{summarizeAdminLabels(group.colorLabels)}</strong>
+            </div>
+            <div className="admin-article-catalog-meta-card">
+              <span>Talles</span>
+              <strong>{summarizeAdminLabels(group.sizeLabels)}</strong>
             </div>
           </div>
 
           <Link
             href={editHref}
             scroll={false}
-            className="inline-flex h-11 items-center justify-center rounded-[16px] bg-[color:var(--admin-accent)] px-4 text-sm font-semibold text-white shadow-[0_14px_28px_rgba(13,109,216,0.2)] transition hover:-translate-y-px hover:bg-[color:var(--admin-accent-strong)]"
+            className="admin-article-catalog-action"
           >
             {isPrimarySelected ? "Seguir editando" : "Editar articulo"}
           </Link>
@@ -794,10 +829,7 @@ function AdminArticleListCard(props: {
       </div>
 
       {secondaryEntries.length > 0 ? (
-        <details
-          className="border-t border-dashed border-[color:var(--admin-card-line)] px-4 pb-4 pt-4 xl:px-5 xl:pb-5"
-          open={isSelectedGroup}
-        >
+        <details className="admin-article-catalog-details" open={isSelectedGroup}>
           <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-semibold text-[color:var(--admin-title)] [&::-webkit-details-marker]:hidden">
             <span>{group.parentEntry ? "Ver articulos hijos" : "Ver articulos relacionados"}</span>
             <span className="text-xs font-medium text-[color:var(--admin-text)]">
@@ -814,7 +846,7 @@ function AdminArticleListCard(props: {
             </span>
           </div>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+          <div className="admin-article-catalog-variant-grid">
             {secondaryEntries.map((child) => {
               const childImageGallery = getAdminArticleGallery(child.product);
               const childImageSummary = getAdminArticleImageSummary(child);
@@ -832,10 +864,8 @@ function AdminArticleListCard(props: {
                 <article
                   key={child.product.id}
                   className={cn(
-                    "rounded-[18px] border px-4 py-4 transition",
-                    isChildSelected
-                      ? "border-[color:var(--admin-accent)]/35 bg-[color:var(--admin-pane-bg)] shadow-[0_14px_28px_rgba(13,109,216,0.12)]"
-                      : "border-[color:var(--admin-card-line)] bg-[color:var(--admin-card-bg)]",
+                    "admin-article-catalog-variant-card",
+                    isChildSelected && "is-selected",
                   )}
                 >
                   <div className="space-y-4">
@@ -893,7 +923,7 @@ function AdminArticleListCard(props: {
                     </div>
 
                     <div className="grid gap-3 md:grid-cols-2">
-                      <div className="rounded-[16px] border border-[color:var(--admin-card-line)] bg-[color:var(--admin-pane-bg)] px-3 py-3">
+                      <div className="admin-article-catalog-meta-card">
                         <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--admin-text)]">
                           Codigo
                         </div>
@@ -901,7 +931,7 @@ function AdminArticleListCard(props: {
                           {child.product.code}
                         </div>
                       </div>
-                      <div className="rounded-[16px] border border-[color:var(--admin-card-line)] bg-[color:var(--admin-pane-bg)] px-3 py-3">
+                      <div className="admin-article-catalog-meta-card">
                         <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--admin-text)]">
                           Precio
                         </div>
@@ -918,7 +948,7 @@ function AdminArticleListCard(props: {
                       <Link
                         href={childEditHref}
                         scroll={false}
-                        className="inline-flex h-10 items-center justify-center rounded-[14px] bg-[color:var(--admin-accent)] px-4 text-sm font-semibold text-white transition hover:-translate-y-px hover:bg-[color:var(--admin-accent-strong)]"
+                        className="admin-article-catalog-action"
                       >
                         {isChildSelected ? "Seguir editando" : "Editar hijo"}
                       </Link>
@@ -1282,7 +1312,6 @@ async function loadAdminProductsPaneData(
       query: normalizedSearchQuery,
       brandId: normalizedBrandFilterId,
       categoryId: normalizedCategoryFilterId,
-      limit: 60,
     });
     const knownIds = new Set(initialResults.map((entry) => entry.product.id));
     const supplementalIds = new Set<string>();
@@ -1465,8 +1494,8 @@ function SystemPane(props: {
           eyebrow="Sistema"
         />
 
-        <section className="admin-section-card space-y-4 px-5 py-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
+        <section className="admin-section-card admin-store-filters-panel">
+          <div className="admin-store-filters-head">
             <div>
               <span className="admin-pane-kicker">Filtros</span>
               <h3 className="text-lg font-semibold text-[color:var(--admin-title)]">
@@ -1485,13 +1514,16 @@ function SystemPane(props: {
           </div>
 
           {productSearchQuery ? (
-            <div className="flex flex-wrap gap-2">
+            <div className="admin-store-active-filter-row">
               <Link
                 href={clearSearchHref}
-                className="inline-flex min-h-10 items-center gap-2 rounded-full border border-[color:var(--admin-card-line)] bg-[color:var(--admin-pane-bg)] px-4 text-sm text-[color:var(--admin-title)] transition hover:bg-white/70 dark:hover:bg-white/10"
+                className="admin-filter-current-chip admin-filter-current-chip-removable"
+                title={`Quitar busqueda: ${productSearchQuery}`}
               >
-                <span>Busqueda: {productSearchQuery}</span>
-                <strong aria-hidden="true">X</strong>
+                <span className="admin-filter-current-chip-text">Busqueda: {productSearchQuery}</span>
+                <span className="admin-filter-current-chip-remove" aria-hidden="true">
+                  X
+                </span>
               </Link>
             </div>
           ) : null}
@@ -1590,6 +1622,9 @@ function SystemPane(props: {
                     }) || "Sin dato",
                   price: child.baseProduct.price,
                   stock: child.product.stock,
+                  imageUrl: child.product.imageUrl,
+                  imageGalleryUrls: child.product.imageGalleryUrls,
+                  hasCustomImages: Boolean(child.imageOverride?.imageGalleryUrls.length),
                 })),
               }
             : null
@@ -1666,7 +1701,7 @@ function SystemPane(props: {
               </article>
             </div>
 
-            <div className="space-y-4">
+            <div className="admin-article-catalog-grid">
               {productGroups.map((group) => (
                 <AdminArticleListCard
                   key={group.parentCode}

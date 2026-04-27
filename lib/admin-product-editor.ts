@@ -1,7 +1,11 @@
 import "server-only";
 import type { ConnectionPool, IResult, Transaction } from "mssql";
 import { getConnection, sql } from "@/lib/db";
-import { getLegacyArticleId, getLegacyArticleParentId } from "@/lib/legacy-article-id";
+import {
+  getLegacyArticleId,
+  getLegacyArticleParentId,
+  getLegacyArticleRelationKey,
+} from "@/lib/legacy-article-id";
 import { getServerSettings } from "@/lib/store-config";
 
 type Executor = ConnectionPool | Transaction;
@@ -110,6 +114,10 @@ function getParentArticleCode(productId: string) {
   return getLegacyArticleParentId(productId);
 }
 
+function getParentArticleRelationKey(productId: string) {
+  return getLegacyArticleRelationKey(productId);
+}
+
 export async function listAdminArticleBrandOptions() {
   return listLookupOptions({
     tableName: "dbo.V_TA_TipoArticulo",
@@ -137,6 +145,7 @@ export async function saveAdminArticleEdits(input: {
 }) {
   const productId = normalizeId(input.productId);
   const parentCode = normalizeId(input.parentCode) || getParentArticleCode(productId);
+  const parentRelationKey = getParentArticleRelationKey(parentCode);
   const description = normalizeOptionalText(input.description, 250);
   const size = normalizeOptionalText(input.size, 60);
   const color = normalizeOptionalText(input.color, 60);
@@ -161,7 +170,10 @@ export async function saveAdminArticleEdits(input: {
         return null;
       }
 
-      if (parentCode && getParentArticleCode(variantId) !== parentCode) {
+      if (
+        parentRelationKey
+        && getParentArticleRelationKey(variantId) !== parentRelationKey
+      ) {
         throw new Error("Las variantes no pertenecen al articulo activo.");
       }
 

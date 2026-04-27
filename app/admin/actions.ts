@@ -40,6 +40,7 @@ import {
   getProductImageOverridesByProductIds,
   normalizeProductImageUrls,
   saveProductImageOverride,
+  type ProductImageOverride,
 } from "@/lib/repositories/productImageRepository";
 import { resolvePendingPaymentStatus } from "@/lib/web-payments";
 
@@ -254,6 +255,89 @@ function toComparablePrice(value: number | null | undefined) {
   }
 
   return Math.round(value * 100) / 100;
+}
+
+type ProductImageOverrideRestore = {
+  productId: string;
+  override: ProductImageOverride | null;
+};
+
+type ProductImageMutationInput = {
+  productId: string;
+  finalImageUrls: string[];
+  baseImageUrls: string[];
+  currentOverride: ProductImageOverride | null;
+};
+
+async function applyProductImageOverrideMutation(
+  input: ProductImageMutationInput & {
+    updatedBy: string;
+    restoreStack: ProductImageOverrideRestore[];
+  },
+) {
+  const {
+    productId,
+    finalImageUrls,
+    baseImageUrls,
+    currentOverride,
+    updatedBy,
+    restoreStack,
+  } = input;
+
+  if (finalImageUrls.length === 0) {
+    if (currentOverride) {
+      restoreStack.push({ productId, override: currentOverride });
+      await saveProductImageOverride({
+        productId,
+        imageUrls: [],
+        updatedBy: null,
+      });
+    }
+
+    return;
+  }
+
+  if (arraysMatch(finalImageUrls, baseImageUrls)) {
+    if (currentOverride) {
+      restoreStack.push({ productId, override: currentOverride });
+      await saveProductImageOverride({
+        productId,
+        imageUrls: [],
+        updatedBy: null,
+      });
+    }
+
+    return;
+  }
+
+  if (
+    !currentOverride ||
+    !arraysMatch(finalImageUrls, currentOverride.imageGalleryUrls)
+  ) {
+    restoreStack.push({ productId, override: currentOverride });
+    await saveProductImageOverride({
+      productId,
+      imageUrls: finalImageUrls,
+      updatedBy,
+    });
+  }
+}
+
+async function restoreProductImageOverrides(
+  restoreStack: ProductImageOverrideRestore[],
+) {
+  for (const restoreInput of [...restoreStack].reverse()) {
+    const { productId, override } = restoreInput;
+
+    await saveProductImageOverride({
+      productId,
+      imageUrls: override?.imageGalleryUrls || [],
+      imageMode: override?.imageMode || "exact",
+      imageNote: override?.imageNote || null,
+      imageSourceUrl: override?.imageSourceUrl || null,
+      updatedBy: override?.updatedBy || null,
+    });
+  }
 }
 
 function getAdminProductMutationErrorCode(message: string): AdminProductMutationError {
@@ -684,6 +768,25 @@ export async function saveAdminProductImagesAction(
     .getAll("newImageClientId")
     .map((value) => (typeof value === "string" ? value.trim() : ""))
     .filter(Boolean);
+  const variantImageProductIds = formData
+    .getAll("variantImageProductId")
+    .map((value) => (typeof value === "string" ? value : ""));
+  const variantImageUrls = formData.getAll("variantImageUrl").map((value) =>
+    typeof value === "string" ? value : "",
+  );
+  const variantImageClientIds = formData
+    .getAll("variantImageClientId")
+    .map((value) => (typeof value === "string" ? value.trim() : ""));
+  const variantUploadProductIds = formData
+    .getAll("variantNewImageProductId")
+    .map((value) => (typeof value === "string" ? value : ""));
+  const variantUploadClientIds = formData
+    .getAll("variantNewImageClientId")
+    .map((value) => (typeof value === "string" ? value.trim() : ""));
+  const variantUploadValues = formData.getAll("variantNewImages");
+  const variantUploadFiles = variantUploadValues.map((value) =>
+    value instanceof File ? value : null,
+  );
 
   if (!productId) {
     return { ok: false, error: "product-not-found" };
@@ -692,10 +795,23 @@ export async function saveAdminProductImagesAction(
   if (
     variantIds.length !== variantSizes.length ||
     variantIds.length !== variantColors.length ||
-    variantIds.length !== variantPrices.length
+    variantIds.length !== variantPrices.length ||
+    variantImageProductIds.length !== variantImageUrls.length ||
+    variantImageProductIds.length !== variantImageClientIds.length ||
+    variantUploadProductIds.length !== variantUploadClientIds.length ||
+    variantUploadProductIds.length !== variantUploadFiles.length ||
+    variantUploadFiles.some((file) => !file)
   ) {
     return { ok: false, error: "product-invalid" };
   }
+
+  const requestedVariantImages = variantImageProductIds
+    .map((variantProductId, index) => ({
+      productId: variantProductId,
+      imageUrl: variantImageUrls[index] || "",
+      uploadClientId: variantImageClientIds[index] || "",
+    }))
+    .filter((imageInput) => Boolean(imageInput.productId));
 
   let parsedRequestedPrice: number | null = null;
   let requestedVariants: Array<{
@@ -718,16 +834,34 @@ export async function saveAdminProductImagesAction(
     return { ok: false, error: "product-invalid" };
   }
 
+  const productIdsForImageLookup = Array.from(
+    new Set([
+      productId,
+      ...variantIds,
+      ...requestedVariantImages.map((imageInput) => imageInput.productId),
+      ...variantUploadProductIds.filter(Boolean),
+    ]),
+  );
+
   const [adminEntries, currentImageOverrides] = await Promise.all([
-    getAdminProductsByIds(Array.from(new Set([productId, ...variantIds]))),
-    getProductImageOverridesByProductIds([productId]),
+    getAdminProductsByIds(productIdsForImageLookup),
+    getProductImageOverridesByProductIds(productIdsForImageLookup),
   ]);
 
   const currentImageOverride = currentImageOverrides.get(productId) || null;
   const currentEntry = adminEntries.find((entry) => entry.product.id === productId) || null;
+  const adminEntriesById = new Map(
+    adminEntries.map((entry) => [entry.product.id, entry]),
+  );
 
   if (!currentEntry) {
     return { ok: false, error: "product-not-found" };
+  }
+
+  if (
+    requestedVariantImages.some((imageInput) => !adminEntriesById.has(imageInput.productId))
+  ) {
+    return { ok: false, error: "product-invalid" };
   }
 
   const requestedDescription =
@@ -774,27 +908,69 @@ export async function saveAdminProductImagesAction(
   }
 
   let uploadedImageUrls: string[] = [];
+  const uploadedVariantImageUrls: string[] = [];
+  const uploadedVariantImageUrlByClientId = new Map<string, string>();
 
-  if (uploadedFiles.length > 0) {
-    try {
+  try {
+    if (uploadedFiles.length > 0) {
       uploadedImageUrls = await saveUploadedProductImages({
         productId,
         files: uploadedFiles,
       });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "";
-
-      return {
-        ok: false,
-        error:
-          /APP_PRODUCT_IMAGE_UPLOAD_DIRECTORY|configura/i.test(message)
-            ? "product-image-storage"
-            : "product-image-file",
-      };
     }
+
+    const variantUploadsByProductId = new Map<
+      string,
+      Array<{ clientId: string; file: File }>
+    >();
+
+    variantUploadProductIds.forEach((variantProductId, index) => {
+      const clientId = variantUploadClientIds[index];
+      const file = variantUploadFiles[index];
+
+      if (!variantProductId || !clientId || !file) {
+        return;
+      }
+
+      const uploads = variantUploadsByProductId.get(variantProductId) || [];
+      uploads.push({ clientId, file });
+      variantUploadsByProductId.set(variantProductId, uploads);
+    });
+
+    for (const [variantProductId, uploads] of variantUploadsByProductId) {
+      const urls = await saveUploadedProductImages({
+        productId: variantProductId,
+        files: uploads.map((upload) => upload.file),
+      });
+
+      if (urls.length !== uploads.length) {
+        throw new Error("product-image-file");
+      }
+
+      urls.forEach((url, index) => {
+        uploadedVariantImageUrlByClientId.set(uploads[index].clientId, url);
+        uploadedVariantImageUrls.push(url);
+      });
+    }
+  } catch (error) {
+    const uploadedUrls = [...uploadedImageUrls, ...uploadedVariantImageUrls];
+    if (uploadedUrls.length > 0) {
+      await deleteManagedProductImages(uploadedUrls);
+    }
+
+    const message = error instanceof Error ? error.message : "";
+
+    return {
+      ok: false,
+      error:
+        /APP_PRODUCT_IMAGE_UPLOAD_DIRECTORY|configura/i.test(message)
+          ? "product-image-storage"
+          : "product-image-file",
+    };
   }
 
   let finalImageUrls: string[] = [];
+  let variantImageMutations: ProductImageMutationInput[] = [];
 
   try {
     if (imageManifest.length > 0) {
@@ -823,9 +999,39 @@ export async function saveAdminProductImagesAction(
     } else {
       finalImageUrls = normalizeProductImageUrls([...requestedImageUrls, ...uploadedImageUrls]);
     }
+
+    variantImageMutations = requestedVariantImages.map((imageInput) => {
+      const variantEntry = adminEntriesById.get(imageInput.productId);
+      if (!variantEntry) {
+        throw new Error("product-image-invalid");
+      }
+
+      const finalVariantImageUrls = normalizeProductImageUrls(
+        imageInput.uploadClientId
+          ? [
+              uploadedVariantImageUrlByClientId.get(imageInput.uploadClientId)
+                || "",
+            ]
+          : imageInput.imageUrl
+            ? [imageInput.imageUrl]
+            : [],
+      );
+
+      if (imageInput.uploadClientId && finalVariantImageUrls.length === 0) {
+        throw new Error("product-image-file");
+      }
+
+      return {
+        productId: imageInput.productId,
+        finalImageUrls: finalVariantImageUrls,
+        baseImageUrls: variantEntry.baseProduct.imageGalleryUrls,
+        currentOverride: currentImageOverrides.get(imageInput.productId) || null,
+      } satisfies ProductImageMutationInput;
+    });
   } catch (error) {
-    if (uploadedImageUrls.length > 0) {
-      await deleteManagedProductImages(uploadedImageUrls);
+    const uploadedUrls = [...uploadedImageUrls, ...uploadedVariantImageUrls];
+    if (uploadedUrls.length > 0) {
+      await deleteManagedProductImages(uploadedUrls);
     }
 
     const message = error instanceof Error ? error.message : "";
@@ -833,37 +1039,24 @@ export async function saveAdminProductImagesAction(
   }
 
   const baseImageUrls = currentEntry.baseProduct.imageGalleryUrls;
-  let imageMutationApplied = false;
+  const imageOverrideRestoreStack: ProductImageOverrideRestore[] = [];
 
   try {
-    if (finalImageUrls.length === 0) {
-      if (currentImageOverride) {
-        await saveProductImageOverride({
-          productId,
-          imageUrls: [],
-          updatedBy: null,
-        });
-        imageMutationApplied = true;
-      }
-    } else if (arraysMatch(finalImageUrls, baseImageUrls)) {
-      if (currentImageOverride) {
-        await saveProductImageOverride({
-          productId,
-          imageUrls: [],
-          updatedBy: null,
-        });
-        imageMutationApplied = true;
-      }
-    } else if (
-      !currentImageOverride ||
-      !arraysMatch(finalImageUrls, currentImageOverride.imageGalleryUrls)
-    ) {
-      await saveProductImageOverride({
-        productId,
-        imageUrls: finalImageUrls,
+    await applyProductImageOverrideMutation({
+      productId,
+      finalImageUrls,
+      baseImageUrls,
+      currentOverride: currentImageOverride,
+      updatedBy: sessionUser.username,
+      restoreStack: imageOverrideRestoreStack,
+    });
+
+    for (const variantImageMutation of variantImageMutations) {
+      await applyProductImageOverrideMutation({
+        ...variantImageMutation,
         updatedBy: sessionUser.username,
+        restoreStack: imageOverrideRestoreStack,
       });
-      imageMutationApplied = true;
     }
 
     if (shouldSaveArticleEdits) {
@@ -880,20 +1073,14 @@ export async function saveAdminProductImagesAction(
       });
     }
   } catch (error) {
-    if (uploadedImageUrls.length > 0) {
-      await deleteManagedProductImages(uploadedImageUrls);
+    const uploadedUrls = [...uploadedImageUrls, ...uploadedVariantImageUrls];
+    if (uploadedUrls.length > 0) {
+      await deleteManagedProductImages(uploadedUrls);
     }
 
-    if (imageMutationApplied) {
+    if (imageOverrideRestoreStack.length > 0) {
       try {
-        await saveProductImageOverride({
-          productId,
-          imageUrls: currentImageOverride?.imageGalleryUrls || [],
-          imageMode: currentImageOverride?.imageMode || "exact",
-          imageNote: currentImageOverride?.imageNote || null,
-          imageSourceUrl: currentImageOverride?.imageSourceUrl || null,
-          updatedBy: currentImageOverride?.updatedBy || null,
-        });
+        await restoreProductImageOverrides(imageOverrideRestoreStack);
       } catch (restoreError) {
         console.error("[admin-products] No se pudo restaurar la galeria previa.", restoreError);
       }
@@ -903,9 +1090,23 @@ export async function saveAdminProductImagesAction(
     return { ok: false, error: getAdminProductMutationErrorCode(message) };
   }
 
-  const retainedUrls = new Set(finalImageUrls);
-  const oldManagedUrls =
-    currentImageOverride?.imageGalleryUrls.filter((url) => isManagedProductImageUrl(url)) || [];
+  const imageCleanupInputs: ProductImageMutationInput[] = [
+    {
+      productId,
+      finalImageUrls,
+      baseImageUrls,
+      currentOverride: currentImageOverride,
+    },
+    ...variantImageMutations,
+  ];
+  const retainedUrls = new Set(
+    imageCleanupInputs.flatMap((cleanupInput) => cleanupInput.finalImageUrls),
+  );
+  const oldManagedUrls = imageCleanupInputs.flatMap((cleanupInput) =>
+    cleanupInput.currentOverride?.imageGalleryUrls.filter((url) =>
+      isManagedProductImageUrl(url),
+    ) || [],
+  );
   const orphanManagedUrls = oldManagedUrls.filter((url) => !retainedUrls.has(url));
 
   if (orphanManagedUrls.length > 0) {

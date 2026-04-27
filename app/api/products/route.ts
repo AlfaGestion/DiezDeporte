@@ -1,12 +1,24 @@
 import { NextResponse } from "next/server";
-import { listProducts } from "@/lib/catalog";
+import { listProducts, searchStoreProducts } from "@/lib/catalog";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const products = await listProducts();
+    const { searchParams } = new URL(request.url);
+    const query = searchParams.get("q") || "";
+    const category = searchParams.get("category") || "";
+    const brand = searchParams.get("brand") || "";
+    const hasServerFilters = Boolean(query.trim() || category.trim() || brand.trim());
+    const products = hasServerFilters
+      ? await searchStoreProducts({
+          query,
+          category,
+          brand,
+        })
+      : await listProducts();
+
     return NextResponse.json({ products });
   } catch (error) {
     const message =

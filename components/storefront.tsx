@@ -13,7 +13,10 @@ import {
   LOCAL_STORE_LOGO_DARK_URL,
   LOCAL_STORE_LOGO_URL,
 } from "@/lib/site-assets";
-import { getLegacyArticleParentId } from "@/lib/legacy-article-id";
+import {
+  getLegacyArticleParentId,
+  getLegacyArticleRelationKey,
+} from "@/lib/legacy-article-id";
 import { ThemeToggleIcon, getThemeToggleLabel } from "@/components/theme-toggle-icon";
 import type {
   BrandImage,
@@ -49,6 +52,8 @@ const APPAREL_SIZE_ORDER = [
   "xxl",
   "xxxl",
 ];
+const UNNAMED_COLOR_OPTION_KEY = "__sin-color__";
+const PRODUCTS_PER_PAGE = 60;
 
 type SortOption = "featured" | "name-asc" | "price-asc" | "price-desc";
 type ThemeMode = "light" | "dark";
@@ -80,6 +85,13 @@ type ProductGroup = {
   children: Product[];
   members: Product[];
   groupStock: number;
+};
+
+type VariantColorOption = {
+  key: string;
+  label: string;
+  variants: Product[];
+  stock: number;
 };
 
 type GroupCartSummary = {
@@ -170,6 +182,12 @@ export function Storefront({
   const [selectedAudience, setSelectedAudience] =
     useState<AudienceFilter>("all");
   const [selectedBrand, setSelectedBrand] = useState("all");
+  const [catalogProducts, setCatalogProducts] = useState<Product[]>(initialProducts);
+  const [catalogLoadError, setCatalogLoadError] = useState<string | null>(
+    loadError || null,
+  );
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogPage, setCatalogPage] = useState(1);
   const [categoriesOpen, setCategoriesOpen] = useState(false);
   const [audienceOpen, setAudienceOpen] = useState(false);
   const [brandsOpen, setBrandsOpen] = useState(false);
@@ -202,6 +220,7 @@ export function Storefront({
     Record<string, WebImageOverride | null>
   >({});
   const pendingWebImageSearchesRef = useRef(new Set<string>());
+  const latestCatalogRequestRef = useRef(0);
 
   useEffect(() => {
     const savedCart = window.localStorage.getItem(LOCAL_STORAGE_CART_KEY);
@@ -276,10 +295,21 @@ export function Storefront({
   }, [mobileCartOpen, selectedProduct]);
 
   const resolvedInitialProducts = initialProducts.map(resolveProductImage);
-  const productGroups = buildProductGroups(resolvedInitialProducts);
+  const resolvedCatalogProducts = catalogProducts.map(resolveProductImage);
+  const filterOptionGroups = buildProductGroups(
+    Array.from(
+      new Map(
+        [...resolvedInitialProducts, ...resolvedCatalogProducts].map((product) => [
+          product.id,
+          product,
+        ]),
+      ).values(),
+    ),
+  );
+  const productGroups = buildProductGroups(resolvedCatalogProducts);
   const categories = Array.from(
     new Set(
-      productGroups
+      filterOptionGroups
         .flatMap((group) => group.members.map((product) => product.category))
         .filter(Boolean),
     ),
@@ -321,7 +351,7 @@ export function Storefront({
     ...normalizedBrandImages.filter((brand) => Boolean(brand.label)),
     ...Array.from(
       new Set(
-        productGroups
+        filterOptionGroups
           .map((group) => group.catalogProduct.brand.trim())
           .filter(Boolean),
       ),
@@ -355,6 +385,9 @@ export function Storefront({
   const activePriceLabel = hasActivePriceFilter
     ? `${formatCurrency(effectiveMinPrice)} a ${formatCurrency(effectiveMaxPrice)}`
     : null;
+  const hasServerFilters = Boolean(
+    search.trim() || selectedCategory !== "all" || selectedBrand !== "all",
+  );
   const filteredProductGroups = productGroups
     .filter((group) => {
       const matchesSearch =
@@ -437,6 +470,15 @@ export function Storefront({
         leftProduct.description.localeCompare(rightProduct.description)
       );
     });
+  const totalCatalogPages = Math.max(
+    1,
+    Math.ceil(filteredProductGroups.length / PRODUCTS_PER_PAGE),
+  );
+  const safeCatalogPage = Math.min(catalogPage, totalCatalogPages);
+  const paginatedProductGroups = filteredProductGroups.slice(
+    (safeCatalogPage - 1) * PRODUCTS_PER_PAGE,
+    safeCatalogPage * PRODUCTS_PER_PAGE,
+  );
 
   const subtotal = cart.reduce(
     (sum, item) => sum + item.netPrice * item.quantity,
@@ -520,12 +562,32 @@ export function Storefront({
         (product) => product.id === selectedVariantId,
       ) || getDefaultSelectableProduct(selectedProductGroup)
     : null;
+  const variantColorOptions = selectedProductGroup
+    ? getVariantColorOptions(selectedProductGroup)
+    : [];
+  const activeVariantColorOption =
+    variantColorOptions.find(
+      (option) => option.key === getProductColorKey(selectedDetailProduct),
+    ) || null;
+  const visibleVariants = activeVariantColorOption
+    ? activeVariantColorOption.variants
+    : selectedProductGroup?.children || [];
+  const selectedDetailProductGallery = getProductGallery(selectedDetailProduct);
+  const selectedDetailGroupGallery = selectedProductGroup
+    ? mergeProductGalleries(
+        [
+          selectedDetailProduct,
+          selectedProductGroup.catalogProduct,
+          selectedProductGroup.parentProduct,
+          ...selectedProductGroup.children,
+          ...selectedProductGroup.members,
+        ].filter((product): product is Product => Boolean(product)),
+      )
+    : [];
   const selectedDetailGallery =
-    selectedDetailProduct?.imageGalleryUrls.length
-      ? selectedDetailProduct.imageGalleryUrls
-      : selectedDetailProduct?.imageUrl
-        ? [selectedDetailProduct.imageUrl]
-        : [];
+    selectedDetailGroupGallery.length > 0
+      ? selectedDetailGroupGallery
+      : selectedDetailProductGallery;
   const activeDetailImageUrl =
     selectedDetailImageUrl &&
     selectedDetailGallery.includes(selectedDetailImageUrl)
@@ -578,6 +640,119 @@ export function Storefront({
   }, [filteredProductGroups, selectedDetailProduct, selectedProductGroup]);
 
   useEffect(() => {
+    if (!hasServerFilters) {
+      latestCatalogRequestRef.current += 1;
+      setCatalogProducts(initialProducts);
+      setCatalogLoadError(loadError || null);
+      setCatalogLoading(false);
+      return;
+    }
+
+    const requestId = latestCatalogRequestRef.current + 1;
+    latestCatalogRequestRef.current = requestId;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(async () => {
+      setCatalogLoading(true);
+
+      try {
+        const params = new URLSearchParams();
+
+        if (search.trim()) {
+          params.set("q", search.trim());
+        }
+
+        if (selectedCategory !== "all") {
+          params.set("category", selectedCategory);
+        }
+
+        if (selectedBrand !== "all") {
+          params.set("brand", selectedBrand);
+        }
+
+        const response = await fetch(`/api/products?${params.toString()}`, {
+          signal: controller.signal,
+        });
+        const result = await readJsonResponse<{
+          products?: Product[];
+          error?: string;
+        }>(response);
+
+        if (!response.ok) {
+          throw new Error(result?.error || "No se pudieron obtener los productos.");
+        }
+
+        if (latestCatalogRequestRef.current !== requestId) {
+          return;
+        }
+
+        setCatalogProducts(result?.products || []);
+        setCatalogLoadError(null);
+      } catch (error) {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        if (latestCatalogRequestRef.current !== requestId) {
+          return;
+        }
+
+        setCatalogLoadError(
+          error instanceof Error
+            ? error.message
+            : "No se pudieron obtener los productos.",
+        );
+      } finally {
+        if (latestCatalogRequestRef.current === requestId) {
+          setCatalogLoading(false);
+        }
+      }
+    }, 250);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    hasServerFilters,
+    initialProducts,
+    loadError,
+    search,
+    selectedCategory,
+    selectedBrand,
+  ]);
+
+  useEffect(() => {
+    if (!selectedProduct) {
+      return;
+    }
+
+    const selectedStillVisible = productGroups.some((group) =>
+      group.members.some((product) => product.id === selectedProduct.id),
+    );
+
+    if (!selectedStillVisible) {
+      setSelectedProduct(null);
+    }
+  }, [productGroups, selectedProduct]);
+
+  useEffect(() => {
+    setCatalogPage(1);
+  }, [
+    search,
+    selectedCategory,
+    selectedBrand,
+    selectedAudience,
+    effectiveMinPrice,
+    effectiveMaxPrice,
+  ]);
+
+  useEffect(() => {
+    if (catalogPage > totalCatalogPages) {
+      setCatalogPage(totalCatalogPages);
+    }
+  }, [catalogPage, totalCatalogPages]);
+
+  useEffect(() => {
     if (!selectedProductGroup) {
       setSelectedVariantId(null);
       return;
@@ -594,6 +769,38 @@ export function Storefront({
       return getDefaultSelectableProduct(selectedProductGroup)?.id ?? null;
     });
   }, [selectedProductGroup]);
+
+  useEffect(() => {
+    if (!selectedProductGroup) {
+      return;
+    }
+
+    const colorOptions = getVariantColorOptions(selectedProductGroup);
+    if (colorOptions.length === 0) {
+      return;
+    }
+
+    const currentColorKey = getProductColorKey(selectedDetailProduct);
+    const currentColorOption =
+      colorOptions.find((option) => option.key === currentColorKey) || null;
+
+    if (
+      currentColorOption &&
+      currentColorOption.variants.some(
+        (product) => product.id === selectedDetailProduct?.id,
+      )
+    ) {
+      return;
+    }
+
+    const fallbackVariant = getDefaultSelectableVariant(
+      (currentColorOption || colorOptions[0]).variants,
+    );
+
+    if (fallbackVariant && fallbackVariant.id !== selectedVariantId) {
+      setSelectedVariantId(fallbackVariant.id);
+    }
+  }, [selectedProductGroup, selectedDetailProduct?.id, selectedVariantId]);
 
   useEffect(() => {
     setDetailQuantity(1);
@@ -735,11 +942,7 @@ export function Storefront({
   }
 
   function getCatalogCardGallery(product: Product) {
-    if (product.imageGalleryUrls.length > 0) {
-      return product.imageGalleryUrls;
-    }
-
-    return product.imageUrl ? [product.imageUrl] : [];
+    return getProductGallery(product);
   }
 
   function getCatalogPreviewImageIndex(parentCode: string, galleryLength: number) {
@@ -1521,9 +1724,9 @@ export function Storefront({
               </label>
             </div>
 
-            {loadError ? (
+            {catalogLoadError ? (
               <div className="message error">
-                {loadError}
+                {catalogLoadError}
                 <div className="message-detail">
                   Revisa la configuracion de `.env` y la conectividad a SQL
                   Server.
@@ -1531,14 +1734,18 @@ export function Storefront({
               </div>
             ) : null}
 
-            {!loadError && filteredProductGroups.length === 0 ? (
+            {catalogLoading ? (
+              <div className="empty-state">Actualizando catalogo...</div>
+            ) : null}
+
+            {!catalogLoadError && !catalogLoading && filteredProductGroups.length === 0 ? (
               <div className="empty-state">
                 No hay productos para mostrar con los filtros actuales.
               </div>
             ) : null}
 
-            <div className="catalog-grid">
-              {filteredProductGroups.map((group) => {
+              <div className="catalog-grid">
+              {paginatedProductGroups.map((group) => {
                 const product = group.catalogProduct;
                 const gallery = getCatalogCardGallery(product);
                 const activeGalleryIndex = getCatalogPreviewImageIndex(
@@ -1574,6 +1781,7 @@ export function Storefront({
                     <div className="catalog-card-media">
                       {activeGalleryImageUrl ? (
                         <img
+                          key={activeGalleryImageUrl}
                           src={
                             buildImageProxyUrl(activeGalleryImageUrl, {
                               transparentBackground: true,
@@ -1759,6 +1967,40 @@ export function Storefront({
                 );
               })}
             </div>
+
+            {!catalogLoadError && !catalogLoading && totalCatalogPages > 1 ? (
+              <div className="catalog-pagination">
+                <button
+                  type="button"
+                  className="catalog-pagination-button"
+                  onClick={() => {
+                    setCatalogPage((current) => Math.max(1, current - 1));
+                    scrollToCatalog();
+                  }}
+                  disabled={safeCatalogPage <= 1}
+                >
+                  Anterior
+                </button>
+
+                <div className="catalog-pagination-status">
+                  Pagina {safeCatalogPage} de {totalCatalogPages}
+                </div>
+
+                <button
+                  type="button"
+                  className="catalog-pagination-button"
+                  onClick={() => {
+                    setCatalogPage((current) =>
+                      Math.min(totalCatalogPages, current + 1),
+                    );
+                    scrollToCatalog();
+                  }}
+                  disabled={safeCatalogPage >= totalCatalogPages}
+                >
+                  Siguiente
+                </button>
+              </div>
+            ) : null}
           </section>
         </div>
 
@@ -1900,6 +2142,7 @@ export function Storefront({
                     <div className="product-detail-stage">
                       {activeDetailImageUrl ? (
                         <img
+                          key={activeDetailImageUrl}
                           src={
                             buildImageProxyUrl(activeDetailImageUrl, {
                               transparentBackground: true,
@@ -1994,9 +2237,15 @@ export function Storefront({
                           selectedDetailProduct.description}
                       </h2>
                       <p className="product-detail-subtitle">
-                        {selectedProductGroup &&
-                        selectedProductGroup.children.length > 0
-                          ? `Talle ${getVariantLabel(selectedDetailProduct)}`
+                      {selectedProductGroup &&
+                      selectedProductGroup.children.length > 0
+                          ? [
+                              activeVariantColorOption?.label ||
+                                getProductColorLabel(selectedDetailProduct),
+                              `Talle ${getVariantLabel(selectedDetailProduct)}`,
+                            ]
+                              .filter(Boolean)
+                              .join(" / ")
                           : selectedDetailProduct.defaultSize ||
                             selectedDetailProduct.presentation ||
                             selectedDetailProduct.unitId ||
@@ -2010,6 +2259,11 @@ export function Storefront({
                       ) : null}
                       {selectedDetailProduct.category ? (
                         <span className="catalog-tag">{selectedDetailProduct.category}</span>
+                      ) : null}
+                      {getProductColorLabel(selectedDetailProduct) ? (
+                        <span className="catalog-tag">
+                          {getProductColorLabel(selectedDetailProduct)}
+                        </span>
                       ) : null}
                       <span
                         className={`catalog-tag ${getStockBadgeClass(selectedDetailProduct.stock)}`}
@@ -2038,7 +2292,9 @@ export function Storefront({
                     <p className="product-detail-note">
                       {selectedProductGroup &&
                       selectedProductGroup.children.length > 0
-                        ? "Selecciona el talle correcto antes de agregar el articulo al pedido."
+                        ? activeVariantColorOption
+                          ? "Selecciona el color y el talle correctos antes de agregar el articulo al pedido."
+                          : "Selecciona el talle correcto antes de agregar el articulo al pedido."
                         : "Si necesitas talle, color o mas informacion sobre este articulo, escribinos por WhatsApp y te ayudamos con la variante correcta."}
                     </p>
 
@@ -2142,35 +2398,81 @@ export function Storefront({
 
               {selectedProductGroup &&
               selectedProductGroup.children.length > 0 ? (
-                <div className="product-variant-section">
-                  <div className="product-variant-header">
-                    <span>Talles disponibles</span>
-                    <strong>{selectedProductGroup.children.length}</strong>
-                  </div>
-                  <div className="product-variant-grid">
-                    {selectedProductGroup.children.map((variant) => {
-                      const isActive = selectedDetailProduct.id === variant.id;
-                      const variantOutOfStock =
-                        variant.stock <= 0 && !settings.allowBackorders;
+                <>
+                  {variantColorOptions.length > 0 ? (
+                    <div className="product-variant-section">
+                      <div className="product-variant-header">
+                        <span>Colores disponibles</span>
+                        <strong>{variantColorOptions.length}</strong>
+                      </div>
+                      <div className="product-color-grid">
+                        {variantColorOptions.map((colorOption) => {
+                          const isActive =
+                            activeVariantColorOption?.key === colorOption.key;
+                          const colorOutOfStock =
+                            colorOption.stock <= 0 && !settings.allowBackorders;
+                          const label = `${colorOption.variants.length} talle${
+                            colorOption.variants.length === 1 ? "" : "s"
+                          }`;
+                          const defaultVariant = getDefaultSelectableVariant(
+                            colorOption.variants,
+                          );
 
-                      return (
-                        <button
-                          type="button"
-                          key={variant.id}
-                          className={`product-variant-option ${isActive ? "active" : ""}`}
-                          onClick={() => setSelectedVariantId(variant.id)}
-                        >
-                          <strong>{getVariantLabel(variant)}</strong>
-                          <small>
-                            {variantOutOfStock
-                              ? "Sin stock"
-                              : `Stock ${variant.stock.toFixed(0)}`}
-                          </small>
-                        </button>
-                      );
-                    })}
+                          return (
+                            <button
+                              type="button"
+                              key={colorOption.key}
+                              className={`product-color-option ${isActive ? "active" : ""}`}
+                              onClick={() =>
+                                defaultVariant &&
+                                setSelectedVariantId(defaultVariant.id)
+                              }
+                              aria-pressed={isActive}
+                            >
+                              <strong>{colorOption.label}</strong>
+                              <small>
+                                {colorOutOfStock ? "Sin stock" : label}
+                              </small>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+                  <div className="product-variant-section">
+                    <div className="product-variant-header">
+                      <span>
+                        {activeVariantColorOption
+                          ? `Talles disponibles / ${activeVariantColorOption.label}`
+                          : "Talles disponibles"}
+                      </span>
+                      <strong>{visibleVariants.length}</strong>
+                    </div>
+                    <div className="product-variant-grid">
+                      {visibleVariants.map((variant) => {
+                        const isActive = selectedDetailProduct.id === variant.id;
+                        const variantOutOfStock =
+                          variant.stock <= 0 && !settings.allowBackorders;
+
+                        return (
+                          <button
+                            type="button"
+                            key={variant.id}
+                            className={`product-variant-option ${isActive ? "active" : ""}`}
+                            onClick={() => setSelectedVariantId(variant.id)}
+                          >
+                            <strong>{getVariantLabel(variant)}</strong>
+                            <small>
+                              {variantOutOfStock
+                                ? "Sin stock"
+                                : `Stock ${variant.stock.toFixed(0)}`}
+                            </small>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
+                </>
               ) : null}
 
             </div>
@@ -2892,6 +3194,59 @@ function resolveWhatsappHref(rawValue: string) {
   return `https://wa.me/${digits}`;
 }
 
+function getProductGallery(product: Product | null | undefined) {
+  if (!product) {
+    return [];
+  }
+
+  const gallerySource = product.imageGalleryUrls.length
+    ? product.imageGalleryUrls
+    : product.imageUrl
+      ? [product.imageUrl]
+      : [];
+  const gallery: string[] = [];
+  const seen = new Set<string>();
+
+  for (const imageUrl of gallerySource) {
+    if (!imageUrl || seen.has(imageUrl)) {
+      continue;
+    }
+
+    seen.add(imageUrl);
+    gallery.push(imageUrl);
+  }
+
+  return gallery;
+}
+
+function mergeProductGalleries(products: Array<Product | null | undefined>) {
+  for (const imageMode of ["exact", "illustrative"] as const) {
+    const gallery: string[] = [];
+    const seen = new Set<string>();
+
+    for (const product of products) {
+      if (!product || product.imageMode !== imageMode) {
+        continue;
+      }
+
+      for (const imageUrl of getProductGallery(product)) {
+        if (seen.has(imageUrl)) {
+          continue;
+        }
+
+        seen.add(imageUrl);
+        gallery.push(imageUrl);
+      }
+    }
+
+    if (gallery.length > 0) {
+      return gallery;
+    }
+  }
+
+  return [];
+}
+
 function buildProductGroups(products: Product[]) {
   const groups = new Map<
     string,
@@ -2931,10 +3286,21 @@ function buildProductGroups(products: Product[]) {
       sortedChildren[0] ||
       group.parentProduct ||
       group.members[0];
+    const imageCandidates = [
+      group.parentProduct,
+      defaultSelectable,
+      ...sortedChildren,
+      ...group.members,
+    ].filter((product): product is Product => Boolean(product));
+    const catalogGallery = mergeProductGalleries(imageCandidates);
     const imageProduct =
-      [group.parentProduct, defaultSelectable, ...sortedChildren, ...group.members]
-        .filter((product): product is Product => Boolean(product))
-        .find((product) => Boolean(product.imageUrl)) || primaryProduct;
+      imageCandidates.find(
+        (product) =>
+          product.imageMode !== "illustrative" &&
+          getProductGallery(product).length > 0,
+      ) ||
+      imageCandidates.find((product) => getProductGallery(product).length > 0) ||
+      primaryProduct;
     const catalogProduct: Product = {
       ...primaryProduct,
       brand: primaryProduct.brand || defaultSelectable.brand,
@@ -2953,11 +3319,17 @@ function buildProductGroups(products: Product[]) {
       presentation:
         primaryProduct.presentation || defaultSelectable.presentation,
       barcode: primaryProduct.barcode || defaultSelectable.barcode,
-        imageUrl: imageProduct.imageUrl,
-        imageGalleryUrls: imageProduct.imageGalleryUrls,
-        imageMode: imageProduct.imageMode,
-        imageNote: imageProduct.imageNote,
-        imageSourceUrl: imageProduct.imageSourceUrl,
+      imageUrl: catalogGallery[0] || imageProduct.imageUrl,
+      imageGalleryUrls: catalogGallery,
+      imageMode: catalogGallery.length > 0
+        ? imageProduct.imageMode
+        : primaryProduct.imageMode,
+      imageNote: catalogGallery.length > 0
+        ? imageProduct.imageNote
+        : primaryProduct.imageNote,
+      imageSourceUrl: catalogGallery.length > 0
+        ? imageProduct.imageSourceUrl
+        : primaryProduct.imageSourceUrl,
       stock: groupStock,
     };
 
@@ -2973,7 +3345,7 @@ function buildProductGroups(products: Product[]) {
 }
 
 function getParentProductCode(code: string) {
-  return getLegacyArticleParentId(code);
+  return getLegacyArticleRelationKey(code) || getLegacyArticleParentId(code);
 }
 
 function isChildProduct(product: Product) {
@@ -2986,6 +3358,64 @@ function getDefaultSelectableProduct(group: ProductGroup) {
     group.children[0] ||
     group.parentProduct ||
     group.catalogProduct
+  );
+}
+
+function getDefaultSelectableVariant(variants: Product[]) {
+  return variants.find((product) => product.stock > 0) || variants[0] || null;
+}
+
+function getProductColorLabel(product: Product | null | undefined) {
+  return (product?.defaultColor || "").replace(/\s+/g, " ").trim();
+}
+
+function getProductColorKey(product: Product | null | undefined) {
+  if (!product) {
+    return "";
+  }
+
+  const label = getProductColorLabel(product);
+  return label ? normalizeFilterValue(label) : UNNAMED_COLOR_OPTION_KEY;
+}
+
+function getVariantColorOptions(group: ProductGroup) {
+  const colorOptions = new Map<string, VariantColorOption>();
+  let hasNamedColors = false;
+
+  for (const variant of group.children) {
+    const label = getProductColorLabel(variant);
+    const key = getProductColorKey(variant);
+    const existing = colorOptions.get(key);
+    const resolvedLabel = label || "Sin color";
+
+    if (label) {
+      hasNamedColors = true;
+    }
+
+    if (existing) {
+      existing.variants.push(variant);
+      existing.stock += Math.max(0, variant.stock);
+      continue;
+    }
+
+    colorOptions.set(key, {
+      key,
+      label: resolvedLabel,
+      variants: [variant],
+      stock: Math.max(0, variant.stock),
+    });
+  }
+
+  if (!hasNamedColors) {
+    return [];
+  }
+
+  return Array.from(colorOptions.values()).sort((left, right) =>
+    left.key === UNNAMED_COLOR_OPTION_KEY
+      ? 1
+      : right.key === UNNAMED_COLOR_OPTION_KEY
+        ? -1
+        : VARIANT_LABEL_COLLATOR.compare(left.label, right.label),
   );
 }
 

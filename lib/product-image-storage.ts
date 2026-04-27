@@ -521,6 +521,56 @@ export async function readManagedProductImage(fileName: string) {
   return readManagedProductImageFromFtp(normalizedFileName);
 }
 
+// Guarda la imagen ilustrativa descargada desde una URL remota
+export async function saveIllustrativeProductImageFromUrl({ productId, imageUrl }: { productId: string, imageUrl: string }) {
+  await ensureProductImageStorageReady();
+
+  const config = getProductImageStorageConfig();
+  // Sanitizar y mantener el formato exacto del productId heredado
+  // Armamos el filename: osa + codigo + '_ilustrativa' + extension
+  // Permitimos solo imagenes validas y tamaño máximo 8MB
+  if (!productId || !imageUrl) return null;
+
+  const response = await fetch(imageUrl);
+  if (!response.ok) return null;
+  const contentType = response.headers.get('content-type') || '';
+  if (!/^image\/(jpeg|png|webp|gif|avif)$/.test(contentType)) return null;
+
+  const ext = MIME_EXTENSION_MAP.get(contentType);
+  if (!ext) return null;
+
+  // Mantener el productId tal y como viene de la base, sin trim ni normalización destructiva
+  const fileName = `osa${productId}_ilustrativa.${ext}`;
+
+  // ¿Ya existe ese archivo? Si sí, devolver URL y no sobrescribir.
+  const fileIndex = await getManagedProductImageFileIndex();
+  if (fileIndex.has(fileName.toLowerCase())) {
+    return buildManagedProductImageUrl(fileName);
+  }
+
+  // Descargar el buffer (verificando tamaño)
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.length === 0 || buffer.length > MAX_IMAGE_FILE_SIZE_BYTES) return null;
+
+  try {
+    if (config.type === "local") {
+      const absolutePath = path.join(config.root, fileName);
+      await fs.writeFile(absolutePath, buffer);
+      invalidateManagedProductImageFileIndexCache();
+      return buildManagedProductImageUrl(fileName);
+    }
+    // FTP
+    await withFtpClient(async (client) => {
+      const remotePath = buildFtpRemoteFilePath(fileName);
+      await client.uploadFrom(Readable.from([buffer]), remotePath);
+    });
+    invalidateManagedProductImageFileIndexCache();
+    return buildManagedProductImageUrl(fileName);
+  } catch {
+    return null;
+  }
+}
+
 export async function saveUploadedProductImages(input: {
   productId: string;
   files: File[];

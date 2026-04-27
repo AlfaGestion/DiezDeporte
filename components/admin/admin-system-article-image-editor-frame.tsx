@@ -63,6 +63,9 @@ type VariantGroupSummary = {
     colorLabel: string;
     price: number;
     stock: number;
+    imageUrl: string | null;
+    imageGalleryUrls: string[];
+    hasCustomImages: boolean;
   }>;
 } | null;
 
@@ -90,6 +93,8 @@ type VariantDraft = {
   color: string;
   price: string;
   stock: number;
+  imageItem: GalleryItem | null;
+  hasCustomImages: boolean;
 };
 
 type GalleryManifestItem =
@@ -152,6 +157,10 @@ function createUrlGalleryItem(url: string) {
   } satisfies GalleryItem;
 }
 
+function createInitialGalleryItem(url: string | null | undefined) {
+  return url ? createUrlGalleryItem(url) : null;
+}
+
 function createUploadGalleryItem(file: File) {
   return {
     id: buildClientId("gallery-upload"),
@@ -171,6 +180,16 @@ function revokeGalleryItem(item: GalleryItem) {
 
 function revokeGalleryItems(items: GalleryItem[]) {
   items.forEach((item) => revokeGalleryItem(item));
+}
+
+function getGalleryItemPreviewSrc(item: GalleryItem | null) {
+  if (!item) {
+    return null;
+  }
+
+  return buildImageProxyUrl(item.src, {
+    transparentBackground: true,
+  }) || item.src;
 }
 
 function getParentCode(entry: EditorEntry) {
@@ -247,6 +266,7 @@ export function AdminSystemArticleImageEditorFrame(props: {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const uploadItemsRef = useRef<GalleryItem[]>([]);
+  const variantUploadItemsRef = useRef<GalleryItem[]>([]);
   const [description, setDescription] = useState("");
   const [price, setPrice] = useState("");
   const [size, setSize] = useState("");
@@ -291,14 +311,23 @@ export function AdminSystemArticleImageEditorFrame(props: {
   }, [galleryItems]);
 
   useEffect(() => {
+    variantUploadItemsRef.current = variantDrafts.flatMap((variant) =>
+      variant.imageItem?.type === "upload" ? [variant.imageItem] : [],
+    );
+  }, [variantDrafts]);
+
+  useEffect(() => {
     return () => {
       revokeGalleryItems(uploadItemsRef.current);
+      revokeGalleryItems(variantUploadItemsRef.current);
     };
   }, []);
 
   useEffect(() => {
     revokeGalleryItems(uploadItemsRef.current);
+    revokeGalleryItems(variantUploadItemsRef.current);
     uploadItemsRef.current = [];
+    variantUploadItemsRef.current = [];
 
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -342,6 +371,10 @@ export function AdminSystemArticleImageEditorFrame(props: {
         color: variant.colorLabel === "Sin dato" ? "" : variant.colorLabel,
         price: formatPriceInput(variant.price),
         stock: variant.stock,
+        imageItem: createInitialGalleryItem(
+          variant.imageGalleryUrls[0] || variant.imageUrl,
+        ),
+        hasCustomImages: variant.hasCustomImages,
       })),
     );
     setUrlDraft("");
@@ -698,6 +731,67 @@ export function AdminSystemArticleImageEditorFrame(props: {
     }
   };
 
+  const replaceVariantImage = (index: number, imageItem: GalleryItem | null) => {
+    setVariantDrafts((current) =>
+      current.map((variant, currentIndex) => {
+        if (currentIndex !== index) {
+          return variant;
+        }
+
+        if (
+          variant.imageItem?.type === "upload" &&
+          variant.imageItem.id !== imageItem?.id
+        ) {
+          revokeGalleryItem(variant.imageItem);
+        }
+
+        return {
+          ...variant,
+          imageItem,
+          hasCustomImages: Boolean(imageItem),
+        };
+      }),
+    );
+  };
+
+  const handleVariantFileSelection = (
+    index: number,
+    event: ChangeEvent<HTMLInputElement>,
+  ) => {
+    const selectedFile = Array.from(event.target.files || []).find(
+      (file) =>
+        file &&
+        typeof file.size === "number" &&
+        file.size > 0 &&
+        file.type.startsWith("image/"),
+    );
+
+    if (selectedFile) {
+      replaceVariantImage(index, createUploadGalleryItem(selectedFile));
+    }
+
+    event.target.value = "";
+  };
+
+  const handleUseCoverForVariant = (index: number) => {
+    const coverItem = galleryItems[0] || null;
+
+    if (!coverItem) {
+      return;
+    }
+
+    replaceVariantImage(
+      index,
+      coverItem.type === "upload"
+        ? createUploadGalleryItem(coverItem.file)
+        : createUrlGalleryItem(coverItem.src),
+    );
+  };
+
+  const handleClearVariantImage = (index: number) => {
+    replaceVariantImage(index, null);
+  };
+
   const buildMutationFormData = () => {
     const formData = new FormData();
 
@@ -719,6 +813,25 @@ export function AdminSystemArticleImageEditorFrame(props: {
       formData.append("variantSize", variant.size);
       formData.append("variantColor", variant.color);
       formData.append("variantPrice", variant.price);
+      formData.append("variantImageProductId", variant.id);
+      formData.append(
+        "variantImageUrl",
+        variant.imageItem?.type === "url" ? variant.imageItem.src : "",
+      );
+      formData.append(
+        "variantImageClientId",
+        variant.imageItem?.type === "upload" ? variant.imageItem.clientId : "",
+      );
+
+      if (variant.imageItem?.type === "upload") {
+        formData.append("variantNewImageProductId", variant.id);
+        formData.append("variantNewImageClientId", variant.imageItem.clientId);
+        formData.append(
+          "variantNewImages",
+          variant.imageItem.file,
+          variant.imageItem.file.name,
+        );
+      }
     });
 
     uploadItems.forEach((item) => {
@@ -814,6 +927,14 @@ export function AdminSystemArticleImageEditorFrame(props: {
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     void runMutation("save");
+  };
+
+  const handleAddSizeClick = () => {
+    setFeedback({
+      tone: "error",
+      message:
+        "El boton para agregar talle ya esta visible, pero la alta de una variante nueva todavia no esta implementada en este panel.",
+    });
   };
 
   return (
@@ -1329,7 +1450,7 @@ export function AdminSystemArticleImageEditorFrame(props: {
                       Articulos hijos
                     </h3>
                     <p className="mt-1 text-sm text-[color:var(--admin-text)]">
-                      Talle, color y precio en una tabla compacta. El stock se muestra en vivo como referencia.
+                      Imagen, talle, color y precio en una tabla compacta. El stock se muestra en vivo como referencia.
                     </p>
                   </div>
 
@@ -1344,9 +1465,10 @@ export function AdminSystemArticleImageEditorFrame(props: {
                   <>
                     <div className="overflow-hidden rounded-[18px] border border-[color:var(--admin-card-line)]">
                       <div className="max-h-[360px] overflow-auto">
-                        <table className="min-w-full border-collapse text-sm">
+                        <table className="min-w-[1040px] border-collapse text-sm">
                           <thead className="sticky top-0 bg-[color:var(--admin-pane-bg)]">
                             <tr className="border-b border-[color:var(--admin-card-line)] text-left text-xs uppercase tracking-[0.18em] text-[color:var(--admin-text)]">
+                              <th className="px-4 py-3">Imagen</th>
                               <th className="px-4 py-3">Articulo</th>
                               <th className="px-4 py-3">Talle</th>
                               <th className="px-4 py-3">Color</th>
@@ -1355,78 +1477,144 @@ export function AdminSystemArticleImageEditorFrame(props: {
                             </tr>
                           </thead>
                           <tbody>
-                            {variantDrafts.map((variant, index) => (
-                              <tr
-                                key={variant.id}
-                                className="border-b border-[color:var(--admin-card-line)] align-top last:border-b-0"
-                              >
-                                <td className="px-4 py-3">
-                                  <input type="hidden" name="variantId" value={variant.id} />
-                                  <div className="space-y-1">
-                                    <strong className="block text-[color:var(--admin-title)]">
-                                      {variant.code}
-                                    </strong>
-                                    <span className="block text-xs text-[color:var(--admin-text)]">
-                                      {variant.description}
+                            {variantDrafts.map((variant, index) => {
+                              const variantPreviewSrc = getGalleryItemPreviewSrc(variant.imageItem);
+                              const canUseCover = Boolean(galleryItems[0]);
+
+                              return (
+                                <tr
+                                  key={variant.id}
+                                  className="border-b border-[color:var(--admin-card-line)] align-top last:border-b-0"
+                                >
+                                  <td className="px-4 py-3">
+                                    <div className="flex min-w-[210px] items-start gap-3">
+                                      <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-[14px] border border-[color:var(--admin-card-line)] bg-[color:var(--admin-pane-bg)]">
+                                        {variantPreviewSrc ? (
+                                          <img
+                                            src={variantPreviewSrc}
+                                            alt={variant.description}
+                                            className="h-full w-full object-contain"
+                                          />
+                                        ) : (
+                                          <span className="px-2 text-center text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--admin-text)]">
+                                            Sin imagen
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      <div className="grid gap-2">
+                                        <label className="inline-flex h-8 cursor-pointer items-center justify-center rounded-[10px] border border-[color:var(--admin-card-line)] bg-[color:var(--admin-pane-bg)] px-3 text-xs font-semibold text-[color:var(--admin-title)] transition hover:bg-white/70 dark:hover:bg-white/10">
+                                          Subir
+                                          <input
+                                            type="file"
+                                            accept="image/jpeg,image/png,image/webp,image/gif,image/avif"
+                                            className="hidden"
+                                            onChange={(event) =>
+                                              handleVariantFileSelection(index, event)
+                                            }
+                                          />
+                                        </label>
+
+                                        <div className="flex gap-2">
+                                          <button
+                                            type="button"
+                                            className="inline-flex h-8 items-center justify-center rounded-[10px] border border-[color:var(--admin-card-line)] bg-[color:var(--admin-pane-bg)] px-3 text-xs font-semibold text-[color:var(--admin-title)] transition hover:bg-white/70 disabled:cursor-not-allowed disabled:opacity-45 dark:hover:bg-white/10"
+                                            onClick={() => handleUseCoverForVariant(index)}
+                                            disabled={!canUseCover}
+                                          >
+                                            Portada
+                                          </button>
+                                          {variant.imageItem ? (
+                                            <button
+                                              type="button"
+                                              className="inline-flex h-8 items-center justify-center rounded-[10px] border border-rose-300/50 bg-rose-500/10 px-3 text-xs font-semibold text-rose-700 transition hover:bg-rose-500/20 dark:text-rose-200"
+                                              onClick={() => handleClearVariantImage(index)}
+                                            >
+                                              Quitar
+                                            </button>
+                                          ) : null}
+                                        </div>
+
+                                        {variant.imageItem?.type === "upload" ? (
+                                          <span className="text-[11px] text-[color:var(--admin-text)]">
+                                            Nueva imagen
+                                          </span>
+                                        ) : variant.hasCustomImages ? (
+                                          <span className="text-[11px] text-[color:var(--admin-text)]">
+                                            Personalizada
+                                          </span>
+                                        ) : null}
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <input type="hidden" name="variantId" value={variant.id} />
+                                    <div className="space-y-1">
+                                      <strong className="block text-[color:var(--admin-title)]">
+                                        {variant.code}
+                                      </strong>
+                                      <span className="block text-xs text-[color:var(--admin-text)]">
+                                        {variant.description}
+                                      </span>
+                                    </div>
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <input
+                                      name="variantSize"
+                                      value={variant.size}
+                                      onChange={(event) =>
+                                        setVariantDrafts((current) =>
+                                          current.map((item, currentIndex) =>
+                                            currentIndex === index
+                                              ? { ...item, size: event.target.value }
+                                              : item,
+                                          ),
+                                        )
+                                      }
+                                      className={cn(adminInputClass, "h-10")}
+                                    />
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <input
+                                      name="variantColor"
+                                      value={variant.color}
+                                      onChange={(event) =>
+                                        setVariantDrafts((current) =>
+                                          current.map((item, currentIndex) =>
+                                            currentIndex === index
+                                              ? { ...item, color: event.target.value }
+                                              : item,
+                                          ),
+                                        )
+                                      }
+                                      className={cn(adminInputClass, "h-10")}
+                                    />
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <input
+                                      name="variantPrice"
+                                      value={variant.price}
+                                      onChange={(event) =>
+                                        setVariantDrafts((current) =>
+                                          current.map((item, currentIndex) =>
+                                            currentIndex === index
+                                              ? { ...item, price: event.target.value }
+                                              : item,
+                                          ),
+                                        )
+                                      }
+                                      className={cn(adminInputClass, "h-10 min-w-[124px]")}
+                                      inputMode="decimal"
+                                    />
+                                  </td>
+                                  <td className="px-4 py-3">
+                                    <span className="inline-flex rounded-full bg-[color:var(--admin-pane-bg)] px-3 py-1.5 font-medium text-[color:var(--admin-title)]">
+                                      {variant.stock.toFixed(0)}
                                     </span>
-                                  </div>
-                                </td>
-                                <td className="px-4 py-3">
-                                  <input
-                                    name="variantSize"
-                                    value={variant.size}
-                                    onChange={(event) =>
-                                      setVariantDrafts((current) =>
-                                        current.map((item, currentIndex) =>
-                                          currentIndex === index
-                                            ? { ...item, size: event.target.value }
-                                            : item,
-                                        ),
-                                      )
-                                    }
-                                    className={cn(adminInputClass, "h-10")}
-                                  />
-                                </td>
-                                <td className="px-4 py-3">
-                                  <input
-                                    name="variantColor"
-                                    value={variant.color}
-                                    onChange={(event) =>
-                                      setVariantDrafts((current) =>
-                                        current.map((item, currentIndex) =>
-                                          currentIndex === index
-                                            ? { ...item, color: event.target.value }
-                                            : item,
-                                        ),
-                                      )
-                                    }
-                                    className={cn(adminInputClass, "h-10")}
-                                  />
-                                </td>
-                                <td className="px-4 py-3">
-                                  <input
-                                    name="variantPrice"
-                                    value={variant.price}
-                                    onChange={(event) =>
-                                      setVariantDrafts((current) =>
-                                        current.map((item, currentIndex) =>
-                                          currentIndex === index
-                                            ? { ...item, price: event.target.value }
-                                            : item,
-                                        ),
-                                      )
-                                    }
-                                    className={cn(adminInputClass, "h-10 min-w-[124px]")}
-                                    inputMode="decimal"
-                                  />
-                                </td>
-                                <td className="px-4 py-3">
-                                  <span className="inline-flex rounded-full bg-[color:var(--admin-pane-bg)] px-3 py-1.5 font-medium text-[color:var(--admin-title)]">
-                                    {variant.stock.toFixed(0)}
-                                  </span>
-                                </td>
-                              </tr>
-                            ))}
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
@@ -1441,6 +1629,16 @@ export function AdminSystemArticleImageEditorFrame(props: {
                     Este articulo no tiene hijos vinculados para editar en esta vista.
                   </div>
                 )}
+
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    className={adminSecondaryButtonClass}
+                    onClick={handleAddSizeClick}
+                  >
+                    Agregar talle
+                  </button>
+                </div>
               </section>
             </div>
           </form>
