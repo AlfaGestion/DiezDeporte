@@ -26,7 +26,7 @@ export default function AppError({
   return (
     <ErrorState
       title="Tuvimos un inconveniente"
-      message="No pudimos mostrar esta pagina en este momento. Proba de nuevo en unos minutos."
+      message="No pudimos mostrar esta página en este momento. Probá de nuevo en unos minutos."
       primaryAction={
         <Link href="/" className="submit-order-button">
           Volver al inicio

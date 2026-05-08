@@ -12,7 +12,7 @@ export function PaymentErrorState({
   return (
     <ErrorState
       title="No pudimos iniciar el pago"
-      message="Tu pedido sigue registrado. Podes volver a intentarlo."
+      message="Tu pedido sigue registrado. Podés volver a intentarlo."
       primaryAction={
         retryHref ? (
           <a href={retryHref} className="submit-order-button">
@@ -35,7 +35,7 @@ export function PaymentErrorState({
         <SupportHint
           href={supportHref}
           actionLabel="Necesito ayuda"
-          text="Si el problema continua, podemos ayudarte a completar la compra."
+          text="Si el problema continúa, podemos ayudarte a completar la compra."
         />
       }
     />

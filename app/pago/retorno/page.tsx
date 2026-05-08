@@ -15,7 +15,7 @@ export default async function PaymentReturnPage() {
           <section className="payment-return-card">
             <span className="payment-return-eyebrow">{settings.storeName}</span>
             <h1>Estamos verificando tu pago</h1>
-            <p>Consultando el estado mas reciente de Mercado Pago.</p>
+            <p>Consultando el estado más reciente de Mercado Pago.</p>
           </section>
         </main>
       }

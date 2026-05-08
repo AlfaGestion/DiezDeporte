@@ -119,7 +119,7 @@ async function readJsonResponse<T>(response: Response): Promise<T | null> {
   try {
     return JSON.parse(raw) as T;
   } catch {
-    throw new Error("El servidor devolvio una respuesta invalida. Reintenta en unos segundos.");
+    throw new Error("El servidor devolvió una respuesta inválida. Reintenta en unos segundos.");
   }
 }
 
@@ -171,20 +171,20 @@ function getCheckoutValidationMessage(params: {
     if (mercadoPagoEnabled) {
       return requiresShippingAddress
         ? requiresPostalCode
-          ? "Completa nombre, email, telefono, direccion, localidad y codigo postal para iniciar el pago."
-          : "Completa nombre, email, telefono, direccion y localidad para iniciar el pago."
-        : "Completa nombre, email y telefono para iniciar el pago.";
+          ? "Completa nombre, email, teléfono, dirección, localidad y código postal para iniciar el pago."
+          : "Completa nombre, email, teléfono, dirección y localidad para iniciar el pago."
+        : "Completa nombre, email y teléfono para iniciar el pago.";
     }
 
     return requiresShippingAddress
       ? requiresPostalCode
-        ? "Completa nombre, email, telefono, direccion, localidad y codigo postal para registrar el pedido."
-        : "Completa nombre, email, telefono, direccion y localidad para registrar el pedido."
-      : "Completa nombre, email y telefono para registrar el pedido.";
+        ? "Completa nombre, email, teléfono, dirección, localidad y código postal para registrar el pedido."
+        : "Completa nombre, email, teléfono, dirección y localidad para registrar el pedido."
+      : "Completa nombre, email y teléfono para registrar el pedido.";
   }
 
   if (requiresPostalCode && !isLikelyValidPostalCode(customer.postalCode)) {
-    return "Ingresa un codigo postal valido para continuar.";
+    return "Ingresa un código postal válido para continuar.";
   }
 
   return null;
@@ -195,7 +195,7 @@ function getFreeShippingPolicyCopy(threshold: number) {
     return null;
   }
 
-  return `En compras con envio desde ${formatCurrency(threshold)} el envio es gratis. Si no, queda a calcular segun destino.`;
+  return `En compras con envío desde ${formatCurrency(threshold)} el envío es gratis. Si no, queda a calcular según destino.`;
 }
 
 function getAmountMissingForFreeShipping(total: number, threshold: number) {
@@ -215,19 +215,19 @@ function buildShippingEstimateWindow(estimate: ShippingEstimateResult | null | u
   const max = estimate.deliveryTimeMax?.trim() || null;
 
   if (min && max && min === max) {
-    return `${min} dias habiles`;
+    return `${min} días hábiles`;
   }
 
   if (min && max) {
-    return `${min} a ${max} dias habiles`;
+    return `${min} a ${max} días hábiles`;
   }
 
   if (min) {
-    return `desde ${min} dias habiles`;
+    return `desde ${min} días hábiles`;
   }
 
   if (max) {
-    return `hasta ${max} dias habiles`;
+    return `hasta ${max} días hábiles`;
   }
 
   return null;
@@ -252,8 +252,8 @@ function getShippingSummary(
         label: "Gratis",
         detail:
           snapshot.freeShippingThreshold > 0
-            ? `Este pedido supera ${formatCurrency(snapshot.freeShippingThreshold)} y califica para envio gratis.`
-            : "Este pedido califica para envio gratis.",
+            ? `Este pedido supera ${formatCurrency(snapshot.freeShippingThreshold)} y califica para envío gratis.`
+            : "Este pedido califica para envío gratis.",
       };
     case "estimated": {
       const deliveryWindow = buildShippingEstimateWindow(estimate);
@@ -267,7 +267,7 @@ function getShippingSummary(
         detail: [
           `Estimado con ${serviceName}.`,
           deliveryWindow ? `Entrega aproximada ${deliveryWindow}.` : null,
-          "Usamos un paquete aproximado segun el tipo de producto del carrito.",
+          "Usamos un paquete aproximado según el tipo de producto del carrito.",
         ]
           .filter(Boolean)
           .join(" "),
@@ -278,13 +278,13 @@ function getShippingSummary(
         label: "A calcular",
         detail:
           snapshot.freeShippingThreshold > 0
-            ? `El total actual no suma envio. Debajo de ${formatCurrency(snapshot.freeShippingThreshold)} el envio queda a calcular segun destino.`
-            : "El envio queda a calcular segun destino.",
+            ? `El total actual no suma envío. Debajo de ${formatCurrency(snapshot.freeShippingThreshold)} el envío queda a calcular según destino.`
+            : "El envío queda a calcular según destino.",
       };
     default:
       return {
         label: "No aplica",
-        detail: "Retiras en el local, asi que no se suma envio.",
+        detail: "Retiras en el local, así que no se suma envío.",
       };
   }
 }
@@ -807,14 +807,14 @@ export function Storefront({
   const detailVariantSelectionNote = selectedProductGroup
     ? detailHasMeaningfulVariantChoices
       ? showDetailColorSelector && showDetailSizeSelector
-        ? "Selecciona el color y el talle correctos antes de agregar el articulo al pedido."
+        ? "Selecciona el color y el talle correctos antes de agregar el artículo al pedido."
         : showDetailColorSelector
-          ? "Selecciona el color correcto antes de agregar el articulo al pedido."
+          ? "Selecciona el color correcto antes de agregar el artículo al pedido."
           : showDetailSizeSelector
-            ? "Selecciona el talle correcto antes de agregar el articulo al pedido."
+            ? "Selecciona el talle correcto antes de agregar el artículo al pedido."
             : null
       : null
-    : "Si necesitas talle, color o mas informacion sobre este articulo, escribinos por WhatsApp y te ayudamos con la variante correcta.";
+    : "Si necesitas talle, color o más información sobre este artículo, escribinos por WhatsApp y te ayudamos con la variante correcta.";
   const selectedDetailProductGallery = getProductGallery(selectedDetailProduct);
   const selectedDetailGroupGallery = selectedProductGroup
     ? mergeProductGalleries(
@@ -890,7 +890,7 @@ export function Storefront({
 
         if (!response.ok || !result?.estimate) {
           throw new Error(
-            result?.error || "No pudimos calcular el envio con Correo Argentino.",
+            result?.error || "No pudimos calcular el envío con Correo Argentino.",
           );
         }
 
@@ -904,7 +904,7 @@ export function Storefront({
         setShippingEstimateError(
           error instanceof Error
             ? error.message
-            : "No pudimos calcular el envio con Correo Argentino.",
+            : "No pudimos calcular el envío con Correo Argentino.",
         );
       } finally {
         if (!controller.signal.aborted) {
@@ -1435,12 +1435,12 @@ export function Storefront({
     const normalizedPostalCode = normalizePostalCodeInput(postalCodePromptDraft);
 
     if (!normalizedPostalCode) {
-      setPostalCodePromptError("Ingresa un codigo postal para continuar.");
+      setPostalCodePromptError("Ingresa un código postal para continuar.");
       return;
     }
 
     if (!isLikelyValidPostalCode(normalizedPostalCode)) {
-      setPostalCodePromptError("Ingresa un codigo postal valido.");
+      setPostalCodePromptError("Ingresa un código postal válido.");
       return;
     }
 
@@ -1461,15 +1461,15 @@ export function Storefront({
     }
 
     if (!normalizePostalCodeInput(customer.postalCode)) {
-      return "Ingresa tu codigo postal para cotizar el envio.";
+      return "Ingresa tu código postal para cotizar el envío.";
     }
 
     if (!isLikelyValidPostalCode(customer.postalCode)) {
-      return "Ingresa un codigo postal valido para cotizar el envio.";
+      return "Ingresa un código postal válido para cotizar el envío.";
     }
 
     if (shippingEstimateLoading) {
-      return "Estamos calculando el envio con Correo Argentino. Espera unos segundos.";
+      return "Estamos calculando el envío con Correo Argentino. Espera unos segundos.";
     }
 
     if (shippingEstimate) {
@@ -1478,7 +1478,7 @@ export function Storefront({
 
     return (
       shippingEstimateError ||
-      "No pudimos cotizar el envio con Correo Argentino. Reintenta en unos segundos."
+      "No pudimos cotizar el envío con Correo Argentino. Reintenta en unos segundos."
     );
   }
 
@@ -1685,7 +1685,7 @@ export function Storefront({
     : "order-panel checkout-sheet-hidden";
   const postalCodeButtonLabel = normalizedCustomerPostalCode
     ? `CP ${normalizedCustomerPostalCode}`
-    : "Cargar codigo postal";
+    : "Cargar código postal";
   const amountMissingForFreeShipping = getAmountMissingForFreeShipping(
     total,
     settings.freeShippingThreshold,
@@ -1703,48 +1703,48 @@ export function Storefront({
   const catalogSummaryCountLabel =
     itemCount === 1 ? "1 unidad" : `${itemCount} unidades`;
   const catalogFreeShippingBadgeLabel = qualifiesForFreeShippingInStorefront
-    ? "Envio gratis"
+    ? "Envío gratis"
     : settings.freeShippingThreshold > 0
       ? `Gratis desde ${formatCurrency(settings.freeShippingThreshold)}`
-      : "Envio a calcular";
+      : "Envío a calcular";
   const catalogFreeShippingPolicyDetail =
     settings.freeShippingThreshold <= 0
-      ? "El costo de envio se calcula segun el destino."
+      ? "El costo de envío se calcula según el destino."
       : qualifiesForFreeShippingInStorefront
-        ? `Superaste ${formatCurrency(settings.freeShippingThreshold)}. Si eliges envio, no se suma ningun cargo extra.`
+        ? `Superaste ${formatCurrency(settings.freeShippingThreshold)}. Si eliges envío, no se suma ningún cargo extra.`
         : amountMissingForFreeShipping > 0
-          ? `Te faltan ${formatCurrency(amountMissingForFreeShipping)} para que el envio sea gratis.`
-          : freeShippingPolicyCopy || "El envio se calcula segun el destino.";
+          ? `Te faltan ${formatCurrency(amountMissingForFreeShipping)} para que el envío sea gratis.`
+          : freeShippingPolicyCopy || "El envío se calcula según el destino.";
   const catalogShippingEstimateLabel = !normalizedCustomerPostalCode
     ? "Carga tu CP"
     : qualifiesForFreeShippingInStorefront
-      ? "Envio gratis"
+      ? "Envío gratis"
       : shippingEstimateLoading
         ? "Calculando"
         : catalogShippingPreview.shippingStatus === "estimated" &&
             Number(catalogShippingPreview.shippingCost || 0) > 0
           ? formatCurrency(Number(catalogShippingPreview.shippingCost || 0))
           : shippingEstimateError
-            ? "Sin cotizacion"
+            ? "Sin cotización"
             : "A calcular";
   const catalogShippingEstimateCopy = !normalizedCustomerPostalCode
-    ? "Ingresa tu codigo postal para estimar el envio y dejarlo guardado para tu compra."
+    ? "Ingresa tu código postal para estimar el envío y dejarlo guardado para tu compra."
     : cart.length === 0
       ? `CP ${normalizedCustomerPostalCode} guardado para usarlo durante el checkout.`
       : qualifiesForFreeShippingInStorefront
-        ? `CP ${normalizedCustomerPostalCode}. Si eliges envio, este pedido ya califica para envio gratis.`
+        ? `CP ${normalizedCustomerPostalCode}. Si eliges envío, este pedido ya califica para envío gratis.`
         : catalogShippingPreview.shippingStatus === "estimated" &&
             Number(catalogShippingPreview.shippingCost || 0) > 0
-          ? `CP ${normalizedCustomerPostalCode}. Envio estimado ${formatCurrency(Number(catalogShippingPreview.shippingCost || 0))}${shippingEstimate?.serviceName ? ` con ${shippingEstimate.serviceName}` : ""}.`
+          ? `CP ${normalizedCustomerPostalCode}. Envío estimado ${formatCurrency(Number(catalogShippingPreview.shippingCost || 0))}${shippingEstimate?.serviceName ? ` con ${shippingEstimate.serviceName}` : ""}.`
           : shippingEstimateLoading
-            ? `CP ${normalizedCustomerPostalCode}. Estamos calculando el envio con Correo Argentino.`
+            ? `CP ${normalizedCustomerPostalCode}. Estamos calculando el envío con Correo Argentino.`
             : shippingEstimateError && settings.shippingEstimationEnabled
             ? `CP ${normalizedCustomerPostalCode}. ${shippingEstimateError}`
             : freeShippingPolicyCopy ||
               `CP ${normalizedCustomerPostalCode} guardado para completar tu compra.`;
   const catalogSummaryFootnote = normalizedCustomerPostalCode
     ? `CP ${normalizedCustomerPostalCode} listo para completar tu compra.`
-    : "Guarda tu codigo postal para acelerar el checkout.";
+    : "Guarda tu código postal para acelerar el checkout.";
   const filtersPanelStatusCopy = [
     activeFilterCount > 0
       ? `${activeFilterCount} filtro${activeFilterCount === 1 ? "" : "s"} activo${activeFilterCount === 1 ? "" : "s"}`
@@ -1761,8 +1761,8 @@ export function Storefront({
     itemCount > 0
       ? `${itemCount} en tu pedido`
       : activeFilterCount > 0
-        ? "Personaliza el catalogo"
-        : "Pedido y busqueda";
+        ? "Personaliza el catálogo"
+        : "Pedido y búsqueda";
 
   return (
     <>
@@ -1782,21 +1782,21 @@ export function Storefront({
               type="button"
               className="postal-code-close"
               onClick={closePostalCodePrompt}
-              aria-label="Cerrar codigo postal"
+              aria-label="Cerrar código postal"
             >
               X
             </button>
 
-            <div className="postal-code-kicker">Envios</div>
-            <h2 id="postal-code-modal-title">Ingresa tu codigo postal</h2>
+            <div className="postal-code-kicker">Envíos</div>
+            <h2 id="postal-code-modal-title">Ingresa tu código postal</h2>
             <p>
               {settings.shippingEstimationEnabled
-                ? "Lo guardamos para estimar el envio con un aproximado del carrito y dejarlo listo para el checkout."
-                : "Lo guardamos para dejar listo el checkout cuando elijas envio."}
+                ? "Lo guardamos para estimar el envío con un aproximado del carrito y dejarlo listo para el checkout."
+                : "Lo guardamos para dejar listo el checkout cuando elijas envío."}
             </p>
 
             <form className="postal-code-form" onSubmit={savePostalCodePrompt}>
-              <label htmlFor="postal-code-prompt-input">Codigo postal</label>
+              <label htmlFor="postal-code-prompt-input">Código postal</label>
               <input
                 id="postal-code-prompt-input"
                 value={postalCodePromptDraft}
@@ -1819,7 +1819,7 @@ export function Storefront({
                   Ahora no
                 </button>
                 <button type="submit" className="submit-order-button">
-                  Guardar codigo postal
+                  Guardar código postal
                 </button>
               </div>
             </form>
@@ -1909,7 +1909,7 @@ export function Storefront({
             </a>
 
             <a className="site-contact-button" href="#contacto">
-              Contactanos
+              Contáctanos
             </a>
           </div>
         </header>
@@ -1922,7 +1922,7 @@ export function Storefront({
 
             <div className="hero-actions">
               <a className="hero-primary" href="#catalogo">
-                Explorar catalogo
+                Explorar catálogo
               </a>
               {whatsappHref ? (
                 <a
@@ -1945,8 +1945,8 @@ export function Storefront({
 
             <p className="hero-postal-code-copy">
               {settings.shippingEstimationEnabled
-                ? "Guardamos tu codigo postal para estimar el envio y precargarlo en el checkout."
-                : "Guardamos tu codigo postal para precargarlo en el checkout cuando elijas envio."}
+                ? "Guardamos tu código postal para estimar el envío y precargarlo en el checkout."
+                : "Guardamos tu código postal para precargarlo en el checkout cuando elijas envío."}
             </p>
 
           </div>
@@ -2002,7 +2002,7 @@ export function Storefront({
                   </div>
                   <div className="promo-tile-copy">
                     <strong>{tile.label}</strong>
-                    <span>Filtrar catalogo</span>
+                    <span>Filtrar catálogo</span>
                   </div>
                 </button>
               ))}
@@ -2040,7 +2040,7 @@ export function Storefront({
                 {renderActiveFilterChip({
                   value: activeSearchLabel,
                   onClear: clearSearchFilter,
-                  ariaLabel: "Quitar filtro de busqueda",
+                  ariaLabel: "Quitar filtro de búsqueda",
                 })}
               </div>
               <input
@@ -2092,8 +2092,8 @@ export function Storefront({
                     <div className="catalog-summary-reward-copy">
                       <span>
                         {qualifiesForFreeShippingInStorefront
-                          ? "Envio gratis activo"
-                          : "Camino al envio gratis"}
+                          ? "Envío gratis activo"
+                          : "Camino al envío gratis"}
                       </span>
                       <strong>{catalogFreeShippingBadgeLabel}</strong>
                     </div>
@@ -2134,7 +2134,7 @@ export function Storefront({
                         <IconTruck />
                       </div>
                       <div>
-                        <span>Envio estimado</span>
+                        <span>Envío estimado</span>
                         <strong>
                           {normalizedCustomerPostalCode
                             ? `CP ${normalizedCustomerPostalCode}`
@@ -2164,9 +2164,9 @@ export function Storefront({
 
                   <div className="catalog-summary-estimate-copy">
                     {!normalizedCustomerPostalCode
-                      ? "Ingresa tu codigo postal para ver un estimado con Correo Argentino."
+                      ? "Ingresa tu código postal para ver un estimado con Correo Argentino."
                       : qualifiesForFreeShippingInStorefront
-                        ? `CP ${normalizedCustomerPostalCode}. El pedido ya entra en envio gratis.`
+                        ? `CP ${normalizedCustomerPostalCode}. El pedido ya entra en envío gratis.`
                         : shippingEstimateLoading
                           ? `Estamos consultando Correo Argentino para CP ${normalizedCustomerPostalCode}.`
                           : catalogShippingPreview.shippingStatus === "estimated" &&
@@ -2192,7 +2192,7 @@ export function Storefront({
                         <IconPin />
                       </div>
                       <div>
-                        <span>Codigo postal</span>
+                        <span>Código postal</span>
                         <strong>{postalCodeButtonLabel}</strong>
                       </div>
                     </div>
@@ -2207,7 +2207,7 @@ export function Storefront({
                   <div className="catalog-summary-estimate-copy">
                     {normalizedCustomerPostalCode
                       ? `CP ${normalizedCustomerPostalCode} guardado para completar tu compra.`
-                      : "Ingresa tu codigo postal para dejarlo guardado antes del checkout."}
+                      : "Ingresa tu código postal para dejarlo guardado antes del checkout."}
                   </div>
                 </div>
               )}
@@ -2455,14 +2455,14 @@ export function Storefront({
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
                     placeholder="Buscar productos"
-                    aria-label="Buscar productos en el catalogo"
+                    aria-label="Buscar productos en el catálogo"
                   />
                   {search.trim() ? (
                     <button
                       type="button"
                       className="catalog-toolbar-search-clear"
                       onClick={clearSearchFilter}
-                      aria-label="Limpiar busqueda"
+                      aria-label="Limpiar búsqueda"
                     >
                       X
                     </button>
@@ -2511,14 +2511,14 @@ export function Storefront({
               <div className="message error">
                 {catalogLoadError}
                 <div className="message-detail">
-                  Revisa la configuracion de `.env` y la conectividad a SQL
+                  Revisa la configuración de `.env` y la conectividad a SQL
                   Server.
                 </div>
               </div>
             ) : null}
 
             {catalogLoading ? (
-              <div className="empty-state">Actualizando catalogo...</div>
+              <div className="empty-state">Actualizando catálogo...</div>
             ) : null}
 
             {!catalogLoadError && !catalogLoading && filteredProductGroups.length === 0 ? (
@@ -2741,13 +2741,22 @@ export function Storefront({
                       <p className="catalog-card-tax">Precio s/Imp. Nac.</p>
                       {cartSummary ? (
                         <div className="catalog-card-cart-status">
-                          <span>
-                            Ya tienes {cartSummary.quantity} unidad
-                            {cartSummary.quantity === 1 ? "" : "es"}
-                          </span>
-                          <strong>
-                            Total {formatCurrency(cartSummary.total)}
-                          </strong>
+                          <div className="catalog-card-cart-status-top">
+                            <span className="catalog-card-cart-status-badge">
+                              En tu pedido
+                            </span>
+                            <span className="catalog-card-cart-status-amount">
+                              {formatUnitLabel(cartSummary.quantity)}
+                            </span>
+                          </div>
+                          <div className="catalog-card-cart-status-copy">
+                            <strong>
+                              {cartSummary.quantity === 1
+                                ? "1 unidad agregada"
+                                : `${cartSummary.quantity} unidades agregadas`}
+                            </strong>
+                            <span>Total acumulado {formatCurrency(cartSummary.total)}</span>
+                          </div>
                         </div>
                       ) : null}
 
@@ -2769,7 +2778,7 @@ export function Storefront({
                           ? variantButtonLabel
                           : disableAddButton
                             ? "Sin stock"
-                            : "Anadir al carrito"}
+                            : "Añadir al carrito"}
                       </button>
                       <span className="catalog-card-detail-link">
                         {hasVariantChoices ? variantDetailLabel : "Ver detalle"}
@@ -2795,7 +2804,7 @@ export function Storefront({
                 </button>
 
                 <div className="catalog-pagination-status">
-                  Pagina {safeCatalogPage} de {totalCatalogPages}
+                  Página {safeCatalogPage} de {totalCatalogPages}
                 </div>
 
                 <button
@@ -2840,10 +2849,10 @@ export function Storefront({
             </div>
           </section>
 
-          <section className="map-section" aria-label="Ubicacion del local">
+          <section className="map-section" aria-label="Ubicación del local">
             <div className="map-copy">
-              <span className="section-kicker">Donde estamos</span>
-              <h2>Visitanos en el local</h2>
+              <span className="section-kicker">Dónde estamos</span>
+              <h2>Visítanos en el local</h2>
               <p>{settings.storeAddress}</p>
               {settings.storeHours ? <p>{settings.storeHours}</p> : null}
             </div>
@@ -3109,10 +3118,29 @@ export function Storefront({
                     ) : null}
 
                     {selectedProductCartItem ? (
-                      <div className="message success product-detail-message">
-                        Ya tienes {selectedProductCartItem.quantity} unidad
-                        {selectedProductCartItem.quantity === 1 ? "" : "es"} en
-                        tu pedido.
+                      <div className="product-detail-cart-status">
+                        <div className="product-detail-cart-status-top">
+                          <span className="product-detail-cart-status-badge">
+                            Ya en tu pedido
+                          </span>
+                          <span className="product-detail-cart-status-amount">
+                            {formatUnitLabel(selectedProductCartItem.quantity)}
+                          </span>
+                        </div>
+                        <div className="product-detail-cart-status-copy">
+                          <strong>
+                            {selectedProductCartItem.quantity === 1
+                              ? "1 unidad de esta selección"
+                              : `${selectedProductCartItem.quantity} unidades de esta selección`}
+                          </strong>
+                          <span>
+                            Total acumulado{" "}
+                            {formatCurrency(
+                              selectedProductCartItem.quantity *
+                                selectedProductCartItem.price,
+                            )}
+                          </span>
+                        </div>
                       </div>
                     ) : null}
 
@@ -3185,7 +3213,7 @@ export function Storefront({
                         {selectedDetailProduct.stock <= 0 &&
                         !settings.allowBackorders
                           ? "Sin stock"
-                          : "Anadir al carrito"}
+                          : "Añadir al carrito"}
                       </button>
                       <button
                         type="button"
@@ -3483,14 +3511,14 @@ function CartContent({
       id: "cart",
       label: "Paso 1 de 4",
       title: "Confirma tu pedido",
-      subtitle: "Revisa articulos, cantidades y total antes de avanzar.",
+      subtitle: "Revisa artículos, cantidades y total antes de avanzar.",
       progressTitle: "Pedido",
     },
     {
       id: "delivery",
       label: "Paso 2 de 4",
-      title: "Elige como lo recibes",
-      subtitle: "Define si retiras en el local o si prefieres envio.",
+      title: "Elige cómo lo recibes",
+      subtitle: "Define si retiras en el local o si prefieres envío.",
       progressTitle: "Entrega",
     },
     {
@@ -3499,7 +3527,7 @@ function CartContent({
       title: "Completa tus datos",
       subtitle: pickupOrder
         ? "Para retiro solo pedimos tus datos de contacto."
-        : "Para envio necesitamos los datos logisticos del destino.",
+        : "Para envío necesitamos los datos logísticos del destino.",
       progressTitle: "Datos",
     },
     {
@@ -3509,7 +3537,7 @@ function CartContent({
       subtitle: shouldUseMercadoPago
         ? "Verifica todo y te redirigimos a Mercado Pago."
         : "Verifica todo y grabamos la NP del pedido para pagar en el local.",
-      progressTitle: shouldUseMercadoPago ? "Pago" : "Confirmacion",
+      progressTitle: shouldUseMercadoPago ? "Pago" : "Confirmación",
     },
   ];
   const currentStepIndex = checkoutSteps.findIndex(
@@ -3600,7 +3628,7 @@ function CartContent({
       {cartStepActive ? (
         cart.length === 0 ? (
           <div className="empty-state compact">
-            Aun no agregaste productos. El carrito se guarda en este navegador.
+            Aún no agregaste productos. El carrito se guarda en este navegador.
           </div>
         ) : (
           <div className="order-items">
@@ -3663,13 +3691,13 @@ function CartContent({
         </div>
         {!cartStepActive ? (
           <div className="summary-row">
-            <span>Envio</span>
+            <span>Envío</span>
             <span>{shippingSummary.label}</span>
           </div>
         ) : null}
         {cartStepActive && shippingEstimationEnabled ? (
           <div className="summary-row">
-            <span>Si eliges envio</span>
+            <span>Si eliges envío</span>
             <span>
               {shippingEstimateLoading
                 ? "Calculando"
@@ -3687,14 +3715,14 @@ function CartContent({
         {cartStepActive && shippingEstimationEnabled ? (
           <div className="order-summary-note">
             {!normalizedPostalCode
-              ? "Carga tu codigo postal para estimar el envio."
+              ? "Carga tu código postal para estimar el envío."
               : deliveryShippingPreview.shippingStatus === "free"
                 ? deliveryShippingSummary.detail
                 : deliveryShippingPreview.shippingStatus === "estimated" &&
                     deliveryShippingPreview.shippingCost
-                  ? `CP ${normalizedPostalCode}. Envio estimado ${formatCurrency(deliveryShippingPreview.shippingCost)}${shippingEstimate?.serviceName ? ` con ${shippingEstimate.serviceName}` : ""}.`
+                  ? `CP ${normalizedPostalCode}. Envío estimado ${formatCurrency(deliveryShippingPreview.shippingCost)}${shippingEstimate?.serviceName ? ` con ${shippingEstimate.serviceName}` : ""}.`
                   : shippingEstimateLoading
-                    ? `Estamos calculando el envio para CP ${normalizedPostalCode}.`
+                    ? `Estamos calculando el envío para CP ${normalizedPostalCode}.`
                     : shippingEstimateError
                       ? shippingEstimateError
                       : deliveryShippingSummary.detail}
@@ -3710,13 +3738,13 @@ function CartContent({
           >
             {normalizedPostalCode
               ? `Cambiar CP ${normalizedPostalCode}`
-              : "Cargar codigo postal"}
+              : "Cargar código postal"}
           </button>
         ) : null}
         {!cartStepActive ? (
           <div className="order-summary-note">
             {shippingSummary.detail}
-            {!pickupOrder && !normalizedPostalCode ? " Ingresa tu codigo postal para cotizarlo." : ""}
+            {!pickupOrder && !normalizedPostalCode ? " Ingresa tu código postal para cotizarlo." : ""}
           </div>
         ) : null}
         {!cartStepActive && !pickupOrder ? (
@@ -3727,7 +3755,7 @@ function CartContent({
           >
             {normalizedPostalCode
               ? `Cambiar CP ${normalizedPostalCode}`
-              : "Cargar codigo postal"}
+              : "Cargar código postal"}
           </button>
         ) : null}
         {!cartStepActive &&
@@ -3735,7 +3763,7 @@ function CartContent({
         shippingEstimationEnabled &&
         shippingEstimateLoading ? (
           <div className="order-summary-note">
-            Estamos calculando el envio con Correo Argentino.
+            Estamos calculando el envío con Correo Argentino.
           </div>
         ) : null}
         {!cartStepActive &&
@@ -3772,8 +3800,8 @@ function CartContent({
             <div>
               <strong>Elige el tipo de entrega antes de cargar tus datos</strong>
               <p>
-                Puedes retirar en el local o pedir envio. Eso define los campos
-                que te vamos a pedir despues.
+                Puedes retirar en el local o pedir envío. Eso define los campos
+                que te vamos a pedir después.
               </p>
             </div>
             <button
@@ -3800,12 +3828,12 @@ function CartContent({
               <strong>Retiro en local</strong>
               <p>
                 Pasas a buscarlo por el local. Solo te pedimos nombre, email y
-                telefono.
+                teléfono.
               </p>
               {storeAddress ? (
                 <small>Retiras en {storeAddress}</small>
               ) : (
-                <small>Te avisamos cuando el pedido este listo para retirar.</small>
+                <small>Te avisamos cuando el pedido esté listo para retirar.</small>
               )}
             </button>
 
@@ -3821,28 +3849,28 @@ function CartContent({
                 onCustomerChange("deliveryMethod", "Envio a domicilio")
               }
             >
-              <span className="checkout-delivery-kicker">Envio</span>
-              <strong>Envio a domicilio</strong>
+              <span className="checkout-delivery-kicker">Envío</span>
+              <strong>Envío a domicilio</strong>
               <p>
-                Cargamos direccion y localidad para preparar la entrega
+                Cargamos dirección y localidad para preparar la entrega
                 correctamente.
               </p>
               <small>
                 {deliveryShippingPreview.shippingStatus === "free"
                   ? deliveryShippingPreview.freeShippingThreshold > 0
-                    ? `Este pedido ya supera ${formatCurrency(deliveryShippingPreview.freeShippingThreshold)} y califica para envio gratis.`
-                    : "Este pedido califica para envio gratis."
+                    ? `Este pedido ya supera ${formatCurrency(deliveryShippingPreview.freeShippingThreshold)} y califica para envío gratis.`
+                    : "Este pedido califica para envío gratis."
                   : deliveryShippingPreview.shippingStatus === "estimated" &&
                       deliveryShippingPreview.shippingCost
                     ? `Correo Argentino estimado ${formatCurrency(deliveryShippingPreview.shippingCost)}${shippingEstimate?.serviceName ? ` con ${shippingEstimate.serviceName}` : ""}.`
                     : shippingEstimateLoading && normalizedPostalCode
-                      ? `Estamos calculando el envio para CP ${normalizedPostalCode}.`
+                      ? `Estamos calculando el envío para CP ${normalizedPostalCode}.`
                       : !normalizedPostalCode
-                        ? "Primero carga tu codigo postal para estimarlo."
+                        ? "Primero carga tu código postal para estimarlo."
                         : shippingEstimateError && shippingEstimationEnabled
                           ? shippingEstimateError
                           : freeShippingPolicyCopy ||
-                            "Te pediremos direccion, ciudad y datos logisticos."}
+                            "Te pediremos dirección, ciudad y datos logísticos."}
               </small>
             </button>
           </div>
@@ -3869,12 +3897,12 @@ function CartContent({
           <div className="checkout-step-summary">
             <div>
               <strong>
-                {pickupOrder ? "Retiro en local" : "Envio a domicilio"}
+                {pickupOrder ? "Retiro en local" : "Envío a domicilio"}
               </strong>
               <p>
                 {pickupOrder
-                  ? "Carga tus datos de contacto para registrar la NP y avisarte cuando este listo."
-                  : "Carga los datos del destinatario y la direccion de entrega."}
+                  ? "Carga tus datos de contacto para registrar la NP y avisarte cuando esté listo."
+                  : "Carga los datos del destinatario y la dirección de entrega."}
               </p>
             </div>
             <button
@@ -3896,13 +3924,13 @@ function CartContent({
                   onChange={(event) =>
                     onCustomerChange("fullName", event.target.value)
                   }
-                  placeholder="Quien recibe el pedido"
+                  placeholder="Quién recibe el pedido"
                   required
                 />
               </div>
 
               <div className="field">
-                <label htmlFor="phone">Telefono</label>
+                <label htmlFor="phone">Teléfono</label>
                 <input
                   id="phone"
                   value={customer.phone}
@@ -3943,7 +3971,7 @@ function CartContent({
               {requiresShippingAddress ? (
                 <>
                   <div className="field span-2">
-                    <label htmlFor="address">Direccion</label>
+                    <label htmlFor="address">Dirección</label>
                     <input
                       id="address"
                       value={customer.address}
@@ -3982,7 +4010,7 @@ function CartContent({
 
                   {!pickupOrder ? (
                     <div className="field">
-                      <label htmlFor="postalCode">Codigo postal</label>
+                      <label htmlFor="postalCode">Código postal</label>
                       <div className="checkout-inline-field">
                         <input
                           id="postalCode"
@@ -3999,7 +4027,7 @@ function CartContent({
                             className="checkout-inline-link"
                             onClick={onOpenPostalCodePrompt}
                           >
-                            Guardado rapido
+                            Guardado rápido
                           </button>
                         ) : null}
                       </div>
@@ -4017,7 +4045,7 @@ function CartContent({
                   onChange={(event) =>
                     onCustomerChange("notes", event.target.value)
                   }
-                  placeholder="Horario de entrega, talle, color o cualquier observacion"
+                  placeholder="Horario de entrega, talle, color o cualquier observación"
                 />
               </div>
             </div>
@@ -4044,10 +4072,10 @@ function CartContent({
         <>
           <div className="checkout-step-summary">
             <div>
-              <strong>Ultima revision antes de avanzar</strong>
+              <strong>Última revisión antes de avanzar</strong>
               <p>
                 {shouldUseMercadoPago
-                  ? "Confirmas el pedido, el tipo de entrega y los datos del cliente. Despues sigues al pago."
+                  ? "Confirmas el pedido, el tipo de entrega y los datos del cliente. Después sigues al pago."
                   : "Confirmas el pedido, el tipo de entrega y los datos del cliente para pagarlo al retirar."}
               </p>
             </div>
@@ -4074,7 +4102,7 @@ function CartContent({
               >
                 <span className="checkout-delivery-kicker">Pago online</span>
                 <strong>Mercado Pago</strong>
-                <p>Pagas ahora y te redirigimos para completar la operacion.</p>
+                <p>Pagas ahora y te redirigimos para completar la operación.</p>
                 <small>El pedido queda abonado antes del retiro.</small>
               </button>
 
@@ -4091,7 +4119,7 @@ function CartContent({
                 <span className="checkout-delivery-kicker">Pago en local</span>
                 <strong>Pagar al retirar</strong>
                 <p>Confirmas el pedido ahora y abonas cuando pases por el local.</p>
-                <small>Lo dejamos registrado para que lo retires despues.</small>
+                <small>Lo dejamos registrado para que lo retires después.</small>
               </button>
             </div>
           ) : null}
@@ -4102,18 +4130,20 @@ function CartContent({
               <div className="checkout-review-list">
                 <div className="checkout-review-row">
                   <span>Entrega</span>
-                  <strong>{customer.deliveryMethod}</strong>
+                  <strong>
+                    {pickupOrder ? "Retiro en local" : "Envío a domicilio"}
+                  </strong>
                   <p>
                     {pickupOrder
                       ? storeAddress || "Retiras en el local."
                       : customer.address
                         ? `${customer.address}, ${customer.city || "Sin localidad"}`
-                        : "Envio a domicilio"}
+                        : "Envío a domicilio"}
                   </p>
                 </div>
 
                 <div className="checkout-review-row">
-                  <span>Envio</span>
+                  <span>Envío</span>
                   <strong>{shippingSummary.label}</strong>
                   <p>{shippingSummary.detail}</p>
                 </div>
@@ -4122,7 +4152,7 @@ function CartContent({
                   <span>Cliente</span>
                   <strong>{customer.fullName || "Sin nombre cargado"}</strong>
                   <p>{customer.email || "Sin email cargado"}</p>
-                  <p>{customer.phone || "Sin telefono cargado"}</p>
+                  <p>{customer.phone || "Sin teléfono cargado"}</p>
                   {customer.documentNumber ? (
                     <p>Documento: {customer.documentNumber}</p>
                   ) : null}
@@ -4132,7 +4162,7 @@ function CartContent({
                   <div className="checkout-review-row">
                     <span>Destino</span>
                     <strong>{customer.city || "Sin localidad"}</strong>
-                    <p>{customer.address || "Sin direccion"}</p>
+                    <p>{customer.address || "Sin dirección"}</p>
                     {customer.province ? <p>{customer.province}</p> : null}
                     {!pickupOrder && customer.postalCode ? (
                       <p>CP {customer.postalCode}</p>
@@ -4437,6 +4467,10 @@ function countDistinctVariantLabels(products: Product[]) {
       .map((label) => label.trim())
       .filter(Boolean),
   ).size;
+}
+
+function formatUnitLabel(quantity: number) {
+  return quantity === 1 ? "1 unidad" : `${quantity} unidades`;
 }
 
 function getVariantChoiceButtonLabel(

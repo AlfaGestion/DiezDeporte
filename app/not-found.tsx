@@ -6,8 +6,8 @@ export default async function RootNotFound() {
 
   return (
     <NotFoundState
-      title="No encontramos esta pagina"
-      message="Puede que el enlace no sea valido o que la pagina ya no este disponible."
+      title="No encontramos esta página"
+      message="Puede que el enlace no sea válido o que la página ya no esté disponible."
       supportHref={settings?.supportWhatsapp || null}
     />
   );

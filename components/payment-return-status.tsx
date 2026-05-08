@@ -29,14 +29,14 @@ function resolveHeadline(status: PaymentStatusResult | null) {
   if (!status) {
     return {
       title: "Estamos verificando tu pago",
-      description: "Consultando el estado mas reciente de Mercado Pago.",
+      description: "Consultando el estado más reciente de Mercado Pago.",
     };
   }
 
   if (status.status === "finalized" && status.order) {
     return {
       title: "Pago aprobado",
-      description: "El pedido ya quedo registrado en el sistema.",
+      description: "El pedido ya quedó registrado en el sistema.",
     };
   }
 
@@ -50,35 +50,35 @@ function resolveHeadline(status: PaymentStatusResult | null) {
   if (status.status === "rejected") {
     return {
       title: "Pago rechazado",
-      description: "Mercado Pago informo que la operacion no fue aprobada.",
+      description: "Mercado Pago informó que la operación no fue aprobada.",
     };
   }
 
   if (status.status === "cancelled") {
     return {
       title: "Pago cancelado",
-      description: "La compra no se completo y el pedido sigue sin confirmar.",
+      description: "La compra no se completó y el pedido sigue sin confirmar.",
     };
   }
 
   if (status.status === "error") {
     return {
-      title: "Pago recibido con revision pendiente",
+      title: "Pago recibido con revisión pendiente",
       description:
-        "La pasarela respondio, pero la carga final del pedido requiere revision manual.",
+        "La pasarela respondió, pero la carga final del pedido requiere revisión manual.",
     };
   }
 
   if (status.status === "processing") {
     return {
       title: "Procesando pedido",
-      description: "El pago ya ingreso y estamos terminando la registracion.",
+      description: "El pago ya ingresó y estamos terminando la registración.",
     };
   }
 
   return {
     title: "Pago pendiente",
-    description: "Mercado Pago todavia no confirmo la operacion.",
+    description: "Mercado Pago todavía no confirmó la operación.",
   };
 }
 
@@ -200,7 +200,7 @@ export function PaymentReturnStatus({
         <p>{headline.description}</p>
 
         {loading && !status ? (
-          <div className="message">Consultando informacion del pago...</div>
+          <div className="message">Consultando información del pago...</div>
         ) : null}
 
         {error ? (
@@ -248,7 +248,7 @@ export function PaymentReturnStatus({
 
         {status?.finalizationError ? (
           <div className="payment-return-note">
-            Recibimos la respuesta del pago, pero todavia estamos terminando de registrar el pedido.
+            Recibimos la respuesta del pago, pero todavía estamos terminando de registrar el pedido.
           </div>
         ) : null}
 

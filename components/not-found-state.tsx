@@ -3,7 +3,7 @@ import { SupportHint } from "@/components/support-hint";
 
 export function NotFoundState({
   title = "No encontramos lo que buscabas",
-  message = "La pagina puede haber cambiado o ya no estar disponible.",
+  message = "La página puede haber cambiado o ya no estar disponible.",
   supportHref,
 }: {
   title?: string;

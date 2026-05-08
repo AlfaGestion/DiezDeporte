@@ -5,10 +5,10 @@ export function ProductErrorState() {
   return (
     <ErrorState
       title="No pudimos preparar este producto"
-      message="Puede que haya cambiado el stock o que el producto ya no este disponible."
+      message="Puede que haya cambiado el stock o que el producto ya no esté disponible."
       primaryAction={
         <Link href="/#catalogo" className="submit-order-button">
-          Volver al catalogo
+          Volver al catálogo
         </Link>
       }
     />

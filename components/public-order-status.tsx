@@ -28,14 +28,14 @@ function resolveTitle(status: PaymentStatusResult | null, error?: string | null)
 
   if (status.orderType === "retiro" && status.orderState === "LISTO_PARA_RETIRO") {
     return {
-      title: "Tu pedido esta listo para retirar",
-      description: "Aqui tienes el codigo de retiro y el QR para mostrar en el local.",
+      title: "Tu pedido está listo para retirar",
+      description: "Aquí tienes el código de retiro y el QR para mostrar en el local.",
     };
   }
 
   return {
     title: "Estado de tu pedido",
-    description: "Consulta el estado mas reciente de tu compra.",
+    description: "Consulta el estado más reciente de tu compra.",
   };
 }
 
@@ -52,7 +52,7 @@ function getPaymentStatusLabel(value: string | null) {
 
 function getOrderTypeLabel(value: PaymentStatusResult["orderType"]) {
   if (value === "envio") {
-    return "Envio a domicilio";
+    return "Envío a domicilio";
   }
 
   if (value === "retiro") {
@@ -64,19 +64,19 @@ function getOrderTypeLabel(value: PaymentStatusResult["orderType"]) {
 
 function getNextStepMessage(status: PaymentStatusResult) {
   if (status.orderState === "LISTO_PARA_RETIRO") {
-    return "Tu pedido ya esta listo. Acercate al local con el QR o el codigo de retiro.";
+    return "Tu pedido ya está listo. Acércate al local con el QR o el código de retiro.";
   }
 
   if (status.orderState === "ENVIADO") {
-    return "Tu pedido ya fue despachado y esta en camino.";
+    return "Tu pedido ya fue despachado y está en camino.";
   }
 
   if (status.orderState === "APROBADO" && status.paymentStatus === "aprobado") {
-    return "El pago fue aprobado. Ahora queda pendiente la facturacion administrativa.";
+    return "El pago fue aprobado. Ahora queda pendiente la facturación administrativa.";
   }
 
   if (status.paymentStatus === "pendiente") {
-    return "Recibimos tu pedido. Estamos esperando la confirmacion del pago para avanzar.";
+    return "Recibimos tu pedido. Estamos esperando la confirmación del pago para avanzar.";
   }
 
   return "Puedes seguir consultando el estado de tu pedido desde este enlace.";
@@ -132,7 +132,7 @@ export function PublicOrderStatus({
               </div>
               {status.pickupCode ? (
                 <div className="payment-return-row">
-                  <span>Codigo de retiro</span>
+                  <span>Código de retiro</span>
                   <strong>{status.pickupCode}</strong>
                 </div>
               ) : null}
@@ -144,7 +144,7 @@ export function PublicOrderStatus({
 
             {status.orderType === "retiro" && status.orderState === "LISTO_PARA_RETIRO" && pickupSchedule ? (
               <div className="mt-4 rounded-[18px] border border-[color:var(--line)] bg-[color:var(--surface)] p-4 text-sm text-[color:var(--text-soft)]">
-                <strong className="block text-[color:var(--text)]">Dias y horarios para retirar</strong>
+                <strong className="block text-[color:var(--text)]">Días y horarios para retirar</strong>
                 <div className="mt-2 whitespace-pre-wrap">{pickupSchedule}</div>
               </div>
             ) : null}
@@ -168,7 +168,7 @@ export function PublicOrderStatus({
                 <div className="text-center">
                   <h2 className="m-0 text-lg">QR de retiro</h2>
                   <p className="mt-2 text-sm text-[color:var(--text-soft)]">
-                    Muestralo en el local junto con tu codigo.
+                    Muéstralo en el local junto con tu código.
                   </p>
                 </div>
                 <div

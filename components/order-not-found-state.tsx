@@ -8,7 +8,7 @@ export function OrderNotFoundState({
   return (
     <NotFoundState
       title="No encontramos ese pedido"
-      message="Puede que el enlace no sea valido o que el pedido ya no este disponible."
+      message="Puede que el enlace no sea válido o que el pedido ya no esté disponible."
       supportHref={supportHref}
     />
   );
