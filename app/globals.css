@@ -2089,29 +2089,21 @@ html[data-theme="dark"] .catalog-sidebar-toggle-badge {
 
 .catalog-card-cart-status {
   display: grid;
-  gap: 10px;
-  padding: 11px 12px;
-  border: 1px solid color-mix(in srgb, var(--success-text) 18%, var(--line));
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgba(118, 156, 255, 0.26);
   border-radius: 16px;
-  background:
-    radial-gradient(
-      circle at top right,
-      color-mix(in srgb, var(--success-soft) 94%, white 6%),
-      transparent 52%
-    ),
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--success-soft) 84%, var(--surface)),
-      color-mix(in srgb, var(--surface) 72%, var(--success-soft) 28%)
-    );
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  background: linear-gradient(135deg, #0d1830, #17335e 58%, #3f6fd6);
+  box-shadow:
+    0 14px 24px rgba(14, 28, 54, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
 .catalog-card-cart-status-top,
 .product-detail-cart-status-top {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 10px;
   flex-wrap: wrap;
 }
@@ -2120,21 +2112,22 @@ html[data-theme="dark"] .catalog-sidebar-toggle-badge {
 .product-detail-cart-status-badge {
   display: inline-flex;
   align-items: center;
-  min-height: 28px;
+  gap: 8px;
+  min-height: 26px;
   padding: 0 10px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--surface) 74%, transparent);
-  color: var(--success-text);
-  font-size: 0.68rem;
-  font-weight: 900;
-  letter-spacing: 0.1em;
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.84);
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--success-text) 10%, transparent);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
 .catalog-card-cart-status-amount,
 .product-detail-cart-status-amount {
-  color: var(--text);
+  color: var(--text-on-dark);
   font-size: 0.76rem;
   font-weight: 800;
 }
@@ -2147,15 +2140,27 @@ html[data-theme="dark"] .catalog-sidebar-toggle-badge {
 
 .catalog-card-cart-status-copy strong,
 .product-detail-cart-status-copy strong {
-  color: var(--text);
-  font-size: 0.92rem;
+  color: var(--text-on-dark);
+  font-size: 1rem;
+  line-height: 1.2;
+  text-shadow: 0 1px 0 rgba(7, 11, 18, 0.2);
 }
 
 .catalog-card-cart-status-copy span,
 .product-detail-cart-status-copy span {
-  color: var(--text-soft);
+  color: rgba(240, 246, 255, 0.78);
   font-size: 0.78rem;
   line-height: 1.45;
+}
+
+.catalog-card-cart-status-badge::before,
+.product-detail-cart-status-badge::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #7ee0a6;
+  box-shadow: 0 0 0 3px rgba(126, 224, 166, 0.16);
 }
 
 .catalog-card-detail-link {
@@ -2642,22 +2647,14 @@ html[data-theme="dark"] .catalog-sidebar-toggle-badge {
 
 .product-detail-cart-status {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   padding: 14px 15px;
-  border: 1px solid color-mix(in srgb, var(--success-text) 16%, var(--line));
+  border: 1px solid rgba(118, 156, 255, 0.26);
   border-radius: 20px;
-  background:
-    radial-gradient(
-      circle at top right,
-      color-mix(in srgb, var(--success-soft) 88%, white 12%),
-      transparent 54%
-    ),
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--surface-soft) 88%, var(--success-soft)),
-      color-mix(in srgb, var(--surface) 74%, var(--success-soft) 26%)
-    );
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  background: linear-gradient(135deg, #0d1830, #17335e 58%, #3f6fd6);
+  box-shadow:
+    0 16px 28px rgba(14, 28, 54, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
 .product-detail-actions {

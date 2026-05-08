@@ -2745,16 +2745,9 @@ export function Storefront({
                             <span className="catalog-card-cart-status-badge">
                               En tu pedido
                             </span>
-                            <span className="catalog-card-cart-status-amount">
-                              {formatUnitLabel(cartSummary.quantity)}
-                            </span>
                           </div>
                           <div className="catalog-card-cart-status-copy">
-                            <strong>
-                              {cartSummary.quantity === 1
-                                ? "1 unidad agregada"
-                                : `${cartSummary.quantity} unidades agregadas`}
-                            </strong>
+                            <strong>{formatUnitLabel(cartSummary.quantity)}</strong>
                             <span>Total acumulado {formatCurrency(cartSummary.total)}</span>
                           </div>
                         </div>
@@ -2778,7 +2771,7 @@ export function Storefront({
                           ? variantButtonLabel
                           : disableAddButton
                             ? "Sin stock"
-                            : "Añadir al carrito"}
+                            : "A\u00f1adir al carrito"}
                       </button>
                       <span className="catalog-card-detail-link">
                         {hasVariantChoices ? variantDetailLabel : "Ver detalle"}
@@ -3123,15 +3116,12 @@ export function Storefront({
                           <span className="product-detail-cart-status-badge">
                             Ya en tu pedido
                           </span>
-                          <span className="product-detail-cart-status-amount">
-                            {formatUnitLabel(selectedProductCartItem.quantity)}
-                          </span>
                         </div>
                         <div className="product-detail-cart-status-copy">
                           <strong>
                             {selectedProductCartItem.quantity === 1
-                              ? "1 unidad de esta selección"
-                              : `${selectedProductCartItem.quantity} unidades de esta selección`}
+                              ? "1 unidad de esta selecci\u00f3n"
+                              : `${selectedProductCartItem.quantity} unidades de esta selecci\u00f3n`}
                           </strong>
                           <span>
                             Total acumulado{" "}
@@ -3213,7 +3203,7 @@ export function Storefront({
                         {selectedDetailProduct.stock <= 0 &&
                         !settings.allowBackorders
                           ? "Sin stock"
-                          : "Añadir al carrito"}
+                          : "A\u00f1adir al carrito"}
                       </button>
                       <button
                         type="button"
