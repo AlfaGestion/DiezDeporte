@@ -62,6 +62,7 @@ export type OrderDocumentItem = {
 
 export type OrderMetadata = {
   items?: OrderItem[];
+  itemsSubtotal?: number | null;
   preferenceId?: string | null;
   paymentInitStatus?: "pending" | "ok" | "failed" | null;
   paymentInitErrorMessage?: string | null;
@@ -78,6 +79,13 @@ export type OrderMetadata = {
   customerProvince?: string | null;
   customerPostalCode?: string | null;
   customerNotes?: string | null;
+  shippingStatus?: "not_applicable" | "free" | "estimated" | "pending_quote" | null;
+  shippingCost?: number | null;
+  shippingEstimateSource?: string | null;
+  shippingEstimateService?: string | null;
+  shippingEstimateValidTo?: string | null;
+  freeShippingThreshold?: number | null;
+  freeShippingQualified?: boolean | null;
   deliveryMethod?: string | null;
   paymentMethod?: string | null;
   paymentStatusDetail?: string | null;

@@ -300,7 +300,8 @@ export function getEmailSentAtField(state: OrderState) {
 }
 
 export function normalizeOrderType(value: string | null | undefined): OrderType {
-  return (value || "").trim().toLowerCase() === "envio" ? "envio" : "retiro";
+  const normalized = (value || "").trim().toLowerCase();
+  return normalized.includes("envio") ? "envio" : "retiro";
 }
 
 export function formatOrderAsLegacySummary(

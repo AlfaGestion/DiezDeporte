@@ -227,7 +227,7 @@ function buildPaymentItemsFromOrder(order: StoredOrder) {
     );
   }
 
-  return items.map((item) => {
+  const paymentItems = items.map((item) => {
     const quantity = Math.max(1, Number(item.quantity || 0));
     const subtotal = Number(item.subtotal || 0);
     const unitPrice =
@@ -242,6 +242,20 @@ function buildPaymentItemsFromOrder(order: StoredOrder) {
       currency: item.currency || "ARS",
     };
   });
+  const shippingCost = Number(order.metadata.shippingCost || 0);
+
+  if (Number.isFinite(shippingCost) && shippingCost > 0) {
+    paymentItems.push({
+      id: "shipping",
+      title: "Envio",
+      description: order.metadata.shippingEstimateService || "Envio",
+      quantity: 1,
+      unitPrice: shippingCost,
+      currency: "ARS",
+    });
+  }
+
+  return paymentItems;
 }
 
 export async function createMercadoPagoOrder(input: {

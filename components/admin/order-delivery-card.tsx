@@ -1,19 +1,76 @@
 import { adminCardClass, cn, formatAdminDateTime } from "@/components/admin/admin-ui";
 import { PickupStatusBadge } from "@/components/admin/pickup-status-badge";
+import { formatCurrency } from "@/lib/commerce";
 import { getOrderTypeLabel } from "@/lib/order-admin";
+import { resolveShippingSnapshotFromMetadata } from "@/lib/shipping";
 import type { StoredOrder } from "@/lib/types";
+
+function getShippingLabel(order: StoredOrder, freeShippingThreshold: number) {
+  const snapshot = resolveShippingSnapshotFromMetadata({
+    orderType: order.tipo_pedido,
+    orderTotal: order.monto_total,
+    metadata: order.metadata,
+    fallbackFreeShippingThreshold: freeShippingThreshold,
+  });
+
+  if (snapshot.shippingStatus === "free") {
+    return {
+      title: "Envio gratis",
+      detail:
+        snapshot.freeShippingThreshold > 0
+          ? `Califico por superar ${formatCurrency(snapshot.freeShippingThreshold)} en productos.`
+          : "Este pedido quedo marcado con envio gratis.",
+    };
+  }
+
+  if (snapshot.shippingStatus === "pending_quote") {
+    return {
+      title: "A calcular",
+      detail:
+        snapshot.freeShippingThreshold > 0
+          ? `No alcanzo ${formatCurrency(snapshot.freeShippingThreshold)} y el envio queda pendiente de calcular.`
+          : "El envio queda pendiente de calcular segun destino.",
+    };
+  }
+
+  if (snapshot.shippingStatus === "estimated") {
+    const shippingCost = Number(order.metadata.shippingCost || snapshot.shippingCost || 0);
+    const validTo = order.metadata.shippingEstimateValidTo
+      ? formatAdminDateTime(order.metadata.shippingEstimateValidTo)
+      : null;
+    const serviceName = order.metadata.shippingEstimateService || "Correo Argentino";
+
+    return {
+      title: shippingCost > 0 ? formatCurrency(shippingCost) : "Estimado",
+      detail: [
+        `Cotizado con ${serviceName}.`,
+        validTo ? `Vigencia aproximada: ${validTo}.` : null,
+      ]
+        .filter(Boolean)
+        .join(" "),
+    };
+  }
+
+  return {
+    title: "No aplica",
+    detail: "El pedido se retira en el local.",
+  };
+}
 
 export function OrderDeliveryCard({
   order,
   documentNumber,
   documentTc,
+  freeShippingThreshold,
 }: {
   order: StoredOrder;
   documentNumber: string;
   documentTc: string | null;
+  freeShippingThreshold: number;
 }) {
   const isPickup = order.tipo_pedido === "retiro";
   const pickupCode = order.metadata.pickupCode || "Sin codigo";
+  const shippingLabel = getShippingLabel(order, freeShippingThreshold);
   const qrPanelStyle = {
     background:
       "linear-gradient(180deg, color-mix(in srgb, var(--admin-accent) 8%, var(--surface) 92%), color-mix(in srgb, var(--surface-soft) 78%, var(--surface) 22%))",
@@ -86,6 +143,17 @@ export function OrderDeliveryCard({
               <dd className="mt-1 text-sm text-[color:var(--admin-title)]">
                 {isPickup ? "No aplica" : order.numero_seguimiento || "Sin seguimiento"}
               </dd>
+            </div>
+            <div className="rounded-[16px] border border-[color:var(--admin-card-line)] bg-[color:var(--admin-card-bg)] px-4 py-3">
+              <dt className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--admin-text)]">
+                Condicion de envio
+              </dt>
+              <dd className="mt-1 text-sm font-medium text-[color:var(--admin-title)]">
+                {shippingLabel.title}
+              </dd>
+              <div className="mt-1 text-xs leading-5 text-[color:var(--admin-text)]">
+                {shippingLabel.detail}
+              </div>
             </div>
             {isPickup ? (
               <>

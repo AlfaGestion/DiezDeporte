@@ -127,6 +127,7 @@ export default async function AdminOrderDetailPage({
                 order={order}
                 documentNumber={documentNumber}
                 documentTc={documentTc}
+                freeShippingThreshold={serverSettings.freeShippingThreshold}
               />
             </aside>
           </div>

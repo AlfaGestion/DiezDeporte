@@ -1,5 +1,6 @@
 import "server-only";
 import { getConnection, sql } from "@/lib/db";
+import { formatCurrency } from "@/lib/commerce";
 import { isPickupLocalPaymentOrder } from "@/lib/models/order";
 import type { ServerSettings } from "@/lib/store-config";
 import type { StoredOrder } from "@/lib/types/order";
@@ -91,10 +92,22 @@ function buildCommercialDocumentHeaderPatch(order: StoredOrder) {
 }
 
 function buildDocumentObservations(order: StoredOrder) {
+  const shippingCost = Number(order.metadata.shippingCost || 0);
+  const shippingDetail =
+    order.tipo_pedido !== "envio"
+      ? null
+      : order.metadata.shippingStatus === "free"
+        ? "Envio: gratis."
+        : order.metadata.shippingStatus === "estimated" && shippingCost > 0
+          ? `Envio estimado: ${formatCurrency(shippingCost)}${order.metadata.shippingEstimateService ? ` (${order.metadata.shippingEstimateService})` : ""}.`
+          : order.metadata.shippingStatus === "pending_quote"
+            ? "Envio pendiente de cotizacion."
+            : null;
   const parts = [
     `NP / pedido web ${order.metadata.webOrderNumber || order.numero_pedido}`,
     order.email_cliente ? `Email: ${order.email_cliente}` : null,
     order.metadata.deliveryMethod ? `Entrega: ${order.metadata.deliveryMethod}` : null,
+    shippingDetail,
     order.metadata.paymentMethod ? `Pago: ${order.metadata.paymentMethod}` : null,
     order.metadata.customerNotes ? `Notas: ${order.metadata.customerNotes}` : null,
   ].filter(Boolean);

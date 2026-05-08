@@ -5,6 +5,12 @@ import {
   OrderValidationError,
 } from "@/lib/models/order";
 import { getLegacyArticleId } from "@/lib/legacy-article-id";
+import {
+  applyShippingEstimate,
+  buildShippingSnapshot,
+  isLikelyValidPostalCode,
+} from "@/lib/shipping";
+import { estimateShippingWithCorreoArgentino } from "@/lib/services/shippingEstimateService";
 import { getServerSettings } from "@/lib/store-config";
 import type { CheckoutCustomer, CreateOrderPayload } from "@/lib/types";
 import type { CreateOrderInput, OrderItem } from "@/lib/types/order";
@@ -136,6 +142,18 @@ function validateCheckoutCustomer(input: {
       "Completa la localidad para continuar con el pedido.",
     );
   }
+
+  if (tipoPedido === "envio" && !customer.postalCode) {
+    throw new OrderValidationError(
+      "Completa el codigo postal para continuar con el pedido.",
+    );
+  }
+
+  if (tipoPedido === "envio" && !isLikelyValidPostalCode(customer.postalCode)) {
+    throw new OrderValidationError(
+      "Ingresa un codigo postal valido para continuar con el pedido.",
+    );
+  }
 }
 
 export async function buildCheckoutOrderDraft(
@@ -214,6 +232,22 @@ export async function buildCheckoutOrderDraft(
       currency: product.currency || "ARS",
     } satisfies OrderItem;
   });
+  const shippingEstimateItems = requestedItems.map((item) => {
+    const product = productMap.get(item.productId);
+
+    if (!product) {
+      throw new OrderValidationError(
+        `El articulo ${item.productId} ya no esta disponible para este canal.`,
+      );
+    }
+
+    return {
+      productId: product.id,
+      description: product.description,
+      category: product.category,
+      quantity: item.quantity,
+    };
+  });
 
   const paymentItems = snapshotItems.map((item) => ({
     title: item.productName || item.productId,
@@ -221,11 +255,60 @@ export async function buildCheckoutOrderDraft(
     unitPrice: item.unitPrice || 0,
     currency: item.currency || "ARS",
   }));
-  const montoTotal = snapshotItems.reduce(
+  const itemsSubtotal = snapshotItems.reduce(
     (sum, item) => sum + Number(item.subtotal || 0),
     0,
   );
+  const shippingSnapshot = buildShippingSnapshot({
+    orderType: tipoPedido,
+    itemsSubtotal,
+    freeShippingThreshold: settings.freeShippingThreshold,
+  });
+  let shippingEstimate = null;
+  let resolvedShippingSnapshot = shippingSnapshot;
+
+  if (
+    settings.shippingEstimationEnabled &&
+    tipoPedido === "envio" &&
+    shippingSnapshot.shippingStatus === "pending_quote"
+  ) {
+    try {
+      shippingEstimate = await estimateShippingWithCorreoArgentino({
+        postalCode: customer.postalCode,
+        items: shippingEstimateItems,
+        deliveredType: "D",
+      });
+      resolvedShippingSnapshot = applyShippingEstimate(
+        shippingSnapshot,
+        shippingEstimate,
+      );
+    } catch (error) {
+      throw new OrderValidationError(
+        error instanceof Error
+          ? error.message
+          : "No se pudo cotizar el envio con Correo Argentino.",
+      );
+    }
+
+    if (resolvedShippingSnapshot.shippingStatus !== "estimated") {
+      throw new OrderValidationError(
+        "No se pudo cotizar el envio con Correo Argentino.",
+      );
+    }
+  }
+
+  const shippingCost = Number(resolvedShippingSnapshot.shippingCost || 0);
+  const montoTotal = itemsSubtotal + shippingCost;
   const itemCount = snapshotItems.reduce((sum, item) => sum + item.quantity, 0);
+
+  if (shippingCost > 0) {
+    paymentItems.push({
+      title: "Envio",
+      quantity: 1,
+      unitPrice: shippingCost,
+      currency: "ARS",
+    });
+  }
 
   return {
     input: {
@@ -237,12 +320,20 @@ export async function buildCheckoutOrderDraft(
       direccion: normalizeOptionalValue(customer.address),
       metadata: {
         items: snapshotItems,
+        itemsSubtotal: resolvedShippingSnapshot.itemsSubtotal,
         customerDocumentNumber: normalizeOptionalValue(customer.documentNumber),
         customerAddress: normalizeOptionalValue(customer.address),
         customerCity: normalizeOptionalValue(customer.city),
         customerProvince: normalizeOptionalValue(customer.province),
         customerPostalCode: normalizeOptionalValue(customer.postalCode),
         customerNotes: normalizeOptionalValue(customer.notes),
+        shippingStatus: resolvedShippingSnapshot.shippingStatus,
+        shippingCost: resolvedShippingSnapshot.shippingCost,
+        shippingEstimateSource: shippingEstimate?.source || null,
+        shippingEstimateService: shippingEstimate?.serviceName || null,
+        shippingEstimateValidTo: shippingEstimate?.validTo || null,
+        freeShippingThreshold: resolvedShippingSnapshot.freeShippingThreshold,
+        freeShippingQualified: resolvedShippingSnapshot.qualifiesForFreeShipping,
         deliveryMethod:
           tipoPedido === "envio" ? "Envio a domicilio" : "Retiro en local",
         paymentMethod:

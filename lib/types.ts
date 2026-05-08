@@ -135,6 +135,35 @@ export type PublicStoreSettings = {
   supportPhone: string;
   storeAddress: string;
   supportBlurb: string;
+  freeShippingThreshold: number;
+  shippingEstimationEnabled: boolean;
+};
+
+export type ShippingEstimateRequestItem = {
+  productId: string;
+  description: string;
+  category: string;
+  quantity: number;
+};
+
+export type ShippingPackageEstimate = {
+  itemCount: number;
+  weightGrams: number;
+  height: number;
+  width: number;
+  length: number;
+};
+
+export type ShippingEstimateResult = {
+  postalCode: string;
+  source: "correo-argentino";
+  serviceName: string | null;
+  deliveredType: "D" | "S";
+  shippingCost: number;
+  deliveryTimeMin: string | null;
+  deliveryTimeMax: string | null;
+  validTo: string | null;
+  estimatedPackage: ShippingPackageEstimate;
 };
 
 export type PaymentCollectionAccount = {

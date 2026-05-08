@@ -403,6 +403,10 @@ export function AdminConfigWorkspace(props: AdminConfigWorkspaceProps) {
               "Esto controla como avanza el proceso de compra y que validaciones haces antes de confirmar.",
               <>
                 {renderBooleanField("APP_ALLOW_PICKUP_CHECKOUT_WITHOUT_ADDRESS")}
+                {renderTextField("APP_FREE_SHIPPING_THRESHOLD", {
+                  half: true,
+                  help: "Monto desde el cual un pedido con envio pasa a mostrarse como envio gratis.",
+                })}
                 {renderBooleanField("APP_VALIDATE_STOCK_ON_CHECKOUT")}
                 {renderBooleanField("APP_VALIDATE_PRICE_CLASS_ON_CHECKOUT")}
                 {renderBooleanField("APP_ALLOW_BACKORDERS")}
@@ -410,6 +414,33 @@ export function AdminConfigWorkspace(props: AdminConfigWorkspaceProps) {
                 {renderBooleanField("APP_WRITE_STOCK_MOVEMENTS")}
                 {renderTextField("APP_STOCK_RESERVATION_HOURS", { half: true })}
                 {renderBooleanField("APP_SEND_ORDER_RECEIVED_EMAIL")}
+              </>,
+            )}
+
+            {renderBlock(
+              "Cotizacion con Correo Argentino",
+              "Si completas estos datos, la web pide el codigo postal al entrar y estima el envio con una caja aproximada segun el tipo de producto del carrito.",
+              <>
+                {renderTextField("APP_CORREO_ARGENTINO_API_BASE_URL", {
+                  half: false,
+                  help: "Base HTTPS de MiCorreo / PAQ.AR. Por defecto dejamos la oficial de Correo Argentino.",
+                })}
+                {renderTextField("APP_CORREO_ARGENTINO_CUSTOMER_ID", {
+                  half: true,
+                  help: "Identificador de cliente provisto por Correo Argentino.",
+                })}
+                {renderTextField("APP_CORREO_ARGENTINO_ORIGIN_POSTAL_CODE", {
+                  half: true,
+                  help: "Codigo postal desde donde despachas los pedidos.",
+                })}
+                {renderTextField("APP_CORREO_ARGENTINO_API_USER", {
+                  half: true,
+                  help: "Usuario de la API usado para pedir el token.",
+                })}
+                {renderTextField("APP_CORREO_ARGENTINO_API_PASSWORD", {
+                  half: true,
+                  help: "Password de la API de Correo Argentino.",
+                })}
               </>,
             )}
           </div>

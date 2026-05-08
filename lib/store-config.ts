@@ -1,5 +1,5 @@
 import "server-only";
-import { parseBoolean } from "@/lib/commerce";
+import { parseBoolean, toNumber } from "@/lib/commerce";
 import { LOCAL_HERO_IMAGE_URL, LOCAL_STORE_LOGO_URL } from "@/lib/site-assets";
 import { getStoredSettingValuesByEnvKey } from "@/lib/store-settings";
 import type { PublicStoreSettings } from "@/lib/types";
@@ -52,6 +52,13 @@ export type ServerSettings = {
   validarClasePrecioAlConfirmarPedido: boolean;
   enviarEmailPedidoRecibido: boolean;
   permitirCheckoutSinDireccionEnRetiro: boolean;
+  freeShippingThreshold: number;
+  correoArgentinoApiBaseUrl: string;
+  correoArgentinoApiUser: string;
+  correoArgentinoApiPassword: string;
+  correoArgentinoCustomerId: string;
+  correoArgentinoOriginPostalCode: string;
+  shippingEstimationEnabled: boolean;
   pickupAvailabilityText: string;
   requerirNombreApellidoAlRetirar: boolean;
   requerirDniAlRetirar: boolean;
@@ -112,6 +119,34 @@ export async function getServerSettings(): Promise<ServerSettings> {
   const productImageDirectory =
     readSetting(storedValues, "APP_PRODUCT_IMAGE_DIRECTORY")
     || readSetting(storedValues, "APP_PRODUCT_IMAGE_UPLOAD_DIRECTORY");
+  const correoArgentinoApiBaseUrl = readSetting(
+    storedValues,
+    "APP_CORREO_ARGENTINO_API_BASE_URL",
+    "https://api.correoargentino.com.ar/micorreo/v1",
+  );
+  const correoArgentinoApiUser = readSetting(
+    storedValues,
+    "APP_CORREO_ARGENTINO_API_USER",
+  );
+  const correoArgentinoApiPassword = readSetting(
+    storedValues,
+    "APP_CORREO_ARGENTINO_API_PASSWORD",
+  );
+  const correoArgentinoCustomerId = readSetting(
+    storedValues,
+    "APP_CORREO_ARGENTINO_CUSTOMER_ID",
+  );
+  const correoArgentinoOriginPostalCode = readSetting(
+    storedValues,
+    "APP_CORREO_ARGENTINO_ORIGIN_POSTAL_CODE",
+  );
+  const shippingEstimationEnabled = Boolean(
+    correoArgentinoApiBaseUrl &&
+      correoArgentinoApiUser &&
+      correoArgentinoApiPassword &&
+      correoArgentinoCustomerId &&
+      correoArgentinoOriginPostalCode,
+  );
 
   return {
     priceColumn: priceColumns.has(priceColumn) ? priceColumn : "PRECIO1",
@@ -200,6 +235,19 @@ export async function getServerSettings(): Promise<ServerSettings> {
       ),
       true,
     ),
+    freeShippingThreshold: Math.max(
+      0,
+      toNumber(
+        readSetting(storedValues, "APP_FREE_SHIPPING_THRESHOLD", "150000"),
+        150000,
+      ),
+    ),
+    correoArgentinoApiBaseUrl,
+    correoArgentinoApiUser,
+    correoArgentinoApiPassword,
+    correoArgentinoCustomerId,
+    correoArgentinoOriginPostalCode,
+    shippingEstimationEnabled,
     pickupAvailabilityText:
       readSetting(storedValues, "APP_PICKUP_SCHEDULE") ||
       readSetting(
@@ -364,5 +412,7 @@ export async function getPublicStoreSettings(): Promise<PublicStoreSettings> {
       "NEXT_PUBLIC_SUPPORT_BLURB",
       "En Diez Deportes trabajamos para ofrecerte atencion personalizada, envios seguros a todo el pais y una experiencia de compra simple.",
     ),
+    freeShippingThreshold: settings.freeShippingThreshold,
+    shippingEstimationEnabled: settings.shippingEstimationEnabled,
   };
 }

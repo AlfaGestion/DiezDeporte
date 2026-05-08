@@ -14,6 +14,13 @@ import {
   LOCAL_STORE_LOGO_URL,
 } from "@/lib/site-assets";
 import {
+  applyShippingEstimate,
+  buildShippingSnapshot,
+  isLikelyValidPostalCode,
+  normalizePostalCodeInput,
+  type ShippingSnapshot,
+} from "@/lib/shipping";
+import {
   getLegacyArticleParentId,
   getLegacyArticleRelationKey,
 } from "@/lib/legacy-article-id";
@@ -28,9 +35,12 @@ import type {
   Product,
   PromoTile,
   PublicStoreSettings,
+  ShippingEstimateRequestItem,
+  ShippingEstimateResult,
 } from "@/lib/types";
 
 const LOCAL_STORAGE_CART_KEY = "diezdeportes-cart";
+const LOCAL_STORAGE_POSTAL_CODE_KEY = "diezdeportes-postal-code";
 const LOCAL_STORAGE_THEME_KEY = "diezdeportes-theme";
 const VARIANT_LABEL_COLLATOR = new Intl.Collator("es", {
   numeric: true,
@@ -117,7 +127,10 @@ function isPickupDeliveryMethod(value: string) {
   return value.trim().toLowerCase() !== "envio a domicilio";
 }
 
-function buildEmptyCustomer(settings: PublicStoreSettings): CheckoutCustomer {
+function buildEmptyCustomer(
+  settings: PublicStoreSettings,
+  postalCode = "",
+): CheckoutCustomer {
   return {
     fullName: "",
     email: "",
@@ -125,7 +138,7 @@ function buildEmptyCustomer(settings: PublicStoreSettings): CheckoutCustomer {
     address: "",
     city: "",
     province: "",
-    postalCode: "",
+    postalCode,
     documentNumber: "",
     notes: "",
     deliveryMethod: "Retiro en local",
@@ -145,26 +158,135 @@ function getCheckoutValidationMessage(params: {
   const pickupOrder = isPickupDeliveryMethod(customer.deliveryMethod);
   const requiresShippingAddress =
     !pickupOrder || !allowPickupCheckoutWithoutAddress;
+  const requiresPostalCode = !pickupOrder;
 
   if (
     !customer.fullName ||
     !customer.email ||
     !customer.phone ||
     (requiresShippingAddress && !customer.address) ||
-    (requiresShippingAddress && !customer.city)
+    (requiresShippingAddress && !customer.city) ||
+    (requiresPostalCode && !customer.postalCode)
   ) {
     if (mercadoPagoEnabled) {
       return requiresShippingAddress
-        ? "Completa nombre, email, telefono, direccion y localidad para iniciar el pago."
+        ? requiresPostalCode
+          ? "Completa nombre, email, telefono, direccion, localidad y codigo postal para iniciar el pago."
+          : "Completa nombre, email, telefono, direccion y localidad para iniciar el pago."
         : "Completa nombre, email y telefono para iniciar el pago.";
     }
 
     return requiresShippingAddress
-      ? "Completa nombre, email, telefono, direccion y localidad para registrar el pedido."
+      ? requiresPostalCode
+        ? "Completa nombre, email, telefono, direccion, localidad y codigo postal para registrar el pedido."
+        : "Completa nombre, email, telefono, direccion y localidad para registrar el pedido."
       : "Completa nombre, email y telefono para registrar el pedido.";
   }
 
+  if (requiresPostalCode && !isLikelyValidPostalCode(customer.postalCode)) {
+    return "Ingresa un codigo postal valido para continuar.";
+  }
+
   return null;
+}
+
+function getFreeShippingPolicyCopy(threshold: number) {
+  if (threshold <= 0) {
+    return null;
+  }
+
+  return `En compras con envio desde ${formatCurrency(threshold)} el envio es gratis. Si no, queda a calcular segun destino.`;
+}
+
+function getAmountMissingForFreeShipping(total: number, threshold: number) {
+  if (threshold <= 0) {
+    return 0;
+  }
+
+  return Math.max(0, threshold - total);
+}
+
+function buildShippingEstimateWindow(estimate: ShippingEstimateResult | null | undefined) {
+  if (!estimate) {
+    return null;
+  }
+
+  const min = estimate.deliveryTimeMin?.trim() || null;
+  const max = estimate.deliveryTimeMax?.trim() || null;
+
+  if (min && max && min === max) {
+    return `${min} dias habiles`;
+  }
+
+  if (min && max) {
+    return `${min} a ${max} dias habiles`;
+  }
+
+  if (min) {
+    return `desde ${min} dias habiles`;
+  }
+
+  if (max) {
+    return `hasta ${max} dias habiles`;
+  }
+
+  return null;
+}
+
+function buildShippingEstimateItems(cart: CartItem[]): ShippingEstimateRequestItem[] {
+  return cart.map((item) => ({
+    productId: item.id,
+    description: item.description,
+    category: item.category,
+    quantity: item.quantity,
+  }));
+}
+
+function getShippingSummary(
+  snapshot: ShippingSnapshot,
+  estimate?: ShippingEstimateResult | null,
+) {
+  switch (snapshot.shippingStatus) {
+    case "free":
+      return {
+        label: "Gratis",
+        detail:
+          snapshot.freeShippingThreshold > 0
+            ? `Este pedido supera ${formatCurrency(snapshot.freeShippingThreshold)} y califica para envio gratis.`
+            : "Este pedido califica para envio gratis.",
+      };
+    case "estimated": {
+      const deliveryWindow = buildShippingEstimateWindow(estimate);
+      const serviceName = estimate?.serviceName || "Correo Argentino";
+
+      return {
+        label:
+          snapshot.shippingCost && snapshot.shippingCost > 0
+            ? formatCurrency(snapshot.shippingCost)
+            : "Estimado",
+        detail: [
+          `Estimado con ${serviceName}.`,
+          deliveryWindow ? `Entrega aproximada ${deliveryWindow}.` : null,
+          "Usamos un paquete aproximado segun el tipo de producto del carrito.",
+        ]
+          .filter(Boolean)
+          .join(" "),
+      };
+    }
+    case "pending_quote":
+      return {
+        label: "A calcular",
+        detail:
+          snapshot.freeShippingThreshold > 0
+            ? `El total actual no suma envio. Debajo de ${formatCurrency(snapshot.freeShippingThreshold)} el envio queda a calcular segun destino.`
+            : "El envio queda a calcular segun destino.",
+      };
+    default:
+      return {
+        label: "No aplica",
+        detail: "Retiras en el local, asi que no se suma envio.",
+      };
+  }
 }
 
 export function Storefront({
@@ -197,6 +319,18 @@ export function Storefront({
   const [cart, setCart] = useState<CartItem[]>([]);
   const [customer, setCustomer] = useState<CheckoutCustomer>(() =>
     buildEmptyCustomer(settings),
+  );
+  const [filtersPanelOpen, setFiltersPanelOpen] = useState(false);
+  const [postalCodePromptOpen, setPostalCodePromptOpen] = useState(false);
+  const [postalCodePromptDraft, setPostalCodePromptDraft] = useState("");
+  const [postalCodePromptError, setPostalCodePromptError] = useState<string | null>(
+    null,
+  );
+  const [shippingEstimate, setShippingEstimate] =
+    useState<ShippingEstimateResult | null>(null);
+  const [shippingEstimateLoading, setShippingEstimateLoading] = useState(false);
+  const [shippingEstimateError, setShippingEstimateError] = useState<string | null>(
+    null,
   );
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -238,6 +372,34 @@ export function Storefront({
   }, [cart]);
 
   useEffect(() => {
+    const savedPostalCode = normalizePostalCodeInput(
+      window.localStorage.getItem(LOCAL_STORAGE_POSTAL_CODE_KEY),
+    );
+
+    if (savedPostalCode && isLikelyValidPostalCode(savedPostalCode)) {
+      setCustomer((current) => ({ ...current, postalCode: savedPostalCode }));
+      setPostalCodePromptDraft(savedPostalCode);
+      return;
+    }
+
+    setPostalCodePromptOpen(true);
+  }, []);
+
+  useEffect(() => {
+    const normalizedPostalCode = normalizePostalCodeInput(customer.postalCode);
+
+    if (!normalizedPostalCode) {
+      window.localStorage.removeItem(LOCAL_STORAGE_POSTAL_CODE_KEY);
+      return;
+    }
+
+    window.localStorage.setItem(
+      LOCAL_STORAGE_POSTAL_CODE_KEY,
+      normalizedPostalCode,
+    );
+  }, [customer.postalCode]);
+
+  useEffect(() => {
     const savedTheme = window.localStorage.getItem(LOCAL_STORAGE_THEME_KEY);
     if (savedTheme === "light" || savedTheme === "dark") {
       setTheme(savedTheme);
@@ -267,7 +429,8 @@ export function Storefront({
   }, [cart.length]);
 
   useEffect(() => {
-    const shouldLockUi = mobileCartOpen || Boolean(selectedProduct);
+    const shouldLockUi =
+      postalCodePromptOpen || mobileCartOpen || Boolean(selectedProduct);
     if (!shouldLockUi) return;
 
     const previousOverflow = document.body.style.overflow;
@@ -278,6 +441,11 @@ export function Storefront({
 
       if (selectedProduct) {
         setSelectedProduct(null);
+        return;
+      }
+
+      if (postalCodePromptOpen) {
+        setPostalCodePromptOpen(false);
         return;
       }
 
@@ -292,7 +460,7 @@ export function Storefront({
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [mobileCartOpen, selectedProduct]);
+  }, [mobileCartOpen, postalCodePromptOpen, selectedProduct]);
 
   const resolvedInitialProducts = initialProducts.map(resolveProductImage);
   const resolvedCatalogProducts = catalogProducts.map(resolveProductImage);
@@ -385,6 +553,13 @@ export function Storefront({
   const activePriceLabel = hasActivePriceFilter
     ? `${formatCurrency(effectiveMinPrice)} a ${formatCurrency(effectiveMaxPrice)}`
     : null;
+  const activeFilterCount = [
+    Boolean(activeSearchLabel),
+    Boolean(activeCategoryLabel),
+    selectedAudience !== "all",
+    Boolean(activeBrandLabel),
+    hasActivePriceFilter,
+  ].filter(Boolean).length;
   const hasServerFilters = Boolean(
     search.trim() || selectedCategory !== "all" || selectedBrand !== "all",
   );
@@ -490,6 +665,28 @@ export function Storefront({
   );
   const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const itemCount = cartItemCount(cart);
+  const freeShippingPolicyCopy = getFreeShippingPolicyCopy(
+    settings.freeShippingThreshold,
+  );
+  const qualifiesForFreeShippingInStorefront =
+    settings.freeShippingThreshold > 0 && total >= settings.freeShippingThreshold;
+  const normalizedCustomerPostalCode = normalizePostalCodeInput(
+    customer.postalCode,
+  );
+  const shouldRequestShippingEstimate =
+    settings.shippingEstimationEnabled &&
+    cart.length > 0 &&
+    !qualifiesForFreeShippingInStorefront &&
+    isLikelyValidPostalCode(normalizedCustomerPostalCode);
+  const catalogShippingBaseSnapshot = buildShippingSnapshot({
+    orderType: "envio",
+    itemsSubtotal: total,
+    freeShippingThreshold: settings.freeShippingThreshold,
+  });
+  const catalogShippingPreview = applyShippingEstimate(
+    catalogShippingBaseSnapshot,
+    shippingEstimate,
+  );
 
   const whatsappHref = resolveWhatsappHref(settings.supportWhatsapp);
   const rawLogoUrl = logoUrl || settings.logoUrl;
@@ -611,6 +808,74 @@ export function Storefront({
 
     return summary;
   }, {});
+
+  useEffect(() => {
+    if (!shouldRequestShippingEstimate) {
+      setShippingEstimate(null);
+      setShippingEstimateLoading(false);
+      setShippingEstimateError(null);
+      return;
+    }
+
+    setShippingEstimate(null);
+    setShippingEstimateError(null);
+    setShippingEstimateLoading(true);
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(async () => {
+      setShippingEstimateError(null);
+
+      try {
+        const response = await fetch("/api/shipping/estimate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          signal: controller.signal,
+          body: JSON.stringify({
+            postalCode: normalizedCustomerPostalCode,
+            items: buildShippingEstimateItems(cart),
+          }),
+        });
+        const result = await readJsonResponse<{
+          error?: string;
+          estimate?: ShippingEstimateResult;
+        }>(response);
+
+        if (!response.ok || !result?.estimate) {
+          throw new Error(
+            result?.error || "No pudimos calcular el envio con Correo Argentino.",
+          );
+        }
+
+        setShippingEstimate(result.estimate);
+      } catch (error) {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        setShippingEstimate(null);
+        setShippingEstimateError(
+          error instanceof Error
+            ? error.message
+            : "No pudimos calcular el envio con Correo Argentino.",
+        );
+      } finally {
+        if (!controller.signal.aborted) {
+          setShippingEstimateLoading(false);
+        }
+      }
+    }, 250);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    cart,
+    normalizedCustomerPostalCode,
+    shouldRequestShippingEstimate,
+  ]);
 
   useEffect(() => {
     const candidates = filteredProductGroups
@@ -1080,6 +1345,12 @@ export function Storefront({
   function updateCustomerField(field: keyof CheckoutCustomer, value: string) {
     setSuccessMessage(null);
     setErrorMessage(null);
+
+    if (field === "postalCode") {
+      setPostalCodePromptDraft(value);
+      setPostalCodePromptError(null);
+    }
+
     setCustomer((current) => {
       if (field === "deliveryMethod") {
         const pickupSelected = isPickupDeliveryMethod(value);
@@ -1098,6 +1369,69 @@ export function Storefront({
 
       return { ...current, [field]: value };
     });
+  }
+
+  function openPostalCodePrompt() {
+    setPostalCodePromptDraft(customer.postalCode);
+    setPostalCodePromptError(null);
+    setPostalCodePromptOpen(true);
+  }
+
+  function closePostalCodePrompt() {
+    setPostalCodePromptError(null);
+    setPostalCodePromptOpen(false);
+  }
+
+  function savePostalCodePrompt(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const normalizedPostalCode = normalizePostalCodeInput(postalCodePromptDraft);
+
+    if (!normalizedPostalCode) {
+      setPostalCodePromptError("Ingresa un codigo postal para continuar.");
+      return;
+    }
+
+    if (!isLikelyValidPostalCode(normalizedPostalCode)) {
+      setPostalCodePromptError("Ingresa un codigo postal valido.");
+      return;
+    }
+
+    updateCustomerField("postalCode", normalizedPostalCode);
+    setPostalCodePromptDraft(normalizedPostalCode);
+    setPostalCodePromptOpen(false);
+  }
+
+  function getShippingEstimateValidationMessage() {
+    const pickupOrder = isPickupDeliveryMethod(customer.deliveryMethod);
+
+    if (
+      pickupOrder ||
+      !settings.shippingEstimationEnabled ||
+      qualifiesForFreeShippingInStorefront
+    ) {
+      return null;
+    }
+
+    if (!normalizePostalCodeInput(customer.postalCode)) {
+      return "Ingresa tu codigo postal para cotizar el envio.";
+    }
+
+    if (!isLikelyValidPostalCode(customer.postalCode)) {
+      return "Ingresa un codigo postal valido para cotizar el envio.";
+    }
+
+    if (shippingEstimateLoading) {
+      return "Estamos calculando el envio con Correo Argentino. Espera unos segundos.";
+    }
+
+    if (shippingEstimate) {
+      return null;
+    }
+
+    return (
+      shippingEstimateError ||
+      "No pudimos cotizar el envio con Correo Argentino. Reintenta en unos segundos."
+    );
   }
 
   function openCartPanel(step: CheckoutStep = "cart") {
@@ -1129,6 +1463,13 @@ export function Storefront({
 
     if (validationError) {
       setErrorMessage(validationError);
+      return;
+    }
+
+    const shippingEstimateValidationError = getShippingEstimateValidationMessage();
+
+    if (shippingEstimateValidationError) {
+      setErrorMessage(shippingEstimateValidationError);
       return;
     }
 
@@ -1201,6 +1542,13 @@ export function Storefront({
       return;
     }
 
+    const shippingEstimateValidationError = getShippingEstimateValidationMessage();
+
+    if (shippingEstimateValidationError) {
+      setErrorMessage(shippingEstimateValidationError);
+      return;
+    }
+
     const payload: CreateOrderPayload = {
       customer,
       items: cart.map((item) => ({
@@ -1258,7 +1606,7 @@ export function Storefront({
       }
 
       setCart([]);
-      setCustomer(buildEmptyCustomer(settings));
+      setCustomer(buildEmptyCustomer(settings, normalizedCustomerPostalCode));
       setCheckoutStep("cart");
       setMobileCartOpen(false);
       setSuccessMessage(
@@ -1282,9 +1630,128 @@ export function Storefront({
   const checkoutSheetClassName = mobileCartOpen
     ? "order-panel checkout-sheet-open"
     : "order-panel checkout-sheet-hidden";
+  const postalCodeButtonLabel = normalizedCustomerPostalCode
+    ? `CP ${normalizedCustomerPostalCode}`
+    : "Cargar codigo postal";
+  const amountMissingForFreeShipping = getAmountMissingForFreeShipping(
+    total,
+    settings.freeShippingThreshold,
+  );
+  const catalogShippingWindow = buildShippingEstimateWindow(shippingEstimate);
+  const catalogFreeShippingBadgeLabel = qualifiesForFreeShippingInStorefront
+    ? "Envio gratis"
+    : settings.freeShippingThreshold > 0
+      ? `Gratis desde ${formatCurrency(settings.freeShippingThreshold)}`
+      : "Envio a calcular";
+  const catalogFreeShippingPolicyDetail =
+    settings.freeShippingThreshold <= 0
+      ? "El costo de envio se calcula segun el destino."
+      : qualifiesForFreeShippingInStorefront
+        ? `Superaste ${formatCurrency(settings.freeShippingThreshold)}. Si eliges envio, no se suma ningun cargo extra.`
+        : amountMissingForFreeShipping > 0
+          ? `Te faltan ${formatCurrency(amountMissingForFreeShipping)} para que el envio sea gratis.`
+          : freeShippingPolicyCopy || "El envio se calcula segun el destino.";
+  const catalogShippingEstimateLabel = !normalizedCustomerPostalCode
+    ? "Carga tu CP"
+    : qualifiesForFreeShippingInStorefront
+      ? "Envio gratis"
+      : shippingEstimateLoading
+        ? "Calculando"
+        : catalogShippingPreview.shippingStatus === "estimated" &&
+            Number(catalogShippingPreview.shippingCost || 0) > 0
+          ? formatCurrency(Number(catalogShippingPreview.shippingCost || 0))
+          : shippingEstimateError
+            ? "Sin cotizacion"
+            : "A calcular";
+  const catalogShippingNote = !normalizedCustomerPostalCode
+    ? "Ingresa tu codigo postal para estimar el envio y dejarlo guardado para tu compra."
+    : cart.length === 0
+      ? `CP ${normalizedCustomerPostalCode} guardado para usarlo durante el checkout.`
+      : qualifiesForFreeShippingInStorefront
+        ? `CP ${normalizedCustomerPostalCode}. Si eliges envio, este pedido ya califica para envio gratis.`
+        : catalogShippingPreview.shippingStatus === "estimated" &&
+            Number(catalogShippingPreview.shippingCost || 0) > 0
+          ? `CP ${normalizedCustomerPostalCode}. Envio estimado ${formatCurrency(Number(catalogShippingPreview.shippingCost || 0))}${shippingEstimate?.serviceName ? ` con ${shippingEstimate.serviceName}` : ""}.`
+          : shippingEstimateLoading
+            ? `CP ${normalizedCustomerPostalCode}. Estamos calculando el envio con Correo Argentino.`
+            : shippingEstimateError && settings.shippingEstimationEnabled
+            ? `CP ${normalizedCustomerPostalCode}. ${shippingEstimateError}`
+            : freeShippingPolicyCopy ||
+              `CP ${normalizedCustomerPostalCode} guardado para completar tu compra.`;
+  const filtersPanelStatusCopy = [
+    activeFilterCount > 0
+      ? `${activeFilterCount} filtro${activeFilterCount === 1 ? "" : "s"} activo${activeFilterCount === 1 ? "" : "s"}`
+      : null,
+    itemCount > 0
+      ? `${itemCount} producto${itemCount === 1 ? "" : "s"} en tu pedido`
+      : "pedido vacio",
+  ]
+    .filter(Boolean)
+    .join(" | ");
 
   return (
     <>
+      {postalCodePromptOpen ? (
+        <>
+          <div
+            className="postal-code-backdrop"
+            onClick={closePostalCodePrompt}
+          />
+          <section
+            className="postal-code-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="postal-code-modal-title"
+          >
+            <button
+              type="button"
+              className="postal-code-close"
+              onClick={closePostalCodePrompt}
+              aria-label="Cerrar codigo postal"
+            >
+              X
+            </button>
+
+            <div className="postal-code-kicker">Envios</div>
+            <h2 id="postal-code-modal-title">Ingresa tu codigo postal</h2>
+            <p>
+              {settings.shippingEstimationEnabled
+                ? "Lo guardamos para estimar el envio con un aproximado del carrito y dejarlo listo para el checkout."
+                : "Lo guardamos para dejar listo el checkout cuando elijas envio."}
+            </p>
+
+            <form className="postal-code-form" onSubmit={savePostalCodePrompt}>
+              <label htmlFor="postal-code-prompt-input">Codigo postal</label>
+              <input
+                id="postal-code-prompt-input"
+                value={postalCodePromptDraft}
+                onChange={(event) => {
+                  setPostalCodePromptDraft(event.target.value);
+                  setPostalCodePromptError(null);
+                }}
+                placeholder="Ej: 8430, R8430 o B1842ZAB"
+                autoFocus
+              />
+              {postalCodePromptError ? (
+                <div className="postal-code-error">{postalCodePromptError}</div>
+              ) : null}
+              <div className="postal-code-actions">
+                <button
+                  type="button"
+                  className="checkout-secondary-button"
+                  onClick={closePostalCodePrompt}
+                >
+                  Ahora no
+                </button>
+                <button type="submit" className="submit-order-button">
+                  Guardar codigo postal
+                </button>
+              </div>
+            </form>
+          </section>
+        </>
+      ) : null}
+
       <main className="shop-page" id="top">
         <header className="site-header">
           <a className="site-logo" href="#top" aria-label={settings.storeName}>
@@ -1385,7 +1852,20 @@ export function Storefront({
                   WhatsApp
                 </a>
               ) : null}
+              <button
+                type="button"
+                className="hero-secondary hero-postal-code"
+                onClick={openPostalCodePrompt}
+              >
+                {postalCodeButtonLabel}
+              </button>
             </div>
+
+            <p className="hero-postal-code-copy">
+              {settings.shippingEstimationEnabled
+                ? "Guardamos tu codigo postal para estimar el envio y precargarlo en el checkout."
+                : "Guardamos tu codigo postal para precargarlo en el checkout cuando elijas envio."}
+            </p>
 
           </div>
         </section>
@@ -1449,7 +1929,29 @@ export function Storefront({
         ) : null}
 
         <div className="shop-layout" id="catalogo">
-          <aside className="filters-panel">
+          <aside
+            className={[
+              "filters-panel",
+              filtersPanelOpen ? "is-open" : "is-collapsed",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            id="catalog-sidebar"
+          >
+            <div className="filters-panel-mobile-header">
+              <div className="filters-panel-mobile-copy">
+                <strong>Filtros y pedido</strong>
+                <span>{filtersPanelStatusCopy}</span>
+              </div>
+              <button
+                type="button"
+                className="filters-panel-close"
+                onClick={() => setFiltersPanelOpen(false)}
+              >
+                Ocultar
+              </button>
+            </div>
+
             <div className="catalog-summary" aria-label="Resumen del pedido">
               <div className="catalog-summary-title">En tu pedido</div>
               <div className="catalog-summary-item">
@@ -1460,6 +1962,89 @@ export function Storefront({
                 <span>Total</span>
                 <strong>{formatCurrency(total)}</strong>
               </div>
+              <div
+                className={[
+                  "catalog-summary-highlight",
+                  qualifiesForFreeShippingInStorefront
+                    ? "catalog-summary-highlight-success"
+                    : "catalog-summary-highlight-warning",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+              >
+                <div className="catalog-summary-highlight-label">
+                  {catalogFreeShippingBadgeLabel}
+                </div>
+                <strong>{catalogFreeShippingPolicyDetail}</strong>
+              </div>
+              {settings.shippingEstimationEnabled ? (
+                <>
+                  <div className="catalog-summary-estimate">
+                    <div className="catalog-summary-estimate-header">
+                      <span>Envio estimado</span>
+                      <button
+                        type="button"
+                        className="catalog-summary-link"
+                        onClick={openPostalCodePrompt}
+                      >
+                        {normalizedCustomerPostalCode ? "Cambiar CP" : "Cargar CP"}
+                      </button>
+                    </div>
+                    <div className="catalog-summary-estimate-price">
+                      {catalogShippingEstimateLabel}
+                    </div>
+                    <div className="catalog-summary-estimate-copy">
+                      {!normalizedCustomerPostalCode
+                        ? "Ingresa tu codigo postal para ver un estimado con Correo Argentino."
+                        : qualifiesForFreeShippingInStorefront
+                          ? `CP ${normalizedCustomerPostalCode}. El pedido ya entra en envio gratis.`
+                          : shippingEstimateLoading
+                            ? `Estamos consultando Correo Argentino para CP ${normalizedCustomerPostalCode}.`
+                            : catalogShippingPreview.shippingStatus === "estimated" &&
+                                Number(catalogShippingPreview.shippingCost || 0) > 0
+                              ? [
+                                  `Correo Argentino para CP ${normalizedCustomerPostalCode}.`,
+                                  catalogShippingWindow
+                                    ? `Entrega aproximada ${catalogShippingWindow}.`
+                                    : null,
+                                ]
+                                  .filter(Boolean)
+                                  .join(" ")
+                              : shippingEstimateError
+                                ? shippingEstimateError
+                                : `CP ${normalizedCustomerPostalCode}. ${catalogShippingNote}`}
+                    </div>
+                  </div>
+                  <div className="catalog-summary-meta">
+                    <span>{postalCodeButtonLabel}</span>
+                    <button
+                      type="button"
+                      className="catalog-summary-link"
+                      onClick={openPostalCodePrompt}
+                    >
+                      {normalizedCustomerPostalCode ? "Cambiar" : "Cargar"}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="catalog-summary-meta">
+                    <span>{postalCodeButtonLabel}</span>
+                    <button
+                      type="button"
+                      className="catalog-summary-link"
+                      onClick={openPostalCodePrompt}
+                    >
+                      {normalizedCustomerPostalCode ? "Cambiar" : "Cargar"}
+                    </button>
+                  </div>
+                  <div className="catalog-summary-note">
+                    {normalizedCustomerPostalCode
+                      ? `CP ${normalizedCustomerPostalCode} guardado para completar tu compra.`
+                      : "Ingresa tu codigo postal para dejarlo guardado antes del checkout."}
+                  </div>
+                </>
+              )}
               <button
                 type="button"
                 className="submit-order-button catalog-summary-button"
@@ -1708,20 +2293,45 @@ export function Storefront({
                 </p>
               </div>
 
-              <label className="sort-box">
-                <span>Ordenar por</span>
-                <select
-                  value={sortBy}
-                  onChange={(event) =>
-                    setSortBy(event.target.value as SortOption)
-                  }
+              <div className="catalog-toolbar-actions">
+                <button
+                  type="button"
+                  className="catalog-sidebar-toggle"
+                  onClick={() => setFiltersPanelOpen((current) => !current)}
+                  aria-controls="catalog-sidebar"
+                  aria-expanded={filtersPanelOpen}
                 >
-                  <option value="featured">Destacado</option>
-                  <option value="name-asc">Nombre (A-Z)</option>
-                  <option value="price-asc">Precio - bajo a alto</option>
-                  <option value="price-desc">Precio - alto a bajo</option>
-                </select>
-              </label>
+                  <span className="catalog-sidebar-toggle-copy">
+                    <strong>
+                      {filtersPanelOpen
+                        ? "Ocultar filtros y pedido"
+                        : "Mostrar filtros y pedido"}
+                    </strong>
+                    <small>{filtersPanelStatusCopy}</small>
+                  </span>
+                  <span
+                    className="catalog-sidebar-toggle-badge"
+                    aria-hidden="true"
+                  >
+                    {filtersPanelOpen ? "-" : "+"}
+                  </span>
+                </button>
+
+                <label className="sort-box">
+                  <span>Ordenar por</span>
+                  <select
+                    value={sortBy}
+                    onChange={(event) =>
+                      setSortBy(event.target.value as SortOption)
+                    }
+                  >
+                    <option value="featured">Destacado</option>
+                    <option value="name-asc">Nombre (A-Z)</option>
+                    <option value="price-asc">Precio - bajo a alto</option>
+                    <option value="price-desc">Precio - alto a bajo</option>
+                  </select>
+                </label>
+              </div>
             </div>
 
             {catalogLoadError ? (
@@ -2517,8 +3127,14 @@ export function Storefront({
           storeAddress={settings.storeAddress}
           successMessage={successMessage}
           subtotal={subtotal}
+          shippingEstimate={shippingEstimate}
+          shippingEstimateError={shippingEstimateError}
+          shippingEstimateLoading={shippingEstimateLoading}
+          shippingEstimationEnabled={settings.shippingEstimationEnabled}
           taxTotal={taxTotal}
           total={total}
+          freeShippingThreshold={settings.freeShippingThreshold}
+          onOpenPostalCodePrompt={openPostalCodePrompt}
         />
       </aside>
     </>
@@ -2544,8 +3160,14 @@ type CartContentProps = {
   storeAddress: string;
   successMessage: string | null;
   subtotal: number;
+  shippingEstimate: ShippingEstimateResult | null;
+  shippingEstimateError: string | null;
+  shippingEstimateLoading: boolean;
+  shippingEstimationEnabled: boolean;
   taxTotal: number;
   total: number;
+  freeShippingThreshold: number;
+  onOpenPostalCodePrompt: () => void;
 };
 
 function CartContent({
@@ -2567,19 +3189,66 @@ function CartContent({
   storeAddress,
   successMessage,
   subtotal,
+  shippingEstimate,
+  shippingEstimateError,
+  shippingEstimateLoading,
+  shippingEstimationEnabled,
   taxTotal,
   total,
+  freeShippingThreshold,
+  onOpenPostalCodePrompt,
 }: CartContentProps) {
   const cartStepActive = checkoutStep === "cart";
   const deliveryStepActive = checkoutStep === "delivery";
   const detailsStepActive = checkoutStep === "details";
   const paymentStepActive = checkoutStep === "payment";
   const pickupOrder = isPickupDeliveryMethod(customer.deliveryMethod);
+  const normalizedPostalCode = normalizePostalCodeInput(customer.postalCode);
+  const shippingBaseSnapshot = buildShippingSnapshot({
+    orderType: pickupOrder ? "retiro" : "envio",
+    itemsSubtotal: total,
+    freeShippingThreshold,
+  });
+  const selectedShippingSnapshot = pickupOrder
+    ? shippingBaseSnapshot
+    : applyShippingEstimate(shippingBaseSnapshot, shippingEstimate);
+  const deliveryShippingBasePreview = buildShippingSnapshot({
+    orderType: "envio",
+    itemsSubtotal: total,
+    freeShippingThreshold,
+  });
+  const deliveryShippingPreview = applyShippingEstimate(
+    deliveryShippingBasePreview,
+    shippingEstimate,
+  );
+  const shippingSummary = getShippingSummary(
+    selectedShippingSnapshot,
+    shippingEstimate,
+  );
+  const deliveryShippingSummary = getShippingSummary(
+    deliveryShippingPreview,
+    shippingEstimate,
+  );
+  const freeShippingPolicyCopy = getFreeShippingPolicyCopy(freeShippingThreshold);
   const shouldUseMercadoPago =
     mercadoPagoEnabled &&
     (!pickupOrder || customer.paymentMethod.trim() === "Mercado Pago");
   const requiresShippingAddress =
     !pickupOrder || !allowPickupCheckoutWithoutAddress;
+  const displayOrderTotal =
+    total + Number(selectedShippingSnapshot.shippingCost || 0);
+  const totalMetricLabel =
+    !pickupOrder && selectedShippingSnapshot.shippingStatus === "pending_quote"
+      ? "Productos"
+      : selectedShippingSnapshot.shippingStatus === "estimated"
+        ? "Total estimado"
+        : "Total";
+  const totalSummaryLabel =
+    !pickupOrder && selectedShippingSnapshot.shippingStatus === "pending_quote"
+      ? "Total productos"
+      : selectedShippingSnapshot.shippingStatus === "estimated"
+        ? "Total estimado"
+        : "Total pedido";
   const checkoutSteps: Array<{
     id: CheckoutStep;
     label: string;
@@ -2700,8 +3369,8 @@ function CartContent({
           <span>Unidades</span>
         </div>
         <div className="order-metric">
-          <strong>{formatCurrency(total)}</strong>
-          <span>Estimado</span>
+          <strong>{formatCurrency(displayOrderTotal)}</strong>
+          <span>{totalMetricLabel}</span>
         </div>
       </div>
 
@@ -2769,10 +3438,91 @@ function CartContent({
           <span>IVA</span>
           <span>{formatCurrency(taxTotal)}</span>
         </div>
+        {!cartStepActive ? (
+          <div className="summary-row">
+            <span>Envio</span>
+            <span>{shippingSummary.label}</span>
+          </div>
+        ) : null}
+        {cartStepActive && shippingEstimationEnabled ? (
+          <div className="summary-row">
+            <span>Si eliges envio</span>
+            <span>
+              {shippingEstimateLoading
+                ? "Calculando"
+                : deliveryShippingPreview.shippingStatus === "estimated" &&
+                    deliveryShippingPreview.shippingCost
+                  ? formatCurrency(deliveryShippingPreview.shippingCost)
+                  : deliveryShippingSummary.label}
+            </span>
+          </div>
+        ) : null}
         <div className="summary-row total">
-          <span>Total pedido</span>
-          <strong>{formatCurrency(total)}</strong>
+          <span>{totalSummaryLabel}</span>
+          <strong>{formatCurrency(displayOrderTotal)}</strong>
         </div>
+        {cartStepActive && shippingEstimationEnabled ? (
+          <div className="order-summary-note">
+            {!normalizedPostalCode
+              ? "Carga tu codigo postal para estimar el envio."
+              : deliveryShippingPreview.shippingStatus === "free"
+                ? deliveryShippingSummary.detail
+                : deliveryShippingPreview.shippingStatus === "estimated" &&
+                    deliveryShippingPreview.shippingCost
+                  ? `CP ${normalizedPostalCode}. Envio estimado ${formatCurrency(deliveryShippingPreview.shippingCost)}${shippingEstimate?.serviceName ? ` con ${shippingEstimate.serviceName}` : ""}.`
+                  : shippingEstimateLoading
+                    ? `Estamos calculando el envio para CP ${normalizedPostalCode}.`
+                    : shippingEstimateError
+                      ? shippingEstimateError
+                      : deliveryShippingSummary.detail}
+          </div>
+        ) : cartStepActive && freeShippingPolicyCopy ? (
+          <div className="order-summary-note">{freeShippingPolicyCopy}</div>
+        ) : null}
+        {cartStepActive ? (
+          <button
+            type="button"
+            className="order-summary-link"
+            onClick={onOpenPostalCodePrompt}
+          >
+            {normalizedPostalCode
+              ? `Cambiar CP ${normalizedPostalCode}`
+              : "Cargar codigo postal"}
+          </button>
+        ) : null}
+        {!cartStepActive ? (
+          <div className="order-summary-note">
+            {shippingSummary.detail}
+            {!pickupOrder && !normalizedPostalCode ? " Ingresa tu codigo postal para cotizarlo." : ""}
+          </div>
+        ) : null}
+        {!cartStepActive && !pickupOrder ? (
+          <button
+            type="button"
+            className="order-summary-link"
+            onClick={onOpenPostalCodePrompt}
+          >
+            {normalizedPostalCode
+              ? `Cambiar CP ${normalizedPostalCode}`
+              : "Cargar codigo postal"}
+          </button>
+        ) : null}
+        {!cartStepActive &&
+        !pickupOrder &&
+        shippingEstimationEnabled &&
+        shippingEstimateLoading ? (
+          <div className="order-summary-note">
+            Estamos calculando el envio con Correo Argentino.
+          </div>
+        ) : null}
+        {!cartStepActive &&
+        !pickupOrder &&
+        shippingEstimationEnabled &&
+        !shippingEstimateLoading &&
+        shippingEstimateError &&
+        selectedShippingSnapshot.shippingStatus !== "estimated" ? (
+          <div className="order-summary-note">{shippingEstimateError}</div>
+        ) : null}
       </div>
 
       {cartStepActive ? (
@@ -2854,7 +3604,23 @@ function CartContent({
                 Cargamos direccion y localidad para preparar la entrega
                 correctamente.
               </p>
-              <small>Te pediremos direccion, ciudad y datos logisticos.</small>
+              <small>
+                {deliveryShippingPreview.shippingStatus === "free"
+                  ? deliveryShippingPreview.freeShippingThreshold > 0
+                    ? `Este pedido ya supera ${formatCurrency(deliveryShippingPreview.freeShippingThreshold)} y califica para envio gratis.`
+                    : "Este pedido califica para envio gratis."
+                  : deliveryShippingPreview.shippingStatus === "estimated" &&
+                      deliveryShippingPreview.shippingCost
+                    ? `Correo Argentino estimado ${formatCurrency(deliveryShippingPreview.shippingCost)}${shippingEstimate?.serviceName ? ` con ${shippingEstimate.serviceName}` : ""}.`
+                    : shippingEstimateLoading && normalizedPostalCode
+                      ? `Estamos calculando el envio para CP ${normalizedPostalCode}.`
+                      : !normalizedPostalCode
+                        ? "Primero carga tu codigo postal para estimarlo."
+                        : shippingEstimateError && shippingEstimationEnabled
+                          ? shippingEstimateError
+                          : freeShippingPolicyCopy ||
+                            "Te pediremos direccion, ciudad y datos logisticos."}
+              </small>
             </button>
           </div>
 
@@ -2991,17 +3757,31 @@ function CartContent({
                     />
                   </div>
 
-                  <div className="field">
-                    <label htmlFor="postalCode">Codigo postal</label>
-                    <input
-                      id="postalCode"
-                      value={customer.postalCode}
-                      onChange={(event) =>
-                        onCustomerChange("postalCode", event.target.value)
-                      }
-                      placeholder="CP"
-                    />
-                  </div>
+                  {!pickupOrder ? (
+                    <div className="field">
+                      <label htmlFor="postalCode">Codigo postal</label>
+                      <div className="checkout-inline-field">
+                        <input
+                          id="postalCode"
+                          value={customer.postalCode}
+                          onChange={(event) =>
+                            onCustomerChange("postalCode", event.target.value)
+                          }
+                          placeholder="Ej: 8430, R8430 o B1842ZAB"
+                          required
+                        />
+                        {shippingEstimationEnabled ? (
+                          <button
+                            type="button"
+                            className="checkout-inline-link"
+                            onClick={onOpenPostalCodePrompt}
+                          >
+                            Guardado rapido
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
                 </>
               ) : null}
 
@@ -3110,6 +3890,12 @@ function CartContent({
                 </div>
 
                 <div className="checkout-review-row">
+                  <span>Envio</span>
+                  <strong>{shippingSummary.label}</strong>
+                  <p>{shippingSummary.detail}</p>
+                </div>
+
+                <div className="checkout-review-row">
                   <span>Cliente</span>
                   <strong>{customer.fullName || "Sin nombre cargado"}</strong>
                   <p>{customer.email || "Sin email cargado"}</p>
@@ -3125,7 +3911,9 @@ function CartContent({
                     <strong>{customer.city || "Sin localidad"}</strong>
                     <p>{customer.address || "Sin direccion"}</p>
                     {customer.province ? <p>{customer.province}</p> : null}
-                    {customer.postalCode ? <p>CP {customer.postalCode}</p> : null}
+                    {!pickupOrder && customer.postalCode ? (
+                      <p>CP {customer.postalCode}</p>
+                    ) : null}
                   </div>
                 ) : null}
 
