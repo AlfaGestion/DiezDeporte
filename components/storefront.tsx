@@ -339,6 +339,7 @@ export function Storefront({
   const [checkoutStep, setCheckoutStep] = useState<CheckoutStep>("cart");
   const [theme, setTheme] = useState<ThemeMode>("light");
   const [themeReady, setThemeReady] = useState(false);
+  const [compactCatalogLayout, setCompactCatalogLayout] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(
     null,
@@ -411,6 +412,18 @@ export function Storefront({
   }, []);
 
   useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 900px)");
+    const syncLayout = () => setCompactCatalogLayout(mediaQuery.matches);
+
+    syncLayout();
+    mediaQuery.addEventListener("change", syncLayout);
+
+    return () => {
+      mediaQuery.removeEventListener("change", syncLayout);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!themeReady) {
       return;
     }
@@ -430,7 +443,10 @@ export function Storefront({
 
   useEffect(() => {
     const shouldLockUi =
-      postalCodePromptOpen || mobileCartOpen || Boolean(selectedProduct);
+      postalCodePromptOpen ||
+      mobileCartOpen ||
+      Boolean(selectedProduct) ||
+      (compactCatalogLayout && filtersPanelOpen);
     if (!shouldLockUi) return;
 
     const previousOverflow = document.body.style.overflow;
@@ -451,6 +467,11 @@ export function Storefront({
 
       if (mobileCartOpen) {
         setMobileCartOpen(false);
+        return;
+      }
+
+      if (compactCatalogLayout && filtersPanelOpen) {
+        setFiltersPanelOpen(false);
       }
     }
 
@@ -460,7 +481,13 @@ export function Storefront({
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [mobileCartOpen, postalCodePromptOpen, selectedProduct]);
+  }, [
+    compactCatalogLayout,
+    filtersPanelOpen,
+    mobileCartOpen,
+    postalCodePromptOpen,
+    selectedProduct,
+  ]);
 
   const resolvedInitialProducts = initialProducts.map(resolveProductImage);
   const resolvedCatalogProducts = catalogProducts.map(resolveProductImage);
@@ -1202,6 +1229,7 @@ export function Storefront({
   }
 
   function openProductDetail(product: Product) {
+    setFiltersPanelOpen(false);
     setSelectedProduct(product);
     setSelectedVariantId(null);
   }
@@ -1372,6 +1400,7 @@ export function Storefront({
   }
 
   function openPostalCodePrompt() {
+    setFiltersPanelOpen(false);
     setPostalCodePromptDraft(customer.postalCode);
     setPostalCodePromptError(null);
     setPostalCodePromptOpen(true);
@@ -1435,6 +1464,7 @@ export function Storefront({
   }
 
   function openCartPanel(step: CheckoutStep = "cart") {
+    setFiltersPanelOpen(false);
     setCheckoutStep(step);
     setMobileCartOpen(true);
   }
@@ -1478,6 +1508,10 @@ export function Storefront({
   }
 
   function scrollToCatalog() {
+    if (compactCatalogLayout) {
+      setFiltersPanelOpen(false);
+    }
+
     requestAnimationFrame(() => {
       document.getElementById("catalogo")?.scrollIntoView({
         behavior: "smooth",
@@ -1637,7 +1671,18 @@ export function Storefront({
     total,
     settings.freeShippingThreshold,
   );
+  const freeShippingProgressPercent =
+    settings.freeShippingThreshold > 0
+      ? Math.max(
+          0,
+          Math.min((total / settings.freeShippingThreshold) * 100, 100),
+        )
+      : 100;
   const catalogShippingWindow = buildShippingEstimateWindow(shippingEstimate);
+  const catalogSummaryHeaderTitle =
+    itemCount > 0 ? "Listo para finalizar" : "Arma tu compra";
+  const catalogSummaryCountLabel =
+    itemCount === 1 ? "1 unidad" : `${itemCount} unidades`;
   const catalogFreeShippingBadgeLabel = qualifiesForFreeShippingInStorefront
     ? "Envio gratis"
     : settings.freeShippingThreshold > 0
@@ -1663,7 +1708,7 @@ export function Storefront({
           : shippingEstimateError
             ? "Sin cotizacion"
             : "A calcular";
-  const catalogShippingNote = !normalizedCustomerPostalCode
+  const catalogShippingEstimateCopy = !normalizedCustomerPostalCode
     ? "Ingresa tu codigo postal para estimar el envio y dejarlo guardado para tu compra."
     : cart.length === 0
       ? `CP ${normalizedCustomerPostalCode} guardado para usarlo durante el checkout.`
@@ -1678,6 +1723,9 @@ export function Storefront({
             ? `CP ${normalizedCustomerPostalCode}. ${shippingEstimateError}`
             : freeShippingPolicyCopy ||
               `CP ${normalizedCustomerPostalCode} guardado para completar tu compra.`;
+  const catalogSummaryFootnote = normalizedCustomerPostalCode
+    ? `CP ${normalizedCustomerPostalCode} listo para completar tu compra.`
+    : "Guarda tu codigo postal para acelerar el checkout.";
   const filtersPanelStatusCopy = [
     activeFilterCount > 0
       ? `${activeFilterCount} filtro${activeFilterCount === 1 ? "" : "s"} activo${activeFilterCount === 1 ? "" : "s"}`
@@ -1688,6 +1736,14 @@ export function Storefront({
   ]
     .filter(Boolean)
     .join(" | ");
+  const filtersPanelButtonLabel =
+    activeFilterCount > 0 ? `Filtros (${activeFilterCount})` : "Filtros";
+  const filtersPanelButtonMeta =
+    itemCount > 0
+      ? `${itemCount} en tu pedido`
+      : activeFilterCount > 0
+        ? "Personaliza el catalogo"
+        : "Pedido y busqueda";
 
   return (
     <>
@@ -1750,6 +1806,13 @@ export function Storefront({
             </form>
           </section>
         </>
+      ) : null}
+
+      {compactCatalogLayout && filtersPanelOpen ? (
+        <div
+          className="mobile-backdrop filters-panel-backdrop"
+          onClick={() => setFiltersPanelOpen(false)}
+        />
       ) : null}
 
       <main className="shop-page" id="top">
@@ -1948,110 +2011,7 @@ export function Storefront({
                 className="filters-panel-close"
                 onClick={() => setFiltersPanelOpen(false)}
               >
-                Ocultar
-              </button>
-            </div>
-
-            <div className="catalog-summary" aria-label="Resumen del pedido">
-              <div className="catalog-summary-title">En tu pedido</div>
-              <div className="catalog-summary-item">
-                <span>Cantidad</span>
-                <strong>{itemCount}</strong>
-              </div>
-              <div className="catalog-summary-item">
-                <span>Total</span>
-                <strong>{formatCurrency(total)}</strong>
-              </div>
-              <div
-                className={[
-                  "catalog-summary-highlight",
-                  qualifiesForFreeShippingInStorefront
-                    ? "catalog-summary-highlight-success"
-                    : "catalog-summary-highlight-warning",
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-              >
-                <div className="catalog-summary-highlight-label">
-                  {catalogFreeShippingBadgeLabel}
-                </div>
-                <strong>{catalogFreeShippingPolicyDetail}</strong>
-              </div>
-              {settings.shippingEstimationEnabled ? (
-                <>
-                  <div className="catalog-summary-estimate">
-                    <div className="catalog-summary-estimate-header">
-                      <span>Envio estimado</span>
-                      <button
-                        type="button"
-                        className="catalog-summary-link"
-                        onClick={openPostalCodePrompt}
-                      >
-                        {normalizedCustomerPostalCode ? "Cambiar CP" : "Cargar CP"}
-                      </button>
-                    </div>
-                    <div className="catalog-summary-estimate-price">
-                      {catalogShippingEstimateLabel}
-                    </div>
-                    <div className="catalog-summary-estimate-copy">
-                      {!normalizedCustomerPostalCode
-                        ? "Ingresa tu codigo postal para ver un estimado con Correo Argentino."
-                        : qualifiesForFreeShippingInStorefront
-                          ? `CP ${normalizedCustomerPostalCode}. El pedido ya entra en envio gratis.`
-                          : shippingEstimateLoading
-                            ? `Estamos consultando Correo Argentino para CP ${normalizedCustomerPostalCode}.`
-                            : catalogShippingPreview.shippingStatus === "estimated" &&
-                                Number(catalogShippingPreview.shippingCost || 0) > 0
-                              ? [
-                                  `Correo Argentino para CP ${normalizedCustomerPostalCode}.`,
-                                  catalogShippingWindow
-                                    ? `Entrega aproximada ${catalogShippingWindow}.`
-                                    : null,
-                                ]
-                                  .filter(Boolean)
-                                  .join(" ")
-                              : shippingEstimateError
-                                ? shippingEstimateError
-                                : `CP ${normalizedCustomerPostalCode}. ${catalogShippingNote}`}
-                    </div>
-                  </div>
-                  <div className="catalog-summary-meta">
-                    <span>{postalCodeButtonLabel}</span>
-                    <button
-                      type="button"
-                      className="catalog-summary-link"
-                      onClick={openPostalCodePrompt}
-                    >
-                      {normalizedCustomerPostalCode ? "Cambiar" : "Cargar"}
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="catalog-summary-meta">
-                    <span>{postalCodeButtonLabel}</span>
-                    <button
-                      type="button"
-                      className="catalog-summary-link"
-                      onClick={openPostalCodePrompt}
-                    >
-                      {normalizedCustomerPostalCode ? "Cambiar" : "Cargar"}
-                    </button>
-                  </div>
-                  <div className="catalog-summary-note">
-                    {normalizedCustomerPostalCode
-                      ? `CP ${normalizedCustomerPostalCode} guardado para completar tu compra.`
-                      : "Ingresa tu codigo postal para dejarlo guardado antes del checkout."}
-                  </div>
-                </>
-              )}
-              <button
-                type="button"
-                className="submit-order-button catalog-summary-button"
-                onClick={openCheckoutFromSummary}
-                disabled={cart.length === 0}
-              >
-                Continuar compra
+                Listo
               </button>
             </div>
 
@@ -2071,6 +2031,184 @@ export function Storefront({
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Codigo, descripcion, marca o categoria"
               />
+            </div>
+
+            <div className="catalog-summary" aria-label="Resumen del pedido">
+              <div className="catalog-summary-header">
+                <div className="catalog-summary-header-copy">
+                  <span className="catalog-summary-kicker">Tu pedido</span>
+                  <strong>{catalogSummaryHeaderTitle}</strong>
+                </div>
+                <div className="catalog-summary-count-pill" aria-label={catalogSummaryCountLabel}>
+                  <IconCart />
+                  <span>{itemCount}</span>
+                </div>
+              </div>
+
+              <div className="catalog-summary-total-card">
+                <div className="catalog-summary-total-copy">
+                  <span>Total actual</span>
+                  <small>{catalogSummaryCountLabel}</small>
+                </div>
+                <strong>{formatCurrency(total)}</strong>
+              </div>
+
+              {settings.freeShippingThreshold > 0 ? (
+                <div
+                  className={[
+                    "catalog-summary-reward-card",
+                    qualifiesForFreeShippingInStorefront ? "is-unlocked" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                >
+                  <div className="catalog-summary-reward-head">
+                    <div className="catalog-summary-icon-badge reward">
+                      {qualifiesForFreeShippingInStorefront ? (
+                        <IconSpark />
+                      ) : (
+                        <IconTruck />
+                      )}
+                    </div>
+                    <div className="catalog-summary-reward-copy">
+                      <span>
+                        {qualifiesForFreeShippingInStorefront
+                          ? "Envio gratis activo"
+                          : "Camino al envio gratis"}
+                      </span>
+                      <strong>{catalogFreeShippingBadgeLabel}</strong>
+                    </div>
+                  </div>
+
+                  <div className="catalog-summary-progress-block">
+                    <div
+                      className="catalog-summary-progress-track"
+                      aria-hidden="true"
+                    >
+                      <span
+                        style={{
+                          width: `${freeShippingProgressPercent}%`,
+                        }}
+                      />
+                    </div>
+                    <div className="catalog-summary-progress-meta">
+                      <span>{Math.round(freeShippingProgressPercent)}%</span>
+                      <span>
+                        {qualifiesForFreeShippingInStorefront
+                          ? "Beneficio desbloqueado"
+                          : `Te faltan ${formatCurrency(amountMissingForFreeShipping)}`}
+                      </span>
+                    </div>
+                  </div>
+
+                  <p className="catalog-summary-reward-note">
+                    {catalogFreeShippingPolicyDetail}
+                  </p>
+                </div>
+              ) : null}
+
+              {settings.shippingEstimationEnabled ? (
+                <div className="catalog-summary-estimate-card">
+                  <div className="catalog-summary-estimate-header">
+                    <div className="catalog-summary-estimate-title">
+                      <div className="catalog-summary-icon-badge subtle">
+                        <IconTruck />
+                      </div>
+                      <div>
+                        <span>Envio estimado</span>
+                        <strong>
+                          {normalizedCustomerPostalCode
+                            ? `CP ${normalizedCustomerPostalCode}`
+                            : "Calculalo con tu CP"}
+                        </strong>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="catalog-summary-link"
+                      onClick={openPostalCodePrompt}
+                    >
+                      {normalizedCustomerPostalCode ? "Cambiar" : "Cargar"}
+                    </button>
+                  </div>
+
+                  <div className="catalog-summary-estimate-main">
+                    <div className="catalog-summary-estimate-price">
+                      {catalogShippingEstimateLabel}
+                    </div>
+                    {catalogShippingWindow ? (
+                      <div className="catalog-summary-estimate-window">
+                        {catalogShippingWindow}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="catalog-summary-estimate-copy">
+                    {!normalizedCustomerPostalCode
+                      ? "Ingresa tu codigo postal para ver un estimado con Correo Argentino."
+                      : qualifiesForFreeShippingInStorefront
+                        ? `CP ${normalizedCustomerPostalCode}. El pedido ya entra en envio gratis.`
+                        : shippingEstimateLoading
+                          ? `Estamos consultando Correo Argentino para CP ${normalizedCustomerPostalCode}.`
+                          : catalogShippingPreview.shippingStatus === "estimated" &&
+                              Number(catalogShippingPreview.shippingCost || 0) > 0
+                            ? [
+                                `Correo Argentino para CP ${normalizedCustomerPostalCode}.`,
+                                catalogShippingWindow
+                                  ? `Entrega aproximada ${catalogShippingWindow}.`
+                                  : null,
+                              ]
+                                .filter(Boolean)
+                                .join(" ")
+                            : shippingEstimateError
+                              ? shippingEstimateError
+                              : catalogShippingEstimateCopy}
+                  </div>
+                </div>
+              ) : (
+                <div className="catalog-summary-estimate-card">
+                  <div className="catalog-summary-estimate-header">
+                    <div className="catalog-summary-estimate-title">
+                      <div className="catalog-summary-icon-badge subtle">
+                        <IconPin />
+                      </div>
+                      <div>
+                        <span>Codigo postal</span>
+                        <strong>{postalCodeButtonLabel}</strong>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="catalog-summary-link"
+                      onClick={openPostalCodePrompt}
+                    >
+                      {normalizedCustomerPostalCode ? "Cambiar" : "Cargar"}
+                    </button>
+                  </div>
+                  <div className="catalog-summary-estimate-copy">
+                    {normalizedCustomerPostalCode
+                      ? `CP ${normalizedCustomerPostalCode} guardado para completar tu compra.`
+                      : "Ingresa tu codigo postal para dejarlo guardado antes del checkout."}
+                  </div>
+                </div>
+              )}
+
+              <div className="catalog-summary-footnote">
+                <div className="catalog-summary-icon-badge subtle small">
+                  <IconPin />
+                </div>
+                <span>{catalogSummaryFootnote}</span>
+              </div>
+
+              <button
+                type="button"
+                className="submit-order-button catalog-summary-button"
+                onClick={openCheckoutFromSummary}
+                disabled={cart.length === 0}
+              >
+                <span>Continuar compra</span>
+                <IconArrowRight />
+              </button>
             </div>
 
             {categories.length > 0 ? (
@@ -2291,6 +2429,26 @@ export function Storefront({
                     ? ` · ${activeAudienceLabel}`
                     : ""}
                 </p>
+                <div className="catalog-toolbar-mobile-search">
+                  <input
+                    className="search-input catalog-toolbar-search-input"
+                    type="search"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="Buscar productos"
+                    aria-label="Buscar productos en el catalogo"
+                  />
+                  {search.trim() ? (
+                    <button
+                      type="button"
+                      className="catalog-toolbar-search-clear"
+                      onClick={clearSearchFilter}
+                      aria-label="Limpiar busqueda"
+                    >
+                      X
+                    </button>
+                  ) : null}
+                </div>
               </div>
 
               <div className="catalog-toolbar-actions">
@@ -2302,18 +2460,14 @@ export function Storefront({
                   aria-expanded={filtersPanelOpen}
                 >
                   <span className="catalog-sidebar-toggle-copy">
-                    <strong>
-                      {filtersPanelOpen
-                        ? "Ocultar filtros y pedido"
-                        : "Mostrar filtros y pedido"}
-                    </strong>
-                    <small>{filtersPanelStatusCopy}</small>
+                    <strong>{filtersPanelButtonLabel}</strong>
+                    <small>{filtersPanelButtonMeta}</small>
                   </span>
                   <span
                     className="catalog-sidebar-toggle-badge"
                     aria-hidden="true"
                   >
-                    {filtersPanelOpen ? "-" : "+"}
+                    {filtersPanelOpen ? "x" : "+"}
                   </span>
                 </button>
 
@@ -3095,6 +3249,27 @@ export function Storefront({
           className="mobile-backdrop"
           onClick={() => setMobileCartOpen(false)}
         />
+      ) : null}
+
+      {compactCatalogLayout ? (
+        <button
+          type="button"
+          className={[
+            "mobile-filters-button",
+            filtersPanelOpen ? "is-active" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          onClick={() => setFiltersPanelOpen((current) => !current)}
+          aria-controls="catalog-sidebar"
+          aria-expanded={filtersPanelOpen}
+        >
+          <IconFilter />
+          <span>Filtros</span>
+          {activeFilterCount > 0 ? (
+            <strong className="mobile-filters-count">{activeFilterCount}</strong>
+          ) : null}
+        </button>
       ) : null}
 
       <button
@@ -4380,6 +4555,46 @@ function IconCart() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M7 18a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm9 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4ZM5 4h-2v2h1.2l2.16 8.64A2 2 0 0 0 8.3 16H18v-2H8.3l-.25-1H18a2 2 0 0 0 1.94-1.52L21.6 5H7.1L6.65 3.2A1.5 1.5 0 0 0 5.2 2H5v2Z" />
+    </svg>
+  );
+}
+
+function IconTruck() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M3 5.5A1.5 1.5 0 0 1 4.5 4h9A1.5 1.5 0 0 1 15 5.5V7h2.88c.53 0 1.02.28 1.29.74l1.83 3.14c.13.22.2.47.2.72v2.9A1.5 1.5 0 0 1 19.7 16H19a2.5 2.5 0 0 1-5 0H9a2.5 2.5 0 0 1-5 0h-.5A1.5 1.5 0 0 1 2 14.5v-1A1.5 1.5 0 0 1 3 12.08V5.5Zm2 8a1 1 0 1 0 0 2 1 1 0 0 0 0-2Zm11.5 0a1 1 0 1 0 0 2 1 1 0 0 0 0-2ZM15 9v3h4.47l-1.17-2H15Z" />
+    </svg>
+  );
+}
+
+function IconPin() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 21s-6-5.33-6-11a6 6 0 1 1 12 0c0 5.67-6 11-6 11Zm0-8.5A2.5 2.5 0 1 0 12 7a2.5 2.5 0 0 0 0 5.5Z" />
+    </svg>
+  );
+}
+
+function IconSpark() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m12 2 1.8 4.74L18.5 8.5l-4.7 1.76L12 15l-1.8-4.74L5.5 8.5l4.7-1.76L12 2Zm6.5 11 1 2.63 2.5.87-2.5.94-1 2.56-1-2.56-2.5-.94 2.5-.87 1-2.63ZM5 14l1.1 2.88 2.9 1.12-2.9 1.08L5 22l-1.08-2.92L1 18l2.92-1.12L5 14Z" />
+    </svg>
+  );
+}
+
+function IconArrowRight() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M13.3 5.3 20 12l-6.7 6.7-1.4-1.4 4.3-4.3H4v-2h12.2l-4.3-4.3 1.4-1.4Z" />
+    </svg>
+  );
+}
+
+function IconFilter() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 6.5A1.5 1.5 0 0 1 5.5 5h13a1.5 1.5 0 0 1 1.12 2.5l-5.12 5.67v4.08a1.5 1.5 0 0 1-.88 1.36l-2 1A1.5 1.5 0 0 1 9 19.25v-6.08L3.88 7.5A1.5 1.5 0 0 1 4 6.5Z" />
     </svg>
   );
 }
