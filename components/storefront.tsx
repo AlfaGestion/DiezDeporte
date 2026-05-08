@@ -796,6 +796,25 @@ export function Storefront({
   const visibleVariants = activeVariantColorOption
     ? activeVariantColorOption.variants
     : selectedProductGroup?.children || [];
+  const totalVariantSizeCount = selectedProductGroup
+    ? countDistinctVariantLabels(selectedProductGroup.children)
+    : 0;
+  const visibleVariantSizeCount = countDistinctVariantLabels(visibleVariants);
+  const showDetailColorSelector = variantColorOptions.length > 1;
+  const showDetailSizeSelector = visibleVariantSizeCount > 1;
+  const detailHasMeaningfulVariantChoices =
+    showDetailColorSelector || totalVariantSizeCount > 1;
+  const detailVariantSelectionNote = selectedProductGroup
+    ? detailHasMeaningfulVariantChoices
+      ? showDetailColorSelector && showDetailSizeSelector
+        ? "Selecciona el color y el talle correctos antes de agregar el articulo al pedido."
+        : showDetailColorSelector
+          ? "Selecciona el color correcto antes de agregar el articulo al pedido."
+          : showDetailSizeSelector
+            ? "Selecciona el talle correcto antes de agregar el articulo al pedido."
+            : null
+      : null
+    : "Si necesitas talle, color o mas informacion sobre este articulo, escribinos por WhatsApp y te ayudamos con la variante correcta.";
   const selectedDetailProductGallery = getProductGallery(selectedDetailProduct);
   const selectedDetailGroupGallery = selectedProductGroup
     ? mergeProductGalleries(
@@ -2519,15 +2538,34 @@ export function Storefront({
                 const activeGalleryImageUrl =
                   gallery[activeGalleryIndex] || product.imageUrl;
                 const hasVariants = group.children.length > 0;
-                const variantPreview = group.children.slice(0, 4);
+                const groupColorChoiceCount = getVariantColorOptions(group).length;
+                const groupSizeChoiceCount = countDistinctVariantLabels(group.children);
+                const hasVariantChoices =
+                  groupColorChoiceCount > 1 || groupSizeChoiceCount > 1;
+                const selectableCatalogProduct = hasVariants
+                  ? getDefaultSelectableProduct(group) || product
+                  : product;
+                const variantPreview = hasVariantChoices
+                  ? group.children.slice(0, 4)
+                  : [];
                 const hiddenVariantCount = Math.max(
                   0,
-                  group.children.length - variantPreview.length,
+                  hasVariantChoices ? group.children.length - variantPreview.length : 0,
                 );
-                const outOfStock = group.groupStock <= 0;
+                const outOfStock = hasVariantChoices
+                  ? group.groupStock <= 0
+                  : selectableCatalogProduct.stock <= 0;
                 const disableAddButton =
-                  !hasVariants && outOfStock && !settings.allowBackorders;
+                  !hasVariantChoices && outOfStock && !settings.allowBackorders;
                 const cartSummary = cartSummaryByParentCode[group.parentCode];
+                const variantButtonLabel = getVariantChoiceButtonLabel(
+                  groupColorChoiceCount > 1,
+                  groupSizeChoiceCount > 1,
+                );
+                const variantDetailLabel = getVariantChoiceLinkLabel(
+                  groupColorChoiceCount > 1,
+                  groupSizeChoiceCount > 1,
+                );
 
                 return (
                   <article
@@ -2635,18 +2673,27 @@ export function Storefront({
                       <div className="catalog-card-tags">
                         <span className="catalog-tag">Cod. {product.code}</span>
                         <span
-                          className={`catalog-tag ${getStockBadgeClass(group.groupStock)}`}
+                          className={`catalog-tag ${getStockBadgeClass(
+                            hasVariantChoices
+                              ? group.groupStock
+                              : selectableCatalogProduct.stock,
+                          )}`}
                         >
-                          Stock {group.groupStock.toFixed(0)}
+                          Stock{" "}
+                          {(
+                            hasVariantChoices
+                              ? group.groupStock
+                              : selectableCatalogProduct.stock
+                          ).toFixed(0)}
                         </span>
                         {product.imageMode === "illustrative" ? (
                           <span className="catalog-tag image-illustrative">
                             Imagen ilustrativa
                           </span>
                         ) : null}
-                        {hasVariants ? (
+                        {hasVariantChoices ? (
                           <span className="catalog-tag">
-                            {group.children.length} variantes
+                            {group.children.length} opciones
                           </span>
                         ) : null}
                       </div>
@@ -2660,16 +2707,17 @@ export function Storefront({
                       <h3>{product.description}</h3>
 
                       <p className="catalog-card-subtitle">
-                        {hasVariants
-                          ? "Selecciona variante en el detalle"
+                        {hasVariantChoices
+                          ? "Selecciona opciones en el detalle"
                           : product.category ||
-                            product.defaultSize ||
-                            product.presentation ||
-                            product.unitId ||
+                            selectableCatalogProduct.defaultSize ||
+                            selectableCatalogProduct.presentation ||
+                            selectableCatalogProduct.unitId ||
+                            getVariantLabel(selectableCatalogProduct) ||
                             "Unidad"}
                       </p>
 
-                      {hasVariants ? (
+                      {hasVariantChoices ? (
                         <div className="catalog-card-variant-preview">
                           {variantPreview.map((variant) => (
                             <span
@@ -2708,23 +2756,23 @@ export function Storefront({
                         className="catalog-card-button"
                         onClick={(event) => {
                           event.stopPropagation();
-                          if (hasVariants) {
+                          if (hasVariantChoices) {
                             openProductDetail(product);
                             return;
                           }
 
-                          addToCart(product);
+                          addToCart(selectableCatalogProduct);
                         }}
                         disabled={disableAddButton}
                       >
-                        {hasVariants
-                          ? "Ver talles"
+                        {hasVariantChoices
+                          ? variantButtonLabel
                           : disableAddButton
                             ? "Sin stock"
                             : "Anadir al carrito"}
                       </button>
                       <span className="catalog-card-detail-link">
-                        {hasVariants ? "Elegir talle" : "Ver detalle"}
+                        {hasVariantChoices ? variantDetailLabel : "Ver detalle"}
                       </span>
                     </div>
                   </article>
@@ -2890,6 +2938,7 @@ export function Storefront({
             aria-modal="true"
             aria-labelledby="product-detail-title"
           >
+            <div className="product-detail-handle" aria-hidden="true" />
             <button
               type="button"
               className="product-detail-close"
@@ -3053,14 +3102,11 @@ export function Storefront({
                       <p className="catalog-card-tax">Precio s/Imp. Nac.</p>
                     </div>
 
-                    <p className="product-detail-note">
-                      {selectedProductGroup &&
-                      selectedProductGroup.children.length > 0
-                        ? activeVariantColorOption
-                          ? "Selecciona el color y el talle correctos antes de agregar el articulo al pedido."
-                          : "Selecciona el talle correcto antes de agregar el articulo al pedido."
-                        : "Si necesitas talle, color o mas informacion sobre este articulo, escribinos por WhatsApp y te ayudamos con la variante correcta."}
-                    </p>
+                    {detailVariantSelectionNote ? (
+                      <p className="product-detail-note">
+                        {detailVariantSelectionNote}
+                      </p>
+                    ) : null}
 
                     {selectedProductCartItem ? (
                       <div className="message success product-detail-message">
@@ -3129,7 +3175,7 @@ export function Storefront({
                       </div>
                       <button
                         type="button"
-                        className="catalog-card-button"
+                        className="catalog-card-button product-detail-primary-action"
                         onClick={handleDetailAddToCart}
                         disabled={
                           selectedDetailProduct.stock <= 0 &&
@@ -3161,12 +3207,12 @@ export function Storefront({
               </div>
 
               {selectedProductGroup &&
-              selectedProductGroup.children.length > 0 ? (
+              detailHasMeaningfulVariantChoices ? (
                 <>
-                  {variantColorOptions.length > 0 ? (
+                  {showDetailColorSelector ? (
                     <div className="product-variant-section">
                       <div className="product-variant-header">
-                        <span>Colores disponibles</span>
+                        <span>Colores</span>
                         <strong>{variantColorOptions.length}</strong>
                       </div>
                       <div className="product-color-grid">
@@ -3203,39 +3249,41 @@ export function Storefront({
                       </div>
                     </div>
                   ) : null}
-                  <div className="product-variant-section">
-                    <div className="product-variant-header">
-                      <span>
-                        {activeVariantColorOption
-                          ? `Talles disponibles / ${activeVariantColorOption.label}`
-                          : "Talles disponibles"}
-                      </span>
-                      <strong>{visibleVariants.length}</strong>
-                    </div>
-                    <div className="product-variant-grid">
-                      {visibleVariants.map((variant) => {
-                        const isActive = selectedDetailProduct.id === variant.id;
-                        const variantOutOfStock =
-                          variant.stock <= 0 && !settings.allowBackorders;
+                  {showDetailSizeSelector ? (
+                    <div className="product-variant-section">
+                      <div className="product-variant-header">
+                        <span>
+                          {showDetailColorSelector && activeVariantColorOption
+                            ? `Talles / ${activeVariantColorOption.label}`
+                            : "Talles"}
+                        </span>
+                        <strong>{visibleVariantSizeCount}</strong>
+                      </div>
+                      <div className="product-variant-grid">
+                        {visibleVariants.map((variant) => {
+                          const isActive = selectedDetailProduct.id === variant.id;
+                          const variantOutOfStock =
+                            variant.stock <= 0 && !settings.allowBackorders;
 
-                        return (
-                          <button
-                            type="button"
-                            key={variant.id}
-                            className={`product-variant-option ${isActive ? "active" : ""}`}
-                            onClick={() => setSelectedVariantId(variant.id)}
-                          >
-                            <strong>{getVariantLabel(variant)}</strong>
-                            <small>
-                              {variantOutOfStock
-                                ? "Sin stock"
-                                : `Stock ${variant.stock.toFixed(0)}`}
-                            </small>
-                          </button>
-                        );
-                      })}
+                          return (
+                            <button
+                              type="button"
+                              key={variant.id}
+                              className={`product-variant-option ${isActive ? "active" : ""}`}
+                              onClick={() => setSelectedVariantId(variant.id)}
+                            >
+                              <strong>{getVariantLabel(variant)}</strong>
+                              <small>
+                                {variantOutOfStock
+                                  ? "Sin stock"
+                                  : `Stock ${variant.stock.toFixed(0)}`}
+                              </small>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
+                  ) : null}
                 </>
               ) : null}
 
@@ -4380,6 +4428,53 @@ function getVariantColorOptions(group: ProductGroup) {
         ? -1
         : VARIANT_LABEL_COLLATOR.compare(left.label, right.label),
   );
+}
+
+function countDistinctVariantLabels(products: Product[]) {
+  return new Set(
+    products
+      .map((product) => getVariantLabel(product))
+      .map((label) => label.trim())
+      .filter(Boolean),
+  ).size;
+}
+
+function getVariantChoiceButtonLabel(
+  hasColorChoices: boolean,
+  hasSizeChoices: boolean,
+) {
+  if (hasColorChoices && hasSizeChoices) {
+    return "Ver opciones";
+  }
+
+  if (hasColorChoices) {
+    return "Ver colores";
+  }
+
+  if (hasSizeChoices) {
+    return "Ver talles";
+  }
+
+  return "Ver detalle";
+}
+
+function getVariantChoiceLinkLabel(
+  hasColorChoices: boolean,
+  hasSizeChoices: boolean,
+) {
+  if (hasColorChoices && hasSizeChoices) {
+    return "Elegir opciones";
+  }
+
+  if (hasColorChoices) {
+    return "Elegir color";
+  }
+
+  if (hasSizeChoices) {
+    return "Elegir talle";
+  }
+
+  return "Ver detalle";
 }
 
 function getVariantLabel(product: Product) {

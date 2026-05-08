@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useDeferredValue, useState, type ReactNode } from "react";
+import { useDeferredValue, useEffect, useState, type ReactNode } from "react";
 import { useFormStatus } from "react-dom";
 import type { AdminConfigField } from "@/lib/types";
 import { ORDER_STATES, type OrderState } from "@/lib/types/order";
@@ -18,6 +18,8 @@ type ConfigSection = {
   description: string;
   eyebrow: string;
 };
+
+type ConfigMode = "simple" | "advanced";
 
 const SECTIONS: ConfigSection[] = [
   {
@@ -130,6 +132,15 @@ export function AdminConfigWorkspace(props: AdminConfigWorkspaceProps) {
   const [previewValues, setPreviewValues] = useState<Record<string, string>>({});
   const deferredPreviewValues = useDeferredValue(previewValues);
   const currentSection = normalizeSectionId(activeSection);
+  const [configMode, setConfigMode] = useState<ConfigMode>(
+    activeSection === SECTIONS[0].id ? "simple" : "advanced",
+  );
+
+  useEffect(() => {
+    if (activeSection !== SECTIONS[0].id) {
+      setConfigMode("advanced");
+    }
+  }, [activeSection]);
 
   function getField(key: string) {
     return fieldMap[key] || null;
@@ -155,6 +166,10 @@ export function AdminConfigWorkspace(props: AdminConfigWorkspaceProps) {
       ...current,
       [key]: value,
     }));
+  }
+
+  function hasValue(key: string) {
+    return getStringValue(key).trim().length > 0;
   }
 
   function renderTextField(
@@ -288,6 +303,27 @@ export function AdminConfigWorkspace(props: AdminConfigWorkspaceProps) {
     );
   }
 
+  function renderStatusCard(input: {
+    label: string;
+    value: string;
+    tone: "active" | "neutral";
+  }) {
+    return (
+      <div
+        className={`rounded-[24px] border p-4 ${
+          input.tone === "active"
+            ? "border-emerald-200 bg-emerald-50/80 text-emerald-950 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100"
+            : "border-[color:var(--admin-card-line)] bg-[color:var(--admin-card-bg)] text-[color:var(--admin-title)]"
+        }`}
+      >
+        <div className="text-[11px] font-semibold uppercase tracking-[0.16em] opacity-75">
+          {input.label}
+        </div>
+        <div className="mt-2 text-base font-semibold">{input.value}</div>
+      </div>
+    );
+  }
+
   function renderEmailTemplateCard(input: {
     title: string;
     description: string;
@@ -353,6 +389,179 @@ export function AdminConfigWorkspace(props: AdminConfigWorkspaceProps) {
           </div>
         </div>
       </section>
+    );
+  }
+
+  function renderSimpleContent() {
+    const shippingEstimateReady =
+      hasValue("APP_CORREO_ARGENTINO_API_BASE_URL") &&
+      hasValue("APP_CORREO_ARGENTINO_CUSTOMER_ID") &&
+      hasValue("APP_CORREO_ARGENTINO_ORIGIN_POSTAL_CODE") &&
+      hasValue("APP_CORREO_ARGENTINO_API_USER") &&
+      hasValue("APP_CORREO_ARGENTINO_API_PASSWORD");
+    const mercadoPagoReady =
+      hasValue("APP_MP_ACCESS_TOKEN") && hasValue("APP_PUBLIC_BASE_URL");
+    const freeShippingThreshold = getStringValue("APP_FREE_SHIPPING_THRESHOLD") || "150000";
+
+    return (
+      <div className="space-y-6">
+        <section className="rounded-[28px] border border-[color:var(--admin-pane-line)] bg-[color:var(--admin-pane-bg)] p-6 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="max-w-3xl">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--admin-text)]">
+                Vista simple
+              </div>
+              <h2 className="mt-2 text-2xl font-semibold text-[color:var(--admin-title)]">
+                Configuracion simple de la tienda
+              </h2>
+              <p className="mt-3 text-sm leading-6 text-[color:var(--admin-text)]">
+                Reunimos los datos clave para una persona no tecnica. Todo guarda sobre las
+                mismas keys reales del sistema, sin duplicar configuraciones.
+              </p>
+            </div>
+
+            <div className="grid min-w-[250px] gap-3 sm:grid-cols-3">
+              {renderStatusCard({
+                label: "Envios online",
+                value: shippingEstimateReady ? "Cotizacion activa" : "Cotizacion pendiente",
+                tone: shippingEstimateReady ? "active" : "neutral",
+              })}
+              {renderStatusCard({
+                label: "Mercado Pago",
+                value: mercadoPagoReady ? "Cobro online activo" : "Configuracion pendiente",
+                tone: mercadoPagoReady ? "active" : "neutral",
+              })}
+              {renderStatusCard({
+                label: "Envio gratis",
+                value: `$ ${freeShippingThreshold}`,
+                tone: "neutral",
+              })}
+            </div>
+          </div>
+        </section>
+
+        {renderBlock(
+          "Datos de la tienda",
+          "Lo basico para identificar el negocio y mostrarle al cliente quien esta comprando.",
+          <>
+            {renderTextField("NEXT_PUBLIC_STORE_NAME", { half: true })}
+            {renderTextField("NEXT_PUBLIC_STORE_TAGLINE", { half: true })}
+            {renderTextField("NEXT_PUBLIC_STORE_ADDRESS")}
+            {renderTextField("NEXT_PUBLIC_STORE_HOURS")}
+          </>,
+        )}
+
+        {renderBlock(
+          "Contacto",
+          "Canales visibles para que el cliente te ubique rapido desde la tienda.",
+          <>
+            {renderTextField("NEXT_PUBLIC_SUPPORT_PHONE", { half: true })}
+            {renderTextField("NEXT_PUBLIC_SUPPORT_WHATSAPP", { half: true })}
+            {renderTextField("NEXT_PUBLIC_SUPPORT_EMAIL", { half: true })}
+            {renderTextField("NEXT_PUBLIC_SUPPORT_BLURB", {
+              rows: 4,
+              help: "Texto corto sobre atencion, asesoramiento y servicio.",
+            })}
+          </>,
+        )}
+
+        {renderBlock(
+          "Envios y retiro",
+          "El envio gratis sigue usando APP_FREE_SHIPPING_THRESHOLD. La cotizacion con Correo Argentino se activa sola cuando completas estos datos.",
+          <>
+            {renderTextField("APP_FREE_SHIPPING_THRESHOLD", {
+              half: true,
+              help: "Monto minimo para que el resumen del pedido marque envio gratis.",
+            })}
+            {renderTextField("APP_CORREO_ARGENTINO_ORIGIN_POSTAL_CODE", {
+              half: true,
+              help: "Codigo postal desde donde salen los pedidos.",
+            })}
+            {renderTextField("APP_CORREO_ARGENTINO_API_BASE_URL", {
+              half: false,
+              help: "Base de la API de Correo Argentino. Si la dejas completa, la cotizacion puede activarse.",
+            })}
+            {renderTextField("APP_CORREO_ARGENTINO_CUSTOMER_ID", {
+              half: true,
+              help: "Identificador de cliente entregado por Correo Argentino.",
+            })}
+            {renderTextField("APP_CORREO_ARGENTINO_API_USER", {
+              half: true,
+              help: "Usuario de la API para cotizar envios.",
+            })}
+            {renderTextField("APP_CORREO_ARGENTINO_API_PASSWORD", {
+              half: true,
+              help: "Password de la API de Correo Argentino.",
+            })}
+            {renderBooleanField("APP_ALLOW_PICKUP_CHECKOUT_WITHOUT_ADDRESS", {
+              help: "Permite retiro en local sin pedir direccion completa.",
+            })}
+            {renderTextField("APP_PICKUP_SCHEDULE", {
+              rows: 4,
+              help: "Texto que ve el cliente cuando eliges retiro en local.",
+            })}
+          </>,
+        )}
+
+        {renderBlock(
+          "Pagos",
+          "Mercado Pago se considera activo cuando completas el token y la URL publica real de la tienda.",
+          <>
+            {renderTextField("APP_MP_ACCESS_TOKEN", {
+              half: false,
+              help: "Token privado de Mercado Pago para cobrar online.",
+            })}
+            {renderTextField("APP_PUBLIC_BASE_URL", {
+              half: false,
+              help: "Direccion publica de tu tienda para retornos y links de pago.",
+            })}
+          </>,
+        )}
+
+        {renderBlock(
+          "Carrito y checkout",
+          "Ajustes simples sobre disponibilidad, visibilidad y comportamiento de compra.",
+          <>
+            {renderBooleanField("NEXT_PUBLIC_SHOW_OUT_OF_STOCK", {
+              help: "Si esta activo, los productos sin stock siguen viendose en el catalogo.",
+            })}
+            {renderBooleanField("APP_ALLOW_BACKORDERS", {
+              help: "Si esta activo, el cliente puede pedir productos aunque no haya stock suficiente.",
+            })}
+            {renderBooleanField("APP_SEND_ORDER_RECEIVED_EMAIL", {
+              help: "Envia el email inicial al registrarse un pedido.",
+            })}
+          </>,
+        )}
+
+        {renderBlock(
+          "Redes sociales",
+          "Perfiles visibles en header, footer y zonas de contacto.",
+          <>
+            {renderTextField("NEXT_PUBLIC_INSTAGRAM_URL", { half: true })}
+            {renderTextField("NEXT_PUBLIC_FACEBOOK_URL", { half: true })}
+          </>,
+        )}
+
+        {renderBlock(
+          "Apariencia basica",
+          "Logo, portada y textos principales de la tienda online.",
+          <>
+            {renderTextField("NEXT_PUBLIC_STORE_LOGO_URL", {
+              half: true,
+              help: "Ruta o URL del logo principal.",
+            })}
+            {renderTextField("NEXT_PUBLIC_HERO_IMAGE_URL", {
+              half: true,
+              help: "Ruta o URL de la imagen principal de portada.",
+            })}
+            {renderTextField("NEXT_PUBLIC_STORE_WELCOME_MESSAGE", {
+              rows: 5,
+              help: "Mensaje corto que aparece en la portada.",
+            })}
+          </>,
+        )}
+      </div>
     );
   }
 
@@ -716,23 +925,48 @@ export function AdminConfigWorkspace(props: AdminConfigWorkspaceProps) {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-3xl">
             <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--admin-text)]">
-              {currentMeta.eyebrow}
+              {configMode === "simple" ? "Simple" : currentMeta.eyebrow}
             </div>
             <h2 className="mt-2 text-2xl font-semibold text-[color:var(--admin-title)]">
-              Configuracion pensada para el negocio
+              {configMode === "simple"
+                ? "Configuracion pensada para usuarios del negocio"
+                : "Configuracion avanzada"}
             </h2>
             <p className="mt-3 text-sm leading-6 text-[color:var(--admin-text)]">
-              Ordenamos la configuracion por tareas reales del dia a dia para que cualquier persona del negocio pueda manejar la tienda sin depender del desarrollador.
+              {configMode === "simple"
+                ? "Edita nombre, contacto, envios, pagos y apariencia basica con las mismas keys reales del sistema."
+                : "Aqui queda la configuracion completa, organizada por areas para tocar reglas finas, automatizaciones y comportamiento interno."}
             </p>
           </div>
 
-          <div className="grid min-w-[220px] gap-3 sm:grid-cols-2">
+          <div className="grid min-w-[240px] gap-3 sm:grid-cols-2">
             <div className="rounded-2xl border border-[color:var(--admin-card-line)] bg-[color:var(--admin-card-bg)] p-4">
               <div className="text-xs uppercase tracking-[0.16em] text-[color:var(--admin-text)]">
-                Secciones
+                Modo
               </div>
-              <div className="mt-2 text-2xl font-semibold text-[color:var(--admin-title)]">
-                {SECTIONS.length}
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  className={`rounded-2xl px-4 py-3 text-sm font-semibold transition ${
+                    configMode === "simple"
+                      ? "bg-[color:var(--admin-accent)] text-white shadow-[0_14px_34px_rgba(13,109,216,0.18)]"
+                      : "border border-[color:var(--admin-card-line)] bg-white text-[color:var(--admin-title)] dark:bg-slate-950/30"
+                  }`}
+                  onClick={() => setConfigMode("simple")}
+                >
+                  Simple
+                </button>
+                <button
+                  type="button"
+                  className={`rounded-2xl px-4 py-3 text-sm font-semibold transition ${
+                    configMode === "advanced"
+                      ? "bg-[color:var(--admin-accent)] text-white shadow-[0_14px_34px_rgba(13,109,216,0.18)]"
+                      : "border border-[color:var(--admin-card-line)] bg-white text-[color:var(--admin-title)] dark:bg-slate-950/30"
+                  }`}
+                  onClick={() => setConfigMode("advanced")}
+                >
+                  Avanzada
+                </button>
               </div>
             </div>
             <div className="rounded-2xl border border-[color:var(--admin-card-line)] bg-[color:var(--admin-card-bg)] p-4">
@@ -747,6 +981,18 @@ export function AdminConfigWorkspace(props: AdminConfigWorkspaceProps) {
         </div>
       </section>
 
+      {configMode === "simple" ? (
+        <>
+          {renderSimpleContent()}
+
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-[28px] border border-[color:var(--admin-pane-line)] bg-[color:var(--admin-pane-bg)] p-5 shadow-sm">
+            <p className="text-sm leading-6 text-[color:var(--admin-text)]">
+              Esta vista usa las mismas configuraciones reales de la tienda. Guarda cuando termines.
+            </p>
+            <SaveButton />
+          </div>
+        </>
+      ) : (
       <div className="grid gap-6 xl:grid-cols-[300px_minmax(0,1fr)] xl:items-start">
         <nav
           className="rounded-[28px] border border-[color:var(--admin-pane-line)] bg-[color:var(--admin-pane-bg)] p-4 shadow-sm xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-hidden"
@@ -754,7 +1000,7 @@ export function AdminConfigWorkspace(props: AdminConfigWorkspaceProps) {
         >
           <div className="px-2 pb-4 pt-1">
             <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--admin-text)]">
-              Secciones
+              Secciones avanzadas
             </div>
             <p className="mt-2 text-sm leading-6 text-[color:var(--admin-text)]">
               Cada bloque funciona como una pestaña independiente para editar solo esa parte del negocio.
@@ -814,6 +1060,7 @@ export function AdminConfigWorkspace(props: AdminConfigWorkspaceProps) {
           </div>
         </div>
       </div>
+      )}
     </form>
   );
 }
