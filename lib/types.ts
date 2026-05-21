@@ -10,6 +10,7 @@ export type ProductImageMode = "none" | "exact" | "illustrative";
 export type Product = {
   id: string;
   code: string;
+  procedencia: string;
   description: string;
   brand: string;
   category: string;

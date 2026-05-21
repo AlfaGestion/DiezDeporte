@@ -293,8 +293,10 @@ iframe {
 }
 
 .theme-toggle,
+.site-panel-toggle,
 .site-cart-pill,
-.site-contact-button {
+.site-contact-button,
+.site-whatsapp-chip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -320,9 +322,29 @@ iframe {
   backdrop-filter: blur(10px);
 }
 
-.theme-toggle svg {
+.theme-toggle svg,
+.site-panel-toggle svg {
   width: 18px;
   height: 18px;
+}
+
+.site-panel-toggle {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--header-control-bg) 88%, transparent);
+  color: var(--header-text);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--header-control-line) 88%, transparent),
+    0 8px 18px rgba(15, 23, 42, 0.08);
+  flex-shrink: 0;
+  backdrop-filter: blur(10px);
+}
+
+.site-panel-toggle.is-active {
+  background: linear-gradient(135deg, #0f172a, #2f4f84);
+  color: #ffffff;
 }
 
 .site-cart-pill {
@@ -330,17 +352,18 @@ iframe {
   width: 40px;
   height: 40px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--header-control-bg) 88%, transparent);
-  color: var(--header-text);
+  background: linear-gradient(135deg, #0b1323, #17335e 52%, #4c83ff);
+  color: #ffffff;
   box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--header-control-line) 88%, transparent),
-    0 10px 22px rgba(15, 23, 42, 0.1);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.14),
+    0 12px 26px rgba(23, 51, 94, 0.24);
   backdrop-filter: blur(10px);
 }
 
 .site-cart-pill svg {
   width: 16px;
   height: 16px;
+  color: currentColor;
 }
 
 .site-cart-count {
@@ -351,8 +374,9 @@ iframe {
   height: 17px;
   padding: 0 4px;
   border-radius: 999px;
-  background: var(--header-button-bg);
-  color: var(--header-button-text);
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
   font-size: 0.68rem;
   font-weight: 800;
   line-height: 17px;
@@ -396,9 +420,26 @@ iframe {
     inset 0 1px 0 rgba(255, 255, 255, 0.16);
 }
 
+.site-whatsapp-chip {
+  display: none;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  color: #1f7a43;
+  box-shadow:
+    inset 0 0 0 1px rgba(31, 122, 67, 0.18),
+    0 10px 22px rgba(15, 23, 42, 0.08);
+  font-size: 0.8rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 .theme-toggle:hover,
+.site-panel-toggle:hover,
 .site-cart-pill:hover,
 .site-contact-button:hover,
+.site-whatsapp-chip:hover,
 .site-socials a:hover {
   transform: translateY(-1px);
 }
@@ -3331,6 +3372,7 @@ html[data-theme="dark"] .site-logo {
   min-height: 48px;
   padding: 0 16px;
   border-radius: 999px;
+  color: #ffffff;
   box-shadow:
     0 18px 30px rgba(15, 23, 42, 0.24),
     inset 0 1px 0 rgba(255, 255, 255, 0.12);
@@ -3662,6 +3704,18 @@ html[data-theme="dark"] .site-logo {
   }
 }
 
+@media (min-width: 901px) and (max-width: 1180px) {
+  .filters-panel.is-collapsed,
+  .filters-panel.is-open {
+    display: block;
+  }
+
+  .filters-panel-mobile-header,
+  .catalog-sidebar-toggle {
+    display: none;
+  }
+}
+
 @media (max-width: 900px) {
   .filters-panel.is-open {
     position: fixed;
@@ -3740,6 +3794,33 @@ html[data-theme="dark"] .site-logo {
   .product-detail-quantity-controls {
     justify-content: space-between;
   }
+
+  .checkout-progress {
+    flex-wrap: nowrap;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+  }
+
+  .checkout-progress::-webkit-scrollbar {
+    display: none;
+  }
+
+  .checkout-progress-item {
+    flex: 0 0 auto;
+    min-width: max-content;
+    scroll-snap-align: start;
+  }
+
+  .checkout-progress-copy strong {
+    white-space: nowrap;
+  }
+
+  .checkout-progress-copy span {
+    display: none;
+  }
 }
 
 @media (max-width: 760px) {
@@ -3758,42 +3839,61 @@ html[data-theme="dark"] .site-logo {
   }
 
   .site-actions {
+    order: 3;
+    flex: 0 0 auto;
     width: auto;
     gap: 6px;
+    margin-left: auto;
     justify-content: flex-end;
     flex-wrap: nowrap;
+    white-space: nowrap;
   }
 
   .site-nav {
+    order: 2;
+    flex: 1 1 auto;
     display: flex;
+    min-width: 0;
     width: auto;
     flex-wrap: nowrap;
     justify-content: flex-start;
-    gap: 6px;
-    overflow: hidden;
+    gap: 8px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .site-nav::-webkit-scrollbar {
+    display: none;
   }
 
   .site-nav a {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
-    min-height: 34px;
-    padding: 0 10px;
-    border: 1px solid color-mix(in srgb, var(--line) 84%, transparent);
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--surface) 88%, transparent);
-    font-size: 0.78rem;
+    justify-content: flex-start;
+    min-height: auto;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    color: var(--header-text);
+    font-size: 0.72rem;
+    font-weight: 800;
+    line-height: 1.1;
+    opacity: 0.88;
     white-space: nowrap;
-  }
-
-  .site-nav a:not(:first-child) {
-    display: none;
   }
 
   .site-contact-button,
   .site-socials,
   .site-email {
     display: none;
+  }
+
+  .site-whatsapp-chip {
+    display: inline-flex;
+    min-height: 32px;
+    padding: 0 10px;
+    font-size: 0.72rem;
   }
 
   .mobile-cart-button {
@@ -3825,28 +3925,37 @@ html[data-theme="dark"] .site-logo {
   }
 
   .site-header {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    grid-template-areas: "logo nav actions";
+    display: flex;
+    grid-template-columns: none;
+    grid-template-areas: none;
+    align-items: center;
+    justify-content: flex-start;
     margin-bottom: -12px;
     gap: 8px;
-    padding: 10px 12px;
+    padding: 8px 10px 10px;
   }
 
   .site-logo {
-    max-width: clamp(112px, 34vw, 160px);
-    padding: 6px 8px;
-    border-radius: 16px;
+    order: 1;
+    flex: 0 0 auto;
+    max-width: 96px;
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
   }
 
   .site-logo img,
   .footer-logo img {
-    height: 30px;
+    height: 28px;
   }
 
   .theme-toggle,
+  .site-panel-toggle,
   .site-cart-pill {
-    width: 36px;
-    height: 36px;
+    width: 34px;
+    height: 34px;
   }
 
   .site-cart-count {
@@ -3864,7 +3973,7 @@ html[data-theme="dark"] .site-logo {
 
   .hero-immersive {
     min-height: auto;
-    padding: 34px 14px 20px;
+    padding: 28px 14px 20px;
     background-size: cover;
     background-position: 60% 0%;
   }
@@ -3884,20 +3993,38 @@ html[data-theme="dark"] .site-logo {
   }
 
   .hero-actions {
-    gap: 10px;
-    margin-top: 18px;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    margin-top: 16px;
   }
 
   .hero-actions > * {
-    width: 100%;
-    min-height: 44px;
+    width: auto;
     min-width: 0;
-    border-radius: 14px;
+    border-radius: 999px;
+  }
+
+  .hero-whatsapp {
+    display: none;
+  }
+
+  .hero-primary {
+    min-height: 42px;
+    padding: 0 16px;
+  }
+
+  .hero-postal-code {
+    min-height: 34px;
+    padding: 0 12px;
+    font-size: 0.8rem;
+    line-height: 1;
   }
 
   .hero-postal-code-copy {
-    margin-top: 10px;
-    font-size: 0.82rem;
+    max-width: 320px;
+    margin-top: 8px;
+    font-size: 0.78rem;
   }
 
   .catalog-toolbar,
@@ -3939,7 +4066,6 @@ html[data-theme="dark"] .site-logo {
   }
 
   .catalog-toolbar,
-  .hero-actions,
   .order-item-top {
     flex-direction: column;
     align-items: stretch;
@@ -3965,6 +4091,11 @@ html[data-theme="dark"] .site-logo {
   .checkout-review-grid,
   .promo-grid {
     grid-template-columns: 1fr;
+  }
+
+  .promo-grid-audience {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
   }
 
   .brand-strip {
@@ -4002,6 +4133,28 @@ html[data-theme="dark"] .site-logo {
   .promo-tile-copy {
     padding: 12px 14px 14px;
     gap: 8px;
+  }
+
+  .promo-grid-audience .promo-tile {
+    border-radius: 16px;
+  }
+
+  .promo-grid-audience .promo-tile-media {
+    min-height: clamp(94px, 28vw, 122px);
+  }
+
+  .promo-grid-audience .promo-tile-copy {
+    padding: 10px 8px 10px;
+    gap: 6px;
+  }
+
+  .promo-grid-audience .promo-tile-copy strong {
+    font-size: clamp(0.74rem, 2.8vw, 0.88rem);
+    text-align: center;
+  }
+
+  .promo-grid-audience .promo-tile-copy span {
+    display: none;
   }
 
   .catalog-toolbar {
@@ -4149,7 +4302,7 @@ html[data-theme="dark"] .site-logo {
   }
 
   .checkout-progress-item {
-    flex-basis: 100%;
+    flex: 0 0 auto;
   }
 
   .checkout-step-summary,
@@ -4267,39 +4420,43 @@ html[data-theme="dark"] .site-logo {
   }
 
   .site-header {
-    gap: 8px;
-    padding: 8px 10px 10px;
+    gap: 6px;
+    padding: 8px 10px 9px;
     border-radius: 0 0 18px 18px;
   }
 
   .site-nav {
-    width: auto;
-    display: flex;
     gap: 6px;
   }
 
   .site-nav a {
-    min-height: 34px;
-    padding: 0 10px;
-    font-size: 0.76rem;
+    min-height: auto;
+    padding: 0;
+    font-size: 0.69rem;
   }
 
   .site-actions {
     display: inline-flex;
     width: auto;
-    gap: 6px;
+    gap: 5px;
     justify-content: flex-end;
   }
 
+  .site-whatsapp-chip {
+    min-height: 30px;
+    padding: 0 9px;
+    font-size: 0.68rem;
+  }
+
   .site-logo {
-    max-width: min(42vw, 136px);
-    padding: 6px 8px;
-    border-radius: 14px;
+    max-width: 88px;
+    padding: 0;
+    border-radius: 0;
   }
 
   .site-logo img,
   .footer-logo img {
-    height: 28px;
+    height: 26px;
   }
 
   .site-contact-button {
@@ -4312,7 +4469,7 @@ html[data-theme="dark"] .site-logo {
 
   .hero-immersive {
     min-height: auto;
-    padding: 30px 12px 18px;
+    padding: 24px 12px 18px;
     background-position: 62% 0%;
   }
 
@@ -4326,12 +4483,19 @@ html[data-theme="dark"] .site-logo {
   }
 
   .hero-actions > * {
-    width: 100%;
+    width: auto;
+  }
+
+  .hero-postal-code {
+    min-height: 32px;
+    padding: 0 11px;
+    font-size: 0.76rem;
   }
 
   .hero-postal-code-copy {
-    max-width: none;
-    font-size: 0.86rem;
+    max-width: 300px;
+    margin-top: 7px;
+    font-size: 0.76rem;
   }
 
   .brand-strip {
@@ -4361,6 +4525,23 @@ html[data-theme="dark"] .site-logo {
   .promo-tile-copy span {
     width: 100%;
     min-width: 0;
+  }
+
+  .promo-grid-audience {
+    gap: 6px;
+  }
+
+  .promo-grid-audience .promo-tile-media {
+    min-height: clamp(88px, 28vw, 110px);
+  }
+
+  .promo-grid-audience .promo-tile-copy {
+    padding: 8px 6px 10px;
+    gap: 4px;
+  }
+
+  .promo-grid-audience .promo-tile-copy strong {
+    font-size: 0.76rem;
   }
 
   .support-band,
@@ -4659,35 +4840,47 @@ html[data-theme="dark"] .site-logo {
 
 @media (max-width: 430px) {
   .site-header {
-    gap: 6px;
-    padding: 8px 8px 10px;
+    gap: 5px;
+    padding: 8px 8px 9px;
   }
 
   .site-logo {
-    max-width: 124px;
-    padding: 5px 7px;
+    max-width: 78px;
+    padding: 0;
   }
 
   .site-logo img {
-    height: 26px;
+    height: 24px;
   }
 
   .site-nav a {
-    min-height: 32px;
-    padding: 0 9px;
-    font-size: 0.74rem;
+    min-height: auto;
+    padding: 0;
+    font-size: 0.66rem;
+  }
+
+  .site-actions {
+    gap: 5px;
+  }
+
+  .site-whatsapp-chip {
+    min-height: 28px;
+    padding: 0 8px;
+    font-size: 0.64rem;
   }
 
   .theme-toggle,
+  .site-panel-toggle,
   .site-cart-pill {
-    width: 34px;
-    height: 34px;
+    width: 32px;
+    height: 32px;
   }
 
   .theme-toggle svg,
+  .site-panel-toggle svg,
   .site-cart-pill svg {
-    width: 15px;
-    height: 15px;
+    width: 14px;
+    height: 14px;
   }
 
   .site-cart-count {
@@ -4707,6 +4900,29 @@ html[data-theme="dark"] .site-logo {
 
   .catalog-summary-button {
     min-height: 50px;
+  }
+
+  .hero-postal-code {
+    min-height: 30px;
+    padding: 0 10px;
+    font-size: 0.72rem;
+  }
+
+  .hero-postal-code-copy {
+    max-width: 260px;
+    font-size: 0.74rem;
+  }
+
+  .promo-grid-audience .promo-tile-media {
+    min-height: clamp(82px, 27vw, 100px);
+  }
+
+  .promo-grid-audience .promo-tile-copy {
+    padding: 8px 6px 9px;
+  }
+
+  .promo-grid-audience .promo-tile-copy strong {
+    font-size: 0.72rem;
   }
 
   .product-detail-layout {
@@ -5059,6 +5275,85 @@ html[data-theme="dark"] .payment-return-actions .submit-order-button {
 .admin-order-tab.active {
   border-color: rgba(13, 109, 216, 0.28);
   box-shadow: 0 0 0 3px rgba(13, 109, 216, 0.1);
+}
+
+.admin-simple-tab-strip {
+  display: flex;
+  gap: 0.75rem;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+  scrollbar-width: thin;
+}
+
+.admin-simple-tab-button {
+  flex: 0 0 auto;
+  min-width: 180px;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--admin-card-line);
+  border-radius: 20px;
+  background: var(--admin-card-bg);
+  color: var(--admin-title);
+  text-align: left;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition:
+    transform 140ms ease,
+    border-color 140ms ease,
+    background-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.admin-simple-tab-button:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--admin-accent) 38%, var(--admin-card-line));
+}
+
+.admin-simple-tab-button span,
+.admin-simple-tab-button small {
+  display: block;
+}
+
+.admin-simple-tab-button span {
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.admin-simple-tab-button small {
+  margin-top: 0.4rem;
+  color: var(--admin-text);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.admin-simple-tab-button.active {
+  border-color: rgba(13, 109, 216, 0.3);
+  background: color-mix(in srgb, var(--admin-accent) 12%, var(--admin-card-bg));
+  box-shadow:
+    0 12px 28px rgba(13, 109, 216, 0.12),
+    inset 0 0 0 1px rgba(13, 109, 216, 0.08);
+}
+
+.admin-simple-tab-button.active small {
+  color: color-mix(in srgb, var(--admin-accent-strong) 76%, var(--admin-text));
+}
+
+.admin-simple-inline-note {
+  display: grid;
+  gap: 0.35rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--admin-card-line);
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--admin-card-bg) 90%, white 10%);
+  color: var(--admin-title);
+}
+
+.admin-simple-inline-note strong {
+  font-size: 0.84rem;
+}
+
+.admin-simple-inline-note span {
+  color: var(--admin-text);
+  font-size: 0.92rem;
+  line-height: 1.55;
 }
 
 .admin-orders-filter-bar {
@@ -8211,6 +8506,11 @@ html[data-theme="dark"] .admin-order-card.status-finalized {
   .admin-danger-button,
   .admin-order-link {
     width: 100%;
+  }
+
+  .admin-simple-tab-button {
+    min-width: 156px;
+    padding: 0.9rem 1rem;
   }
 
   .admin-login-copy,

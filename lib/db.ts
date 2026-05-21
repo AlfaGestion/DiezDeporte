@@ -11,30 +11,98 @@ declare global {
   var __diezDeportesSqlPool: Promise<mssql.ConnectionPool> | undefined;
 }
 
-function getSqlConfig(): mssql.config {
-  const server = process.env.DB_SERVER?.trim();
+function parsePositiveInt(value: string | undefined, fallback: number) {
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function parseHostWithInstance(rawServer: string) {
+  const value = rawServer.trim();
+
+  if (value.includes("\\")) {
+    const [serverName, instanceName] = value.split("\\", 2);
+    return {
+      server: serverName?.trim() ?? "",
+      instanceName: instanceName?.trim() || undefined,
+      port: undefined as number | undefined,
+    };
+  }
+
+  if (value.includes(",")) {
+    const [serverName, rawPort] = value.split(",", 2);
+    return {
+      server: serverName?.trim() ?? "",
+      instanceName: undefined,
+      port: parsePositiveInt(rawPort, 1433),
+    };
+  }
+
+  return {
+    server: value,
+    instanceName: undefined,
+    port: undefined as number | undefined,
+  };
+}
+
+function getSqlConfig(): mssql.config | string {
+  const connectionString = process.env.DB_CONNECTION_STRING?.trim();
+  const poolMax = parsePositiveInt(process.env.DB_POOL_MAX, 10);
+  const poolIdleTimeoutMillis = parsePositiveInt(
+    process.env.DB_POOL_IDLE_TIMEOUT_MS,
+    30000,
+  );
+  const connectionTimeout = parsePositiveInt(
+    process.env.DB_CONNECT_TIMEOUT_MS,
+    15000,
+  );
+  const requestTimeout = parsePositiveInt(
+    process.env.DB_REQUEST_TIMEOUT_MS,
+    30000,
+  );
+  const encrypt = parseBoolean(process.env.DB_ENCRYPT, false);
+  const trustServerCertificate = parseBoolean(process.env.DB_TRUST_CERT, true);
+
+  if (connectionString) {
+    return connectionString;
+  }
+
+  const rawServer = process.env.DB_SERVER?.trim();
   const database = process.env.DB_DATABASE?.trim();
 
-  if (!server || !database) {
+  if (!rawServer || !database) {
     throw new Error(
-      "Faltan DB_SERVER o DB_DATABASE en el entorno. Revisá el archivo .env.",
+      "Faltan DB_SERVER o DB_DATABASE en el entorno. Revisa el archivo .env.",
     );
   }
+
+  const parsedServer = parseHostWithInstance(rawServer);
+  const explicitPort = process.env.DB_PORT?.trim();
+  const port = explicitPort
+    ? parsePositiveInt(explicitPort, 1433)
+    : parsedServer.instanceName
+      ? undefined
+      : (parsedServer.port ?? 1433);
 
   return {
     user: process.env.DB_USER?.trim(),
     password: process.env.DB_PASSWORD,
-    server,
+    server: parsedServer.server,
     database,
-    port: Number(process.env.DB_PORT || "1433"),
+    port,
     pool: {
-      max: 10,
+      max: poolMax,
       min: 0,
-      idleTimeoutMillis: 30000,
+      idleTimeoutMillis: poolIdleTimeoutMillis,
     },
+    connectionTimeout,
+    requestTimeout,
     options: {
-      encrypt: parseBoolean(process.env.DB_ENCRYPT, false),
-      trustServerCertificate: parseBoolean(process.env.DB_TRUST_CERT, true),
+      encrypt,
+      trustServerCertificate,
+      ...(parsedServer.instanceName
+        ? { instanceName: parsedServer.instanceName }
+        : {}),
     },
   };
 }

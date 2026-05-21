@@ -3,8 +3,8 @@ import type { ConnectionPool, IResult, Transaction } from "mssql";
 import { getConnection, sql } from "@/lib/db";
 import {
   getLegacyArticleId,
-  getLegacyArticleParentId,
-  getLegacyArticleRelationKey,
+  getLegacyArticleGroupingParentId,
+  getLegacyArticleGroupingRelationKey,
 } from "@/lib/legacy-article-id";
 import { getServerSettings } from "@/lib/store-config";
 
@@ -13,6 +13,11 @@ type Executor = ConnectionPool | Transaction;
 type LookupRow = {
   RawId: string | null;
   Description: string | null;
+};
+
+type ArticleGroupingRow = {
+  RawId: string | null;
+  Procedencia: string | null;
 };
 
 export type AdminArticleLookupOption = {
@@ -110,12 +115,74 @@ function resolveLookupRawId(
   return match.rawId;
 }
 
-function getParentArticleCode(productId: string) {
-  return getLegacyArticleParentId(productId);
+function getParentArticleCode(
+  productId: string,
+  procedencia?: string | null,
+) {
+  return getLegacyArticleGroupingParentId({
+    articleId: productId,
+    procedencia,
+  });
 }
 
-function getParentArticleRelationKey(productId: string) {
-  return getLegacyArticleRelationKey(productId);
+function getParentArticleRelationKey(
+  productId: string,
+  procedencia?: string | null,
+) {
+  return getLegacyArticleGroupingRelationKey({
+    articleId: productId,
+    procedencia,
+  });
+}
+
+async function getArticleGroupingMap(
+  productIds: string[],
+  executor?: Executor,
+) {
+  const normalizedIds = Array.from(new Set(productIds.filter(Boolean)));
+
+  if (normalizedIds.length === 0) {
+    return new Map<string, { productId: string; procedencia: string }>();
+  }
+
+  const connection = executor || (await getConnection());
+  const request = createRequest(connection);
+
+  normalizedIds.forEach((productId, index) => {
+    request.input(`productId${index}`, productId);
+  });
+
+  const result: IResult<ArticleGroupingRow> = await request.query(`
+    SELECT
+      IDARTICULO AS RawId,
+      Procedencia
+    FROM dbo.V_MA_ARTICULOS WITH (NOLOCK)
+    WHERE IDARTICULO IN (
+      ${normalizedIds.map((_, index) => `@productId${index}`).join(", ")}
+    );
+  `);
+
+  return new Map(
+    result.recordset
+      .map((row) => {
+        const productId = normalizeId(row.RawId);
+
+        if (!productId) {
+          return null;
+        }
+
+        return [
+          productId,
+          {
+            productId,
+            procedencia: normalizeId(row.Procedencia),
+          },
+        ] as const;
+      })
+      .filter((entry): entry is readonly [string, { productId: string; procedencia: string }] =>
+        Boolean(entry),
+      ),
+  );
 }
 
 export async function listAdminArticleBrandOptions() {
@@ -144,8 +211,7 @@ export async function saveAdminArticleEdits(input: {
   variants: AdminArticleVariantUpdate[];
 }) {
   const productId = normalizeId(input.productId);
-  const parentCode = normalizeId(input.parentCode) || getParentArticleCode(productId);
-  const parentRelationKey = getParentArticleRelationKey(parentCode);
+  const requestedParentCode = normalizeId(input.parentCode);
   const description = normalizeOptionalText(input.description, 250);
   const size = normalizeOptionalText(input.size, 60);
   const color = normalizeOptionalText(input.color, 60);
@@ -168,13 +234,6 @@ export async function saveAdminArticleEdits(input: {
 
       if (!variantId) {
         return null;
-      }
-
-      if (
-        parentRelationKey
-        && getParentArticleRelationKey(variantId) !== parentRelationKey
-      ) {
-        throw new Error("Las variantes no pertenecen al articulo activo.");
       }
 
       if (variant.price !== null && (!Number.isFinite(variant.price) || variant.price <= 0)) {
@@ -218,6 +277,39 @@ export async function saveAdminArticleEdits(input: {
   await transaction.begin();
 
   try {
+    const groupingById = await getArticleGroupingMap(
+      [productId, requestedParentCode, ...variants.map((variant) => variant.productId)],
+      transaction,
+    );
+    const resolvedParentCode =
+      requestedParentCode ||
+      getParentArticleCode(productId, groupingById.get(productId)?.procedencia || "");
+    const parentRelationKey = getParentArticleRelationKey(
+      resolvedParentCode,
+      groupingById.get(resolvedParentCode)?.procedencia || "",
+    );
+
+    if (!resolvedParentCode || !parentRelationKey) {
+      throw new Error("Articulo invalido.");
+    }
+
+    for (const variant of variants) {
+      const variantGrouping = groupingById.get(variant.productId);
+
+      if (!variantGrouping) {
+        throw new Error("No se encontro una variante seleccionada.");
+      }
+
+      if (
+        getParentArticleRelationKey(
+          variant.productId,
+          variantGrouping.procedencia,
+        ) !== parentRelationKey
+      ) {
+        throw new Error("Las variantes no pertenecen al articulo activo.");
+      }
+    }
+
     const mainRequest = createRequest(transaction);
     mainRequest.input("productId", productId);
     mainRequest.input("description", description);

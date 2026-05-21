@@ -9,6 +9,7 @@ import type { ProductImageMode } from "@/lib/types";
 const PRODUCT_IMAGES_TABLE = "dbo.WEB_MA_ARTICULOS_IMAGENES";
 const PRODUCT_IMAGES_SCHEMA_VERSION = 2;
 const MAX_PRODUCT_IMAGE_URLS = 12;
+const SQL_IN_PARAMETER_CHUNK_SIZE = 1800;
 
 declare global {
   var __diezDeportesProductImagesSchemaReady:
@@ -173,6 +174,16 @@ function setInput(
   }
 }
 
+function chunkValues<T>(values: T[], size: number) {
+  const chunks: T[][] = [];
+
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+
+  return chunks;
+}
+
 async function ensureSchema() {
   if (
     global.__diezDeportesProductImagesSchemaReady &&
@@ -270,51 +281,55 @@ export async function getProductImageOverridesByProductIds(productIds: string[])
   }
 
   const pool = await getConnection();
-  const request = pool.request();
+  const overrides = new Map<string, ProductImageOverride>();
 
-  normalizedIds.forEach((productId, index) => {
-    request.input(`productId${index}`, productId);
-  });
+  for (const chunk of chunkValues(normalizedIds, SQL_IN_PARAMETER_CHUNK_SIZE)) {
+    const request = pool.request();
 
-  const placeholders = normalizedIds.map((_, index) => `@productId${index}`).join(", ");
-  const result = await request.query<ProductImageOverrideRow>(`
-    IF OBJECT_ID('${PRODUCT_IMAGES_TABLE}', 'U') IS NOT NULL
-    BEGIN
-      SELECT
-        IDARTICULO,
-        IMAGEN_PRINCIPAL_URL,
-        GALERIA_JSON,
-        IMAGEN_TIPO,
-        IMAGEN_NOTA,
-        IMAGEN_SOURCE_URL,
-        ACTUALIZADO_POR,
-        FECHA_CREACION,
-        FECHA_ACTUALIZACION
-      FROM ${PRODUCT_IMAGES_TABLE} WITH (NOLOCK)
-      WHERE IDARTICULO IN (${placeholders});
-    END
-    ELSE
-    BEGIN
-      SELECT
-        CAST('' AS nvarchar(120)) AS IDARTICULO,
-        CAST(NULL AS nvarchar(1500)) AS IMAGEN_PRINCIPAL_URL,
-        CAST(NULL AS nvarchar(max)) AS GALERIA_JSON,
-        CAST(NULL AS nvarchar(20)) AS IMAGEN_TIPO,
-        CAST(NULL AS nvarchar(250)) AS IMAGEN_NOTA,
-        CAST(NULL AS nvarchar(1500)) AS IMAGEN_SOURCE_URL,
-        CAST(NULL AS nvarchar(120)) AS ACTUALIZADO_POR,
-        CAST(NULL AS datetime2) AS FECHA_CREACION,
-        CAST(NULL AS datetime2) AS FECHA_ACTUALIZACION
-      WHERE 1 = 0;
-    END
-  `);
+    chunk.forEach((productId, index) => {
+      request.input(`productId${index}`, productId);
+    });
 
-  return new Map(
-    result.recordset.map((row) => {
+    const placeholders = chunk.map((_, index) => `@productId${index}`).join(", ");
+    const result = await request.query<ProductImageOverrideRow>(`
+      IF OBJECT_ID('${PRODUCT_IMAGES_TABLE}', 'U') IS NOT NULL
+      BEGIN
+        SELECT
+          IDARTICULO,
+          IMAGEN_PRINCIPAL_URL,
+          GALERIA_JSON,
+          IMAGEN_TIPO,
+          IMAGEN_NOTA,
+          IMAGEN_SOURCE_URL,
+          ACTUALIZADO_POR,
+          FECHA_CREACION,
+          FECHA_ACTUALIZACION
+        FROM ${PRODUCT_IMAGES_TABLE} WITH (NOLOCK)
+        WHERE IDARTICULO IN (${placeholders});
+      END
+      ELSE
+      BEGIN
+        SELECT
+          CAST('' AS nvarchar(120)) AS IDARTICULO,
+          CAST(NULL AS nvarchar(1500)) AS IMAGEN_PRINCIPAL_URL,
+          CAST(NULL AS nvarchar(max)) AS GALERIA_JSON,
+          CAST(NULL AS nvarchar(20)) AS IMAGEN_TIPO,
+          CAST(NULL AS nvarchar(250)) AS IMAGEN_NOTA,
+          CAST(NULL AS nvarchar(1500)) AS IMAGEN_SOURCE_URL,
+          CAST(NULL AS nvarchar(120)) AS ACTUALIZADO_POR,
+          CAST(NULL AS datetime2) AS FECHA_CREACION,
+          CAST(NULL AS datetime2) AS FECHA_ACTUALIZACION
+        WHERE 1 = 0;
+      END
+    `);
+
+    for (const row of result.recordset) {
       const mapped = mapOverrideRow(row);
-      return [mapped.productId, mapped];
-    }),
-  );
+      overrides.set(mapped.productId, mapped);
+    }
+  }
+
+  return overrides;
 }
 
 export async function saveProductImageOverride(input: {

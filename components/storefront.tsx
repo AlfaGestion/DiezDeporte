@@ -21,8 +21,10 @@ import {
   type ShippingSnapshot,
 } from "@/lib/shipping";
 import {
-  getLegacyArticleParentId,
-  getLegacyArticleRelationKey,
+  getLegacyArticleGroupingParentId,
+  getLegacyArticleGroupingRelationKey,
+  getLegacyArticleVariantSegments,
+  isLegacyArticleGroupedChild,
 } from "@/lib/legacy-article-id";
 import { ThemeToggleIcon, getThemeToggleLabel } from "@/components/theme-toggle-icon";
 import type {
@@ -95,6 +97,13 @@ type ProductGroup = {
   children: Product[];
   members: Product[];
   groupStock: number;
+};
+
+type ProductGroupDraft = {
+  parentProduct: Product | null;
+  members: Product[];
+  children: Product[];
+  firstIndex: number;
 };
 
 type VariantColorOption = {
@@ -502,6 +511,11 @@ export function Storefront({
     ),
   );
   const productGroups = buildProductGroups(resolvedCatalogProducts);
+  const groupedParentCodeByProductId = new Map(
+    filterOptionGroups.flatMap((group) =>
+      group.members.map((product) => [product.id, group.parentCode] as const),
+    ),
+  );
   const categories = Array.from(
     new Set(
       filterOptionGroups
@@ -777,8 +791,7 @@ export function Storefront({
       ?.label || "Todo";
   const selectedProductGroup = selectedProduct
     ? productGroups.find(
-        (group) =>
-          group.parentCode === getParentProductCode(selectedProduct.code),
+        (group) => group.members.some((product) => product.id === selectedProduct.id),
       ) || null
     : null;
   const selectedDetailProduct = selectedProductGroup
@@ -845,7 +858,8 @@ export function Storefront({
   const cartSummaryByParentCode = cart.reduce<
     Record<string, GroupCartSummary>
   >((summary, item) => {
-    const parentCode = getParentProductCode(item.code);
+    const parentCode =
+      groupedParentCodeByProductId.get(item.id) || getParentProductCode(item);
     const current = summary[parentCode] || { quantity: 0, total: 0 };
 
     current.quantity += item.quantity;
@@ -1683,6 +1697,13 @@ export function Storefront({
   const checkoutSheetClassName = mobileCartOpen
     ? "order-panel checkout-sheet-open"
     : "order-panel checkout-sheet-hidden";
+  const hideCatalogCheckoutChrome = mobileCartOpen;
+  const promoGridClassName = [
+    "promo-grid",
+    featuredTiles.length === 3 ? "promo-grid-audience" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
   const postalCodeButtonLabel = normalizedCustomerPostalCode
     ? `CP ${normalizedCustomerPostalCode}`
     : "Cargar código postal";
@@ -1755,15 +1776,6 @@ export function Storefront({
   ]
     .filter(Boolean)
     .join(" | ");
-  const filtersPanelButtonLabel =
-    activeFilterCount > 0 ? `Filtros (${activeFilterCount})` : "Filtros";
-  const filtersPanelButtonMeta =
-    itemCount > 0
-      ? `${itemCount} en tu pedido`
-      : activeFilterCount > 0
-        ? "Personaliza el catálogo"
-        : "Pedido y búsqueda";
-
   return (
     <>
       {postalCodePromptOpen ? (
@@ -1859,6 +1871,36 @@ export function Storefront({
           </nav>
 
           <div className="site-actions">
+            {compactCatalogLayout && !hideCatalogCheckoutChrome ? (
+              <button
+                type="button"
+                className={[
+                  "site-panel-toggle",
+                  filtersPanelOpen ? "is-active" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                onClick={() => setFiltersPanelOpen((current) => !current)}
+                aria-controls="catalog-sidebar"
+                aria-expanded={filtersPanelOpen}
+                aria-label="Abrir panel"
+                title="Abrir panel"
+              >
+                <IconFilter />
+              </button>
+            ) : null}
+
+            {whatsappHref ? (
+              <a
+                className="site-whatsapp-chip"
+                href={whatsappHref}
+                target="_blank"
+                rel="noreferrer"
+              >
+                WhatsApp
+              </a>
+            ) : null}
+
             <button
               type="button"
               className="theme-toggle"
@@ -1983,11 +2025,17 @@ export function Storefront({
               <h2>Bloques destacados</h2>
             </div>
 
-            <div className="promo-grid">
+            <div className={promoGridClassName}>
               {featuredTiles.map((tile) => (
                 <button
                   type="button"
-                  className={`promo-tile ${selectedAudience === tile.filterValue ? "active" : ""}`}
+                  className={[
+                    "promo-tile",
+                    featuredTiles.length === 3 ? "promo-tile-audience" : "",
+                    selectedAudience === tile.filterValue ? "active" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
                   key={`${tile.src}-${tile.label}`}
                   onClick={() =>
                     applyAudienceFilter(tile.filterValue as AudienceFilter)
@@ -2471,25 +2519,6 @@ export function Storefront({
               </div>
 
               <div className="catalog-toolbar-actions">
-                <button
-                  type="button"
-                  className="catalog-sidebar-toggle"
-                  onClick={() => setFiltersPanelOpen((current) => !current)}
-                  aria-controls="catalog-sidebar"
-                  aria-expanded={filtersPanelOpen}
-                >
-                  <span className="catalog-sidebar-toggle-copy">
-                    <strong>{filtersPanelButtonLabel}</strong>
-                    <small>{filtersPanelButtonMeta}</small>
-                  </span>
-                  <span
-                    className="catalog-sidebar-toggle-badge"
-                    aria-hidden="true"
-                  >
-                    {filtersPanelOpen ? "x" : "+"}
-                  </span>
-                </button>
-
                 <label className="sort-box">
                   <span>Ordenar por</span>
                   <select
@@ -3317,7 +3346,7 @@ export function Storefront({
         />
       ) : null}
 
-      {compactCatalogLayout ? (
+      {compactCatalogLayout && !hideCatalogCheckoutChrome ? (
         <button
           type="button"
           className={[
@@ -3338,13 +3367,15 @@ export function Storefront({
         </button>
       ) : null}
 
-      <button
-        type="button"
-        className="mobile-cart-button"
-        onClick={() => openCartPanel("cart")}
-      >
-        Carrito ({itemCount})
-      </button>
+      {!hideCatalogCheckoutChrome ? (
+        <button
+          type="button"
+          className="mobile-cart-button"
+          onClick={() => openCartPanel("cart")}
+        >
+          Carrito ({itemCount})
+        </button>
+      ) : null}
 
       <aside className={checkoutSheetClassName}>
         <CartContent
@@ -4279,20 +4310,19 @@ function mergeProductGalleries(products: Array<Product | null | undefined>) {
 }
 
 function buildProductGroups(products: Product[]) {
-  const groups = new Map<
-    string,
-    { parentProduct: Product | null; members: Product[]; children: Product[] }
-  >();
+  const groups = new Map<string, ProductGroupDraft>();
 
-  for (const product of products) {
-    const parentCode = getParentProductCode(product.code);
+  products.forEach((product, index) => {
+    const parentCode = getParentProductCode(product);
     const group = groups.get(parentCode) || {
       parentProduct: null,
       members: [],
       children: [],
+      firstIndex: index,
     };
 
     group.members.push(product);
+    group.firstIndex = Math.min(group.firstIndex, index);
 
     if (isChildProduct(product)) {
       group.children.push(product);
@@ -4301,9 +4331,57 @@ function buildProductGroups(products: Product[]) {
     }
 
     groups.set(parentCode, group);
-  }
+  });
 
-  return Array.from(groups.entries()).map(([parentCode, group]) => {
+  const parentGroupsByRelationKey = new Map<string, ProductGroupDraft | null>();
+  const memberGroupsByProductId = new Map<string, ProductGroupDraft | null>();
+
+  groups.forEach((group) => {
+    if (group.parentProduct) {
+      const relationKey = getParentProductCode(group.parentProduct);
+      if (relationKey) {
+        parentGroupsByRelationKey.set(
+          relationKey,
+          parentGroupsByRelationKey.has(relationKey) ? null : group,
+        );
+      }
+    }
+
+    group.members.forEach((member) => {
+      const memberKey = normalizeProductGroupKey(member.id);
+      if (!memberKey) {
+        return;
+      }
+
+      memberGroupsByProductId.set(
+        memberKey,
+        memberGroupsByProductId.has(memberKey) ? null : group,
+      );
+    });
+  });
+
+  Array.from(groups.entries()).forEach(([parentCode, group]) => {
+    if (group.parentProduct || group.children.length === 0) {
+      return;
+    }
+
+    const relationKey = normalizeProductGroupKey(parentCode);
+    const parentGroup = relationKey
+      ? parentGroupsByRelationKey.get(relationKey) || memberGroupsByProductId.get(relationKey)
+      : null;
+
+    if (!parentGroup || parentGroup === group) {
+      return;
+    }
+
+    parentGroup.children.push(...group.children);
+    parentGroup.members.push(...group.members);
+    parentGroup.firstIndex = Math.min(parentGroup.firstIndex, group.firstIndex);
+    groups.delete(parentCode);
+  });
+
+  return Array.from(groups.entries())
+    .map(([parentCode, group]) => {
     const sortedChildren = [...group.children].sort(compareVariantProducts);
     const stockPool = sortedChildren.length > 0 ? sortedChildren : group.members;
     const groupStock = stockPool.reduce(
@@ -4372,15 +4450,45 @@ function buildProductGroups(products: Product[]) {
       members: group.members,
       groupStock,
     } satisfies ProductGroup;
-  });
+    })
+    .sort((left, right) => {
+      const leftGroup = groups.get(left.parentCode);
+      const rightGroup = groups.get(right.parentCode);
+      return (leftGroup?.firstIndex || 0) - (rightGroup?.firstIndex || 0);
+    });
 }
 
-function getParentProductCode(code: string) {
-  return getLegacyArticleRelationKey(code) || getLegacyArticleParentId(code);
+function getParentProductCode(
+  productOrCode: Product | string,
+  procedencia?: string | null,
+) {
+  const articleId =
+    typeof productOrCode === "string" ? productOrCode : productOrCode.code;
+  const groupingProcedencia =
+    typeof productOrCode === "string"
+      ? procedencia || ""
+      : productOrCode.procedencia;
+
+  return (
+    getLegacyArticleGroupingRelationKey({
+      articleId,
+      procedencia: groupingProcedencia,
+    }) || getLegacyArticleGroupingParentId({
+      articleId,
+      procedencia: groupingProcedencia,
+    })
+  );
 }
 
 function isChildProduct(product: Product) {
-  return product.code.includes("|");
+  return isLegacyArticleGroupedChild({
+    articleId: product.code,
+    procedencia: product.procedencia,
+  });
+}
+
+function normalizeProductGroupKey(value: string | null | undefined) {
+  return (value || "").replace(/\s+/g, " ").trim();
 }
 
 function getDefaultSelectableProduct(group: ProductGroup) {
@@ -4506,11 +4614,10 @@ function getVariantLabel(product: Product) {
     return product.defaultSize;
   }
 
-  const variantSegments = product.code
-    .split("|")
-    .slice(1)
-    .map((segment) => segment.trim())
-    .filter((segment) => segment && segment !== "-");
+  const variantSegments = getLegacyArticleVariantSegments({
+    articleId: product.code,
+    procedencia: product.procedencia,
+  });
 
   if (variantSegments.length > 0) {
     return variantSegments.join(" / ");

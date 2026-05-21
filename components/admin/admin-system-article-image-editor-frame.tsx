@@ -25,7 +25,7 @@ import {
 } from "@/app/admin/actions";
 import { buildImageProxyUrl, formatCurrency } from "@/lib/commerce";
 import {
-  getLegacyArticleParentId,
+  getLegacyArticleGroupingParentId,
 } from "@/lib/legacy-article-id";
 import type { Product } from "@/lib/types";
 import type { ProductAdminOverride } from "@/lib/repositories/productOverrideRepository";
@@ -193,7 +193,10 @@ function getGalleryItemPreviewSrc(item: GalleryItem | null) {
 }
 
 function getParentCode(entry: EditorEntry) {
-  return getLegacyArticleParentId(entry.product.code);
+  return getLegacyArticleGroupingParentId({
+    articleId: entry.product.code,
+    procedencia: entry.product.procedencia,
+  });
 }
 
 function ensureCurrentOption(
@@ -226,6 +229,16 @@ function normalizeGoogleSearchTerm(value: string | null | undefined) {
   }
 
   return normalized;
+}
+
+function buildGoogleImageSearchUrl(terms: Array<string | null | undefined>) {
+  const normalizedTerms = terms
+    .map((term) => normalizeGoogleSearchTerm(term))
+    .filter(Boolean);
+
+  return `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(
+    normalizedTerms.join(" "),
+  )}`;
 }
 
 function buildBackgroundRemovedFileName(label: string, fallbackCode: string) {
@@ -443,20 +456,15 @@ export function AdminSystemArticleImageEditorFrame(props: {
   const hasColorField = Boolean(entry.baseProduct.defaultColor || entry.product.defaultColor);
   const currentVariantDraft =
     variantDrafts.find((variant) => variant.id === entry.product.id) || null;
-  const googleSearchTerms = [
-    normalizeGoogleSearchTerm(description || entry.baseProduct.description),
-    normalizeGoogleSearchTerm(resolvedBrandLabel),
-    normalizeGoogleSearchTerm(resolvedCategoryLabel),
-    normalizeGoogleSearchTerm(
-      color
-        || currentVariantDraft?.color
-        || entry.baseProduct.defaultColor
-        || entry.product.defaultColor,
-    ),
-  ].filter(Boolean);
-  const googleSearchUrl = `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(
-    googleSearchTerms.join(" "),
-  )}`;
+  const googleSearchUrl = buildGoogleImageSearchUrl([
+    description || entry.baseProduct.description,
+    resolvedBrandLabel,
+    resolvedCategoryLabel,
+    color
+      || currentVariantDraft?.color
+      || entry.baseProduct.defaultColor
+      || entry.product.defaultColor,
+  ]);
   const isBusy = submitMode !== null || isRefreshPending;
 
   const handleClose = () => {
@@ -790,6 +798,84 @@ export function AdminSystemArticleImageEditorFrame(props: {
 
   const handleClearVariantImage = (index: number) => {
     replaceVariantImage(index, null);
+  };
+
+  const handleVariantPasteFromClipboard = async (index: number) => {
+    if (
+      typeof navigator !== "undefined" &&
+      navigator.clipboard &&
+      "read" in navigator.clipboard
+    ) {
+      try {
+        const clipboardItems = await navigator.clipboard.read();
+        const pastedFiles: File[] = [];
+        const pastedUrls: string[] = [];
+
+        for (const item of clipboardItems) {
+          for (const type of item.types) {
+            if (type.startsWith("image/")) {
+              const blob = await item.getType(type);
+              pastedFiles.push(
+                new File([blob], buildClipboardFileName(pastedFiles.length, blob.type), {
+                  type: blob.type,
+                  lastModified: Date.now(),
+                }),
+              );
+            } else if (type === "text/plain") {
+              const blob = await item.getType(type);
+              pastedUrls.push(...parseClipboardText(await blob.text()));
+            }
+          }
+        }
+
+        if (pastedFiles.length > 0) {
+          replaceVariantImage(index, createUploadGalleryItem(pastedFiles[0]));
+          setFeedback({
+            tone: "success",
+            message: "Imagen pegada en el articulo hijo.",
+          });
+          return;
+        }
+
+        if (pastedUrls.length > 0) {
+          replaceVariantImage(index, createUrlGalleryItem(pastedUrls[0]));
+          setFeedback({
+            tone: "success",
+            message: "URL pegada en el articulo hijo.",
+          });
+          return;
+        }
+      } catch {
+        // fallback handled below
+      }
+    }
+
+    if (
+      typeof navigator !== "undefined" &&
+      navigator.clipboard &&
+      "readText" in navigator.clipboard
+    ) {
+      try {
+        const pastedUrls = parseClipboardText(await navigator.clipboard.readText());
+
+        if (pastedUrls.length > 0) {
+          replaceVariantImage(index, createUrlGalleryItem(pastedUrls[0]));
+          setFeedback({
+            tone: "success",
+            message: "URL pegada en el articulo hijo.",
+          });
+          return;
+        }
+      } catch {
+        // final fallback below
+      }
+    }
+
+    setFeedback({
+      tone: "error",
+      message:
+        "No se pudo leer el portapapeles de la variante. Copia una URL de imagen o usa Subir.",
+    });
   };
 
   const buildMutationFormData = () => {
@@ -1480,6 +1566,13 @@ export function AdminSystemArticleImageEditorFrame(props: {
                             {variantDrafts.map((variant, index) => {
                               const variantPreviewSrc = getGalleryItemPreviewSrc(variant.imageItem);
                               const canUseCover = Boolean(galleryItems[0]);
+                              const variantGoogleSearchUrl = buildGoogleImageSearchUrl([
+                                variant.description,
+                                resolvedBrandLabel,
+                                resolvedCategoryLabel,
+                                variant.size,
+                                variant.color,
+                              ]);
 
                               return (
                                 <tr
@@ -1514,6 +1607,31 @@ export function AdminSystemArticleImageEditorFrame(props: {
                                             }
                                           />
                                         </label>
+
+                                        <div className="flex gap-2">
+                                          <button
+                                            type="button"
+                                            className="inline-flex h-8 items-center justify-center rounded-[10px] border border-[color:var(--admin-card-line)] bg-[color:var(--admin-pane-bg)] px-3 text-xs font-semibold text-[color:var(--admin-title)] transition hover:bg-white/70 disabled:cursor-not-allowed disabled:opacity-45 dark:hover:bg-white/10"
+                                            onClick={() =>
+                                              window.open(
+                                                variantGoogleSearchUrl,
+                                                "_blank",
+                                                "noopener,noreferrer",
+                                              )
+                                            }
+                                          >
+                                            Google
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="inline-flex h-8 items-center justify-center rounded-[10px] border border-[color:var(--admin-card-line)] bg-[color:var(--admin-pane-bg)] px-3 text-xs font-semibold text-[color:var(--admin-title)] transition hover:bg-white/70 disabled:cursor-not-allowed disabled:opacity-45 dark:hover:bg-white/10"
+                                            onClick={() => {
+                                              void handleVariantPasteFromClipboard(index);
+                                            }}
+                                          >
+                                            Pegar
+                                          </button>
+                                        </div>
 
                                         <div className="flex gap-2">
                                           <button

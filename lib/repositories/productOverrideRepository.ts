@@ -7,6 +7,7 @@ import {
 
 const PRODUCT_OVERRIDES_TABLE = "dbo.WEB_MA_ARTICULOS_OVERRIDES";
 const PRODUCT_OVERRIDES_SCHEMA_VERSION = 1;
+const SQL_IN_PARAMETER_CHUNK_SIZE = 1800;
 
 declare global {
   var __diezDeportesProductOverridesSchemaReady:
@@ -83,6 +84,16 @@ function setInput(
   for (const [key, value] of Object.entries(values)) {
     request.input(key, value);
   }
+}
+
+function chunkValues<T>(values: T[], size: number) {
+  const chunks: T[][] = [];
+
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+
+  return chunks;
 }
 
 async function ensureSchema() {
@@ -176,49 +187,53 @@ export async function getProductAdminOverridesByProductIds(productIds: string[])
   }
 
   const pool = await getConnection();
-  const request = pool.request();
+  const overrides = new Map<string, ProductAdminOverride>();
 
-  normalizedIds.forEach((productId, index) => {
-    request.input(`productId${index}`, productId);
-  });
+  for (const chunk of chunkValues(normalizedIds, SQL_IN_PARAMETER_CHUNK_SIZE)) {
+    const request = pool.request();
 
-  const placeholders = normalizedIds.map((_, index) => `@productId${index}`).join(", ");
-  const result = await request.query<ProductOverrideRow>(`
-    IF OBJECT_ID('${PRODUCT_OVERRIDES_TABLE}', 'U') IS NOT NULL
-    BEGIN
-      SELECT
-        IDARTICULO,
-        DESCRIPCION_OVERRIDE,
-        CAST(PRECIO_OVERRIDE AS float) AS PRECIO_OVERRIDE,
-        MARCA_OVERRIDE,
-        CATEGORIA_OVERRIDE,
-        ACTUALIZADO_POR,
-        FECHA_CREACION,
-        FECHA_ACTUALIZACION
-      FROM ${PRODUCT_OVERRIDES_TABLE} WITH (NOLOCK)
-      WHERE IDARTICULO IN (${placeholders});
-    END
-    ELSE
-    BEGIN
-      SELECT
-        CAST('' AS nvarchar(120)) AS IDARTICULO,
-        CAST(NULL AS nvarchar(250)) AS DESCRIPCION_OVERRIDE,
-        CAST(NULL AS float) AS PRECIO_OVERRIDE,
-        CAST(NULL AS nvarchar(120)) AS MARCA_OVERRIDE,
-        CAST(NULL AS nvarchar(120)) AS CATEGORIA_OVERRIDE,
-        CAST(NULL AS nvarchar(120)) AS ACTUALIZADO_POR,
-        CAST(NULL AS datetime2) AS FECHA_CREACION,
-        CAST(NULL AS datetime2) AS FECHA_ACTUALIZACION
-      WHERE 1 = 0;
-    END
-  `);
+    chunk.forEach((productId, index) => {
+      request.input(`productId${index}`, productId);
+    });
 
-  return new Map(
-    result.recordset.map((row) => {
+    const placeholders = chunk.map((_, index) => `@productId${index}`).join(", ");
+    const result = await request.query<ProductOverrideRow>(`
+      IF OBJECT_ID('${PRODUCT_OVERRIDES_TABLE}', 'U') IS NOT NULL
+      BEGIN
+        SELECT
+          IDARTICULO,
+          DESCRIPCION_OVERRIDE,
+          CAST(PRECIO_OVERRIDE AS float) AS PRECIO_OVERRIDE,
+          MARCA_OVERRIDE,
+          CATEGORIA_OVERRIDE,
+          ACTUALIZADO_POR,
+          FECHA_CREACION,
+          FECHA_ACTUALIZACION
+        FROM ${PRODUCT_OVERRIDES_TABLE} WITH (NOLOCK)
+        WHERE IDARTICULO IN (${placeholders});
+      END
+      ELSE
+      BEGIN
+        SELECT
+          CAST('' AS nvarchar(120)) AS IDARTICULO,
+          CAST(NULL AS nvarchar(250)) AS DESCRIPCION_OVERRIDE,
+          CAST(NULL AS float) AS PRECIO_OVERRIDE,
+          CAST(NULL AS nvarchar(120)) AS MARCA_OVERRIDE,
+          CAST(NULL AS nvarchar(120)) AS CATEGORIA_OVERRIDE,
+          CAST(NULL AS nvarchar(120)) AS ACTUALIZADO_POR,
+          CAST(NULL AS datetime2) AS FECHA_CREACION,
+          CAST(NULL AS datetime2) AS FECHA_ACTUALIZACION
+        WHERE 1 = 0;
+      END
+    `);
+
+    for (const row of result.recordset) {
       const mapped = mapOverrideRow(row);
-      return [mapped.productId, mapped];
-    }),
-  );
+      overrides.set(mapped.productId, mapped);
+    }
+  }
+
+  return overrides;
 }
 
 export async function saveProductAdminOverride(input: {

@@ -25,8 +25,9 @@ import { PickupDeskPane } from "@/components/admin/pickup-desk-pane";
 import { OrdersTable } from "@/components/admin/orders-table";
 import { OrderTabs } from "@/components/admin/order-tabs";
 import {
+  getAdminProductsByGroupRelationKey,
   getAdminProductsByIds,
-  searchProductsForAdmin,
+  searchProductsForAdminPage,
   type AdminProductImageEntry,
 } from "@/lib/catalog";
 import {
@@ -63,8 +64,10 @@ import {
 } from "@/lib/order-admin";
 import { getAdminOrderStateCssVariables } from "@/lib/order-state-config";
 import {
-  getLegacyArticleParentId,
-  getLegacyArticleRelationKey,
+  getLegacyArticleGroupingParentId,
+  getLegacyArticleGroupingRelationKey,
+  getLegacyArticleVariantSegments,
+  isLegacyArticleGroupedChild,
 } from "@/lib/legacy-article-id";
 import { normalizeOrderFilters } from "@/lib/models/order";
 import { getOrders } from "@/lib/services/orderService";
@@ -91,10 +94,12 @@ type AdminPageProps = {
     fecha_desde?: string;
     fecha_hasta?: string;
     system?: string;
+    system_tab?: string;
     system_q?: string;
     system_brand?: string;
     system_category?: string;
     system_article?: string;
+    system_page?: string;
     config?: string;
     error?: string;
     create?: string;
@@ -105,6 +110,7 @@ type AdminPageProps = {
 };
 
 type AdminView = "orders" | "pickups" | "users" | "system" | "config" | "help";
+type AdminCatalogScope = "published" | "all";
 
 type AdminProductImageGroup = {
   parentCode: string;
@@ -145,6 +151,7 @@ const ADMIN_APPAREL_SIZE_ORDER = [
 const ADMIN_INTEGER_FORMATTER = new Intl.NumberFormat("es-AR", {
   maximumFractionDigits: 0,
 });
+const ADMIN_SYSTEM_CATALOG_PAGE_SIZE = 24;
 
 type AdminHrefInput = {
   view?: AdminView;
@@ -156,10 +163,12 @@ type AdminHrefInput = {
   fecha_desde?: string | null;
   fecha_hasta?: string | null;
   system?: AdminSystemSection;
+  system_tab?: AdminCatalogScope;
   system_q?: string | null;
   system_brand?: string | null;
   system_category?: string | null;
   system_article?: string | null;
+  system_page?: number | null;
   config?: string;
   create?: boolean;
   editUser?: number;
@@ -199,6 +208,14 @@ function normalizePositiveInt(value: string | undefined) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+function normalizeAdminCatalogScope(value: string | undefined): AdminCatalogScope {
+  if (value === "all" || value === "todos") {
+    return "all";
+  }
+
+  return "published";
+}
+
 function formatDateTime(value: string | null | undefined) {
   if (!value) {
     return "Sin dato";
@@ -231,16 +248,25 @@ function normalizeAdminText(value: string | null | undefined) {
   return (value || "").replace(/\s+/g, " ").trim();
 }
 
-function getAdminParentProductCode(code: string) {
-  return getLegacyArticleRelationKey(code) || getLegacyArticleParentId(code);
+function getAdminParentProductCode(product: AdminProductImageEntry["product"]) {
+  return getLegacyArticleGroupingParentId({
+    articleId: product.code,
+    procedencia: product.procedencia,
+  });
 }
 
-function getAdminArticleRelationKey(code: string) {
-  return getLegacyArticleRelationKey(code);
+function getAdminArticleRelationKey(product: AdminProductImageEntry["product"]) {
+  return getLegacyArticleGroupingRelationKey({
+    articleId: product.code,
+    procedencia: product.procedencia,
+  });
 }
 
-function isAdminChildProductCode(code: string) {
-  return code.includes("|");
+function isAdminChildProduct(product: AdminProductImageEntry["product"]) {
+  return isLegacyArticleGroupedChild({
+    articleId: product.code,
+    procedencia: product.procedencia,
+  });
 }
 
 function getAdminVariantLabel(product: AdminProductImageEntry["product"]) {
@@ -248,11 +274,10 @@ function getAdminVariantLabel(product: AdminProductImageEntry["product"]) {
     return product.defaultSize;
   }
 
-  const variantSegments = product.code
-    .split("|")
-    .slice(1)
-    .map((segment) => segment.trim())
-    .filter((segment) => segment && segment !== "-");
+  const variantSegments = getLegacyArticleVariantSegments({
+    articleId: product.code,
+    procedencia: product.procedencia,
+  });
 
   if (variantSegments.length > 0) {
     return variantSegments.join(" / ");
@@ -343,11 +368,10 @@ function extractAdminVariantColor(params: {
     remainder = normalizeAdminText(remainder.slice(normalizedParentDescription.length));
   }
 
-  const childSegments = childEntry.product.code
-    .split("|")
-    .slice(1)
-    .map((segment) => segment.trim())
-    .filter(Boolean);
+  const childSegments = getLegacyArticleVariantSegments({
+    articleId: childEntry.product.code,
+    procedencia: childEntry.product.procedencia,
+  });
   const audienceSegment = childSegments[0] || "";
 
   if (/^(m|f|u|k|b|g|d)$/i.test(audienceSegment)) {
@@ -371,7 +395,7 @@ function buildAdminProductImageGroups(entries: AdminProductImageEntry[]) {
   const groups = new Map<string, AdminProductImageGroupDraft>();
 
   entries.forEach((entry, index) => {
-    const parentCode = getAdminParentProductCode(entry.product.code);
+    const parentCode = getAdminParentProductCode(entry.product);
     const currentGroup = groups.get(parentCode) || {
       parentEntry: null,
       children: [],
@@ -382,7 +406,7 @@ function buildAdminProductImageGroups(entries: AdminProductImageEntry[]) {
     currentGroup.members.push(entry);
     currentGroup.firstIndex = Math.min(currentGroup.firstIndex, index);
 
-    if (isAdminChildProductCode(entry.product.code)) {
+    if (isAdminChildProduct(entry.product)) {
       currentGroup.children.push(entry);
     } else if (!currentGroup.parentEntry) {
       currentGroup.parentEntry = entry;
@@ -395,14 +419,44 @@ function buildAdminProductImageGroups(entries: AdminProductImageEntry[]) {
     string,
     AdminProductImageGroupDraft | null
   >();
+  const memberGroupsByProductId = new Map<
+    string,
+    AdminProductImageGroupDraft | null
+  >();
 
   groups.forEach((group) => {
     if (!group.parentEntry) {
+      group.members.forEach((member) => {
+        const memberKey = normalizeAdminText(member.product.id);
+        if (!memberKey) {
+          return;
+        }
+
+        memberGroupsByProductId.set(
+          memberKey,
+          memberGroupsByProductId.has(memberKey)
+            ? null
+            : group,
+        );
+      });
       return;
     }
 
-    const relationKey = getAdminArticleRelationKey(group.parentEntry.product.code);
+    const relationKey = getAdminArticleRelationKey(group.parentEntry.product);
     if (!relationKey) {
+      group.members.forEach((member) => {
+        const memberKey = normalizeAdminText(member.product.id);
+        if (!memberKey) {
+          return;
+        }
+
+        memberGroupsByProductId.set(
+          memberKey,
+          memberGroupsByProductId.has(memberKey)
+            ? null
+            : group,
+        );
+      });
       return;
     }
 
@@ -412,6 +466,20 @@ function buildAdminProductImageGroups(entries: AdminProductImageEntry[]) {
         ? null
         : group,
     );
+
+    group.members.forEach((member) => {
+      const memberKey = normalizeAdminText(member.product.id);
+      if (!memberKey) {
+        return;
+      }
+
+      memberGroupsByProductId.set(
+        memberKey,
+        memberGroupsByProductId.has(memberKey)
+          ? null
+          : group,
+      );
+    });
   });
 
   Array.from(groups.entries()).forEach(([parentCode, group]) => {
@@ -419,9 +487,9 @@ function buildAdminProductImageGroups(entries: AdminProductImageEntry[]) {
       return;
     }
 
-    const relationKey = getAdminArticleRelationKey(parentCode);
+    const relationKey = normalizeAdminText(parentCode);
     const parentGroup = relationKey
-      ? parentGroupsByRelationKey.get(relationKey)
+      ? parentGroupsByRelationKey.get(relationKey) || memberGroupsByProductId.get(relationKey)
       : null;
 
     if (!parentGroup || parentGroup === group) {
@@ -657,18 +725,22 @@ function getAdminGroupDisplayEntries(group: AdminProductImageGroup) {
 function AdminArticleListCard(props: {
   group: AdminProductImageGroup;
   activeSection: AdminSystemSection;
+  catalogScope: AdminCatalogScope;
   productSearchQuery: string;
   activeBrandFilterId: string;
   activeCategoryFilterId: string;
+  currentPage: number;
   isSelectedGroup: boolean;
   selectedProductId: string | null;
 }) {
   const {
     group,
     activeSection,
+    catalogScope,
     productSearchQuery,
     activeBrandFilterId,
     activeCategoryFilterId,
+    currentPage,
     isSelectedGroup,
     selectedProductId,
   } = props;
@@ -679,10 +751,12 @@ function AdminArticleListCard(props: {
   const editHref = buildAdminHref({
     view: "system",
     system: activeSection,
+    system_tab: catalogScope,
     system_q: productSearchQuery,
     system_brand: activeBrandFilterId || null,
     system_category: activeCategoryFilterId || null,
     system_article: primaryEntry.product.id,
+    system_page: currentPage,
   });
   const isPrimarySelected = selectedProductId === primaryEntry.product.id;
 
@@ -853,10 +927,12 @@ function AdminArticleListCard(props: {
               const childEditHref = buildAdminHref({
                 view: "system",
                 system: activeSection,
+                system_tab: catalogScope,
                 system_q: productSearchQuery,
                 system_brand: activeBrandFilterId || null,
                 system_category: activeCategoryFilterId || null,
                 system_article: child.product.id,
+                system_page: currentPage,
               });
               const isChildSelected = selectedProductId === child.product.id;
 
@@ -978,6 +1054,10 @@ function buildAdminHref(input: AdminHrefInput) {
       params.set("system", input.system);
     }
 
+    if (input.system_tab && input.system_tab !== "published") {
+      params.set("system_tab", input.system_tab);
+    }
+
     if (input.system_q) {
       params.set("system_q", input.system_q);
     }
@@ -992,6 +1072,14 @@ function buildAdminHref(input: AdminHrefInput) {
 
     if (input.system_article) {
       params.set("system_article", input.system_article);
+    }
+
+    if (
+      typeof input.system_page === "number"
+      && Number.isFinite(input.system_page)
+      && input.system_page > 1
+    ) {
+      params.set("system_page", String(Math.trunc(input.system_page)));
     }
   } else if (!input.view || input.view === "orders") {
     if (input.vista && input.vista !== "pedidos") {
@@ -1290,11 +1378,135 @@ async function loadAdminProductsPaneData(
   selectedProductId: string | undefined,
   brandFilterId: string | undefined,
   categoryFilterId: string | undefined,
+  catalogScope: AdminCatalogScope,
+  requestedPage: number | undefined,
 ) {
   const normalizedSearchQuery = (productSearchQuery || "").trim();
   const normalizedSelectedProductId = selectedProductId || "";
   const normalizedBrandFilterId = brandFilterId || "";
   const normalizedCategoryFilterId = categoryFilterId || "";
+  const normalizedPage = Math.max(1, requestedPage || 1);
+  const publishedOnly = catalogScope === "published";
+
+  async function supplementEntriesWithParents(
+    entries: AdminProductImageEntry[],
+    options?: { respectCatalogScope?: boolean },
+  ) {
+    const respectCatalogScope = options?.respectCatalogScope ?? true;
+    const knownIds = new Set(entries.map((entry) => entry.product.id));
+    const supplementalIds = new Set<string>();
+
+    entries.forEach((entry) => {
+      if (!isAdminChildProduct(entry.product)) {
+        return;
+      }
+
+      const parentCode = getAdminParentProductCode(entry.product);
+      if (parentCode && !knownIds.has(parentCode)) {
+        supplementalIds.add(parentCode);
+      }
+    });
+
+    const supplementalResults =
+      supplementalIds.size > 0
+        ? (await getAdminProductsByIds(Array.from(supplementalIds))).filter(
+            (entry) =>
+              !respectCatalogScope || !publishedOnly || entry.isPublishedInCatalog,
+          )
+        : [];
+    let mergedEntries = Array.from(
+      new Map(
+        [...entries, ...supplementalResults].map((entry) => [entry.product.id, entry]),
+      ).values(),
+    );
+    const lateKnownIds = new Set(mergedEntries.map((entry) => entry.product.id));
+    const lateSupplementalIds = new Set<string>();
+
+    mergedEntries.forEach((entry) => {
+      if (!isAdminChildProduct(entry.product)) {
+        return;
+      }
+
+      const parentCode = getAdminParentProductCode(entry.product);
+      if (parentCode && !lateKnownIds.has(parentCode)) {
+        lateSupplementalIds.add(parentCode);
+      }
+    });
+
+    if (lateSupplementalIds.size === 0) {
+      return mergedEntries;
+    }
+
+    const lateSupplementalResults = await getAdminProductsByIds(
+      Array.from(lateSupplementalIds),
+    ).then((entries) =>
+      entries.filter(
+        (entry) =>
+          !respectCatalogScope || !publishedOnly || entry.isPublishedInCatalog,
+      ),
+    );
+
+    mergedEntries = Array.from(
+      new Map(
+        [...mergedEntries, ...lateSupplementalResults].map((entry) => [
+          entry.product.id,
+          entry,
+        ]),
+      ).values(),
+    );
+
+    return mergedEntries;
+  }
+
+  async function expandGroupEntriesWithDescendants(
+    entries: AdminProductImageEntry[],
+  ) {
+    const mergedEntries = new Map(
+      entries.map((entry) => [entry.product.id, entry] as const),
+    );
+    const queuedRelationKeys = new Set<string>();
+    const pendingRelationKeys: string[] = [];
+
+    function enqueueRelationKey(value: string | null | undefined) {
+      const relationKey = normalizeAdminText(value);
+      if (!relationKey || queuedRelationKeys.has(relationKey)) {
+        return;
+      }
+
+      queuedRelationKeys.add(relationKey);
+      pendingRelationKeys.push(relationKey);
+    }
+
+    entries.forEach((entry) => {
+      enqueueRelationKey(entry.product.id);
+      enqueueRelationKey(getAdminParentProductCode(entry.product));
+      enqueueRelationKey(getAdminArticleRelationKey(entry.product));
+    });
+
+    while (pendingRelationKeys.length > 0) {
+      const relationKey = pendingRelationKeys.shift();
+      if (!relationKey) {
+        continue;
+      }
+
+      const relatedEntries = await getAdminProductsByGroupRelationKey({
+        groupRelationKey: relationKey,
+        publishedOnly: false,
+      });
+
+      for (const relatedEntry of relatedEntries) {
+        const existing = mergedEntries.get(relatedEntry.product.id);
+        if (!existing) {
+          mergedEntries.set(relatedEntry.product.id, relatedEntry);
+          enqueueRelationKey(relatedEntry.product.id);
+          enqueueRelationKey(getAdminParentProductCode(relatedEntry.product));
+          enqueueRelationKey(getAdminArticleRelationKey(relatedEntry.product));
+        }
+      }
+    }
+
+    return Array.from(mergedEntries.values());
+  }
 
   try {
     await ensureProductImageSchemaReady();
@@ -1308,97 +1520,150 @@ async function loadAdminProductsPaneData(
       );
     }
 
-    const initialResults = await searchProductsForAdmin({
+    let pagedSearch = await searchProductsForAdminPage({
       query: normalizedSearchQuery,
       brandId: normalizedBrandFilterId,
       categoryId: normalizedCategoryFilterId,
-    });
-    const knownIds = new Set(initialResults.map((entry) => entry.product.id));
-    const supplementalIds = new Set<string>();
-
-    initialResults.forEach((entry) => {
-      if (!isAdminChildProductCode(entry.product.code)) {
-        return;
-      }
-
-      const parentCode = getAdminParentProductCode(entry.product.code);
-      if (parentCode && !knownIds.has(parentCode)) {
-        supplementalIds.add(parentCode);
-      }
+      limit: ADMIN_SYSTEM_CATALOG_PAGE_SIZE,
+      page: normalizedPage,
+      publishedOnly,
     });
 
-    if (normalizedSelectedProductId) {
-      if (!knownIds.has(normalizedSelectedProductId)) {
-        supplementalIds.add(normalizedSelectedProductId);
-      }
+    if (pagedSearch.entries.length === 0 && pagedSearch.totalCount > 0 && normalizedPage > 1) {
+      const lastPage = Math.max(1, Math.ceil(pagedSearch.totalCount / pagedSearch.pageSize));
+      pagedSearch = await searchProductsForAdminPage({
+        query: normalizedSearchQuery,
+        brandId: normalizedBrandFilterId,
+        categoryId: normalizedCategoryFilterId,
+        limit: pagedSearch.pageSize,
+        page: lastPage,
+        publishedOnly,
+      });
+    }
 
-      if (isAdminChildProductCode(normalizedSelectedProductId)) {
-        const selectedParentCode = getAdminParentProductCode(normalizedSelectedProductId);
-        if (selectedParentCode && !knownIds.has(selectedParentCode)) {
-          supplementalIds.add(selectedParentCode);
-        }
+    const pageEntries = await supplementEntriesWithParents(pagedSearch.entries, {
+      respectCatalogScope: true,
+    });
+    let selectedProduct =
+      pageEntries.find((entry) => entry.product.id === normalizedSelectedProductId) || null;
+
+    if (!selectedProduct && normalizedSelectedProductId) {
+      const selectedResults = await getAdminProductsByIds([normalizedSelectedProductId]);
+      const candidate = selectedResults[0] || null;
+
+      if (candidate && (!publishedOnly || candidate.isPublishedInCatalog)) {
+        selectedProduct = candidate;
       }
     }
 
-    const supplementalResults =
-      supplementalIds.size > 0
-        ? await getAdminProductsByIds(Array.from(supplementalIds))
-        : [];
-    const searchResults = Array.from(
-      new Map(
-        [...initialResults, ...supplementalResults].map((entry) => [entry.product.id, entry]),
-      ).values(),
-    );
-    const selectedProduct =
-      searchResults.find((entry) => entry.product.id === normalizedSelectedProductId) || null;
+    let selectedGroupEntries: AdminProductImageEntry[] = [];
+
+    if (selectedProduct) {
+      const selectedGroupRelationKey = getAdminArticleRelationKey(selectedProduct.product);
+
+      selectedGroupEntries = selectedGroupRelationKey
+        ? await getAdminProductsByGroupRelationKey({
+            groupRelationKey: selectedGroupRelationKey,
+            publishedOnly: false,
+          })
+        : [selectedProduct];
+
+      if (
+        selectedGroupEntries.length === 0
+        || !selectedGroupEntries.some((entry) => entry.product.id === selectedProduct?.product.id)
+      ) {
+        selectedGroupEntries = [selectedProduct, ...selectedGroupEntries].filter(
+          (entry, index, current) =>
+            current.findIndex((candidate) => candidate.product.id === entry.product.id) === index,
+        );
+      }
+
+      selectedGroupEntries = await expandGroupEntriesWithDescendants(selectedGroupEntries);
+      selectedGroupEntries = await supplementEntriesWithParents(selectedGroupEntries, {
+        respectCatalogScope: false,
+      });
+    }
 
     return {
-      searchResults,
+      pageEntries,
       selectedProduct,
+      selectedGroupEntries,
       loadError: null,
+      totalCount: pagedSearch.totalCount,
+      publishedCount: pagedSearch.publishedCount,
+      allCount: pagedSearch.allCount,
+      currentPage: pagedSearch.page,
+      pageSize: pagedSearch.pageSize,
     };
   } catch (error) {
     return {
-      searchResults: [] as AdminProductImageEntry[],
+      pageEntries: [] as AdminProductImageEntry[],
       selectedProduct: null,
+      selectedGroupEntries: [] as AdminProductImageEntry[],
       loadError:
         error instanceof Error
           ? error.message
           : "No se pudieron cargar los articulos.",
+      totalCount: 0,
+      publishedCount: 0,
+      allCount: 0,
+      currentPage: 1,
+      pageSize: ADMIN_SYSTEM_CATALOG_PAGE_SIZE,
     };
   }
 }
 
 function SystemPane(props: {
   activeSection: AdminSystemSection;
+  catalogScope: AdminCatalogScope;
   productSearchQuery: string;
   activeBrandFilterId: string;
   activeCategoryFilterId: string;
-  searchResults: AdminProductImageEntry[];
+  pageEntries: AdminProductImageEntry[];
   selectedProduct: AdminProductImageEntry | null;
+  selectedGroupEntries: AdminProductImageEntry[];
   loadError: string | null;
+  totalCount: number;
+  publishedCount: number;
+  allCount: number;
+  currentPage: number;
+  pageSize: number;
   brandOptions: Awaited<ReturnType<typeof listAdminArticleBrandOptions>>;
   categoryOptions: Awaited<ReturnType<typeof listAdminArticleCategoryOptions>>;
 }) {
   const {
     activeSection,
+    catalogScope,
     productSearchQuery,
     activeBrandFilterId,
     activeCategoryFilterId,
-    searchResults,
+    pageEntries,
     selectedProduct,
+    selectedGroupEntries,
     loadError,
+    totalCount,
+    publishedCount,
+    allCount,
+    currentPage,
+    pageSize,
     brandOptions,
     categoryOptions,
   } = props;
-  const productGroups = buildAdminProductImageGroups(searchResults);
-  const visibleArticleCount = productGroups.reduce(
+  const productGroups = buildAdminProductImageGroups(pageEntries);
+  const pageVisibleArticleCount = productGroups.reduce(
     (sum, group) => sum + getAdminGroupDisplayEntries(group).allEntries.length,
     0,
   );
+  const editorEntries =
+    selectedGroupEntries.length > 0
+      ? selectedGroupEntries
+      : selectedProduct
+        ? [selectedProduct]
+        : [];
+  const editorGroups = buildAdminProductImageGroups(editorEntries);
   const selectedGroup =
     selectedProduct
-      ? productGroups.find(
+      ? editorGroups.find(
           (group) => group.members.some((entry) => entry.product.id === selectedProduct.product.id),
         ) || null
       : null;
@@ -1419,34 +1684,65 @@ function SystemPane(props: {
   const hasActiveSystemFilters = Boolean(
     productSearchQuery || activeBrandFilterId || activeCategoryFilterId,
   );
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
   const editorCloseHref = buildAdminHref({
     view: "system",
     system: activeSection,
+    system_tab: catalogScope,
     system_q: productSearchQuery,
     system_brand: activeBrandFilterId || null,
     system_category: activeCategoryFilterId || null,
+    system_page: currentPage,
   });
   const editorReturnTo = selectedEntry
     ? buildAdminHref({
         view: "system",
         system: activeSection,
+        system_tab: catalogScope,
         system_q: productSearchQuery,
         system_brand: activeBrandFilterId || null,
         system_category: activeCategoryFilterId || null,
         system_article: selectedEntry.product.id,
+        system_page: currentPage,
       })
     : editorCloseHref;
   const clearFiltersHref = buildAdminHref({
     view: "system",
     system: activeSection,
+    system_tab: catalogScope,
   });
   const clearSearchHref = buildAdminHref({
     view: "system",
     system: activeSection,
+    system_tab: catalogScope,
     system_brand: activeBrandFilterId || null,
     system_category: activeCategoryFilterId || null,
   });
+  const previousPageHref =
+    currentPage > 1
+      ? buildAdminHref({
+          view: "system",
+          system: activeSection,
+          system_tab: catalogScope,
+          system_q: productSearchQuery || null,
+          system_brand: activeBrandFilterId || null,
+          system_category: activeCategoryFilterId || null,
+          system_page: currentPage - 1,
+        })
+      : null;
+  const nextPageHref =
+    currentPage < totalPages
+      ? buildAdminHref({
+          view: "system",
+          system: activeSection,
+          system_tab: catalogScope,
+          system_q: productSearchQuery || null,
+          system_brand: activeBrandFilterId || null,
+          system_category: activeCategoryFilterId || null,
+          system_page: currentPage + 1,
+        })
+      : null;
 
   return (
     <section className="admin-pane space-y-4">
@@ -1460,6 +1756,7 @@ function SystemPane(props: {
             href={buildAdminHref({
               view: "system",
               system: section,
+              system_tab: catalogScope,
               system_q: section === activeSection ? productSearchQuery : null,
               system_brand: section === activeSection ? activeBrandFilterId || null : null,
               system_category:
@@ -1468,6 +1765,7 @@ function SystemPane(props: {
                 section === activeSection && selectedProduct
                   ? selectedProduct.product.id
                   : null,
+              system_page: section === activeSection ? currentPage : null,
             })}
             className={cn(
               "inline-flex min-w-[140px] items-center justify-between rounded-[14px] px-4 py-2.5 text-sm transition",
@@ -1484,15 +1782,71 @@ function SystemPane(props: {
       <form action="/admin" className="space-y-4">
         <input type="hidden" name="view" value="system" />
         <input type="hidden" name="system" value={activeSection} />
+        <input type="hidden" name="system_tab" value={catalogScope} />
         <AdminPageHeader
           title={getAdminSystemSectionLabel(activeSection)}
-          subtitle="Busca un articulo y edita descripcion, precio, marca, categoria e imagenes desde un solo panel."
+          subtitle={
+            catalogScope === "published"
+              ? "Busca y edita solo los articulos hoy visibles en la tienda."
+              : "Busca y edita todo el maestro de articulos desde un solo panel."
+          }
           searchDefaultValue={productSearchQuery}
-          resultCount={visibleArticleCount}
+          resultCount={totalCount}
           searchName="system_q"
           searchPlaceholder="Buscar por codigo, descripcion o EAN"
           eyebrow="Sistema"
         />
+
+        <section className="rounded-[22px] border border-[color:var(--admin-pane-line)] bg-[color:var(--admin-pane-bg)] p-2">
+          <nav className="flex gap-2 overflow-x-auto" aria-label="Vistas del catalogo admin">
+            {[
+              {
+                value: "published" as const,
+                label: "Catalogo actual",
+                count: publishedCount,
+              },
+              {
+                value: "all" as const,
+                label: "Todos los articulos",
+                count: allCount,
+              },
+            ].map((tab) => {
+              const isActive = tab.value === catalogScope;
+
+              return (
+                <Link
+                  key={tab.value}
+                  href={buildAdminHref({
+                    view: "system",
+                    system: activeSection,
+                    system_tab: tab.value,
+                    system_q: productSearchQuery || null,
+                    system_brand: activeBrandFilterId || null,
+                    system_category: activeCategoryFilterId || null,
+                  })}
+                  className={cn(
+                    "inline-flex min-w-[180px] items-center justify-between gap-3 rounded-[14px] px-4 py-2.5 text-sm transition",
+                    isActive
+                      ? "bg-[color:var(--admin-accent)] text-white shadow-[0_10px_24px_rgba(13,109,216,0.18)]"
+                      : "text-[color:var(--admin-title)] hover:bg-black/[0.04] dark:hover:bg-white/[0.06]",
+                  )}
+                >
+                  <span className="font-medium">{tab.label}</span>
+                  <span
+                    className={cn(
+                      "inline-flex min-w-7 items-center justify-center rounded-full px-2 py-0.5 text-xs font-semibold",
+                      isActive
+                        ? "bg-white/16 text-white"
+                        : "bg-[color:var(--admin-accent-soft)] text-[color:var(--admin-accent-strong)]",
+                    )}
+                  >
+                    {formatAdminInteger(tab.count)}
+                  </span>
+                </Link>
+              );
+            })}
+          </nav>
+        </section>
 
         <section className="admin-section-card admin-store-filters-panel">
           <div className="admin-store-filters-head">
@@ -1538,6 +1892,7 @@ function SystemPane(props: {
                 allHref={buildAdminHref({
                   view: "system",
                   system: activeSection,
+                  system_tab: catalogScope,
                   system_q: productSearchQuery || null,
                   system_brand: activeBrandFilterId || null,
                 })}
@@ -1545,6 +1900,7 @@ function SystemPane(props: {
                   buildAdminHref({
                     view: "system",
                     system: activeSection,
+                    system_tab: catalogScope,
                     system_q: productSearchQuery || null,
                     system_brand: activeBrandFilterId || null,
                     system_category: optionId,
@@ -1562,6 +1918,7 @@ function SystemPane(props: {
                 allHref={buildAdminHref({
                   view: "system",
                   system: activeSection,
+                  system_tab: catalogScope,
                   system_q: productSearchQuery || null,
                   system_category: activeCategoryFilterId || null,
                 })}
@@ -1569,6 +1926,7 @@ function SystemPane(props: {
                   buildAdminHref({
                     view: "system",
                     system: activeSection,
+                    system_tab: catalogScope,
                     system_q: productSearchQuery || null,
                     system_brand: optionId,
                     system_category: activeCategoryFilterId || null,
@@ -1637,9 +1995,9 @@ function SystemPane(props: {
             <span className="admin-pane-kicker">Listado</span>
             <h3>Resultados del catalogo</h3>
           </div>
-          {visibleArticleCount > 0 ? (
+          {totalCount > 0 ? (
             <div className="text-sm text-[color:var(--admin-text)]">
-              {visibleArticleCount} articulo{visibleArticleCount === 1 ? "" : "s"} visible{visibleArticleCount === 1 ? "" : "s"}
+              Pagina {currentPage} de {totalPages} · {formatAdminInteger(totalCount)} resultado{totalCount === 1 ? "" : "s"}
             </div>
           ) : null}
         </div>
@@ -1658,9 +2016,14 @@ function SystemPane(props: {
           <div className="space-y-4">
             <div className="admin-overview-grid">
               <article className="admin-overview-card">
-                <span>Resultados</span>
-                <strong>{formatAdminInteger(visibleArticleCount)}</strong>
-                <small>Articulos individuales visibles para edicion.</small>
+                <span>Coincidencias</span>
+                <strong>{formatAdminInteger(totalCount)}</strong>
+                <small>Articulos dentro del filtro activo.</small>
+              </article>
+              <article className="admin-overview-card">
+                <span>En esta pagina</span>
+                <strong>{formatAdminInteger(pageVisibleArticleCount)}</strong>
+                <small>Articulos visibles para editar sin cambiar de pagina.</small>
               </article>
               <article className="admin-overview-card tone-success">
                 <span>Con imagen</span>
@@ -1701,15 +2064,55 @@ function SystemPane(props: {
               </article>
             </div>
 
+            {totalPages > 1 ? (
+              <div className="flex flex-col gap-3 rounded-[20px] border border-[color:var(--admin-pane-line)] bg-[color:var(--admin-pane-bg)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="text-sm text-[color:var(--admin-text)]">
+                  Viendo pagina {currentPage} de {totalPages} con {formatAdminInteger(pageVisibleArticleCount)} articulo{pageVisibleArticleCount === 1 ? "" : "s"} en esta tanda.
+                </div>
+                <div className="flex items-center gap-2">
+                  {previousPageHref ? (
+                    <Link href={previousPageHref} className={adminSecondaryButtonClass}>
+                      Anterior
+                    </Link>
+                  ) : (
+                    <span
+                      className={cn(
+                        adminSecondaryButtonClass,
+                        "pointer-events-none opacity-50",
+                      )}
+                    >
+                      Anterior
+                    </span>
+                  )}
+                  {nextPageHref ? (
+                    <Link href={nextPageHref} className={adminSecondaryButtonClass}>
+                      Siguiente
+                    </Link>
+                  ) : (
+                    <span
+                      className={cn(
+                        adminSecondaryButtonClass,
+                        "pointer-events-none opacity-50",
+                      )}
+                    >
+                      Siguiente
+                    </span>
+                  )}
+                </div>
+              </div>
+            ) : null}
+
             <div className="admin-article-catalog-grid">
               {productGroups.map((group) => (
                 <AdminArticleListCard
                   key={group.parentCode}
                   group={group}
                   activeSection={activeSection}
+                  catalogScope={catalogScope}
                   productSearchQuery={productSearchQuery}
                   activeBrandFilterId={activeBrandFilterId}
                   activeCategoryFilterId={activeCategoryFilterId}
+                  currentPage={currentPage}
                   isSelectedGroup={selectedGroup?.parentCode === group.parentCode}
                   selectedProductId={selectedEntry?.product.id || null}
                 />
@@ -2123,10 +2526,12 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
       fecha_desde,
       fecha_hasta,
       system,
+      system_tab,
       system_q,
       system_brand,
       system_category,
       system_article,
+      system_page,
       config,
       error,
       create,
@@ -2147,10 +2552,12 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
   const activeSystemSection = normalizeAdminSystemSection(
     system || (activeView === "system" ? "articulos" : undefined),
   );
+  const activeSystemScope = normalizeAdminCatalogScope(system_tab);
   const activeSystemQuery = (system_q || productQ || "").trim();
   const activeSystemBrandId = system_brand || "";
   const activeSystemCategoryId = system_category || "";
   const activeSystemArticle = system_article || product || "";
+  const activeSystemPage = normalizePositiveInt(system_page) || 1;
   const activeOrderView = normalizeAdminOrderView(vista || status);
   const baseOrderFilters = normalizeOrderFilters({
     q,
@@ -2196,11 +2603,19 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           activeSystemArticle,
           activeSystemBrandId,
           activeSystemCategoryId,
+          activeSystemScope,
+          activeSystemPage,
         )
       : Promise.resolve({
-          searchResults: [] as AdminProductImageEntry[],
+          pageEntries: [] as AdminProductImageEntry[],
           selectedProduct: null,
+          selectedGroupEntries: [] as AdminProductImageEntry[],
           loadError: null,
+          totalCount: 0,
+          publishedCount: 0,
+          allCount: 0,
+          currentPage: 1,
+          pageSize: ADMIN_SYSTEM_CATALOG_PAGE_SIZE,
         }),
     activeView === "system"
       ? listAdminArticleBrandOptions()
@@ -2349,10 +2764,13 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
             href={buildAdminHref({
               view: "system",
               system: activeSystemSection,
+              system_tab: activeSystemScope,
               system_q: activeSystemQuery,
               system_brand: activeSystemBrandId || null,
               system_category: activeSystemCategoryId || null,
               system_article: activeSystemArticle,
+              system_page:
+                activeView === "system" ? productsPaneData.currentPage : activeSystemPage,
             })}
             className={cn(
               "inline-flex min-w-[140px] items-center justify-between rounded-[14px] px-4 py-2.5 text-sm transition",
@@ -2419,12 +2837,19 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
         ) : activeView === "system" ? (
           <SystemPane
             activeSection={activeSystemSection}
+            catalogScope={activeSystemScope}
             productSearchQuery={activeSystemQuery}
             activeBrandFilterId={activeSystemBrandId}
             activeCategoryFilterId={activeSystemCategoryId}
-            searchResults={productsPaneData.searchResults}
+            pageEntries={productsPaneData.pageEntries}
             selectedProduct={productsPaneData.selectedProduct}
+            selectedGroupEntries={productsPaneData.selectedGroupEntries}
             loadError={productsPaneData.loadError}
+            totalCount={productsPaneData.totalCount}
+            publishedCount={productsPaneData.publishedCount}
+            allCount={productsPaneData.allCount}
+            currentPage={productsPaneData.currentPage}
+            pageSize={productsPaneData.pageSize}
             brandOptions={articleBrandOptions}
             categoryOptions={articleCategoryOptions}
           />

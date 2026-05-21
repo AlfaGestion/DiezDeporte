@@ -20,6 +20,18 @@ type ConfigSection = {
 };
 
 type ConfigMode = "simple" | "advanced";
+type SimpleConfigTabId =
+  | "general"
+  | "contacto"
+  | "envios-retiro"
+  | "pagos"
+  | "redes-apariencia";
+
+type SimpleConfigTab = {
+  id: SimpleConfigTabId;
+  label: string;
+  description: string;
+};
 
 const SECTIONS: ConfigSection[] = [
   {
@@ -69,6 +81,34 @@ const SECTIONS: ConfigSection[] = [
     title: "Facturacion",
     description: "Ajusta el mail de factura y el comportamiento comercial al facturar.",
     eyebrow: "Documentos",
+  },
+];
+
+const SIMPLE_CONFIG_TABS: SimpleConfigTab[] = [
+  {
+    id: "general",
+    label: "General",
+    description: "Nombre, ubicacion y datos basicos de la tienda.",
+  },
+  {
+    id: "contacto",
+    label: "Contacto",
+    description: "Canales visibles para hablar con clientes.",
+  },
+  {
+    id: "envios-retiro",
+    label: "Envios y retiro",
+    description: "Envio gratis, origen y retiro en local.",
+  },
+  {
+    id: "pagos",
+    label: "Pagos",
+    description: "Estado comercial de Mercado Pago sin mostrar credenciales.",
+  },
+  {
+    id: "redes-apariencia",
+    label: "Redes y apariencia",
+    description: "Redes, logo, portada y mensaje principal.",
   },
 ];
 
@@ -135,6 +175,7 @@ export function AdminConfigWorkspace(props: AdminConfigWorkspaceProps) {
   const [configMode, setConfigMode] = useState<ConfigMode>(
     activeSection === SECTIONS[0].id ? "simple" : "advanced",
   );
+  const [simpleTab, setSimpleTab] = useState<SimpleConfigTabId>("general");
 
   useEffect(() => {
     if (activeSection !== SECTIONS[0].id) {
@@ -402,6 +443,102 @@ export function AdminConfigWorkspace(props: AdminConfigWorkspaceProps) {
     const mercadoPagoReady =
       hasValue("APP_MP_ACCESS_TOKEN") && hasValue("APP_PUBLIC_BASE_URL");
     const freeShippingThreshold = getStringValue("APP_FREE_SHIPPING_THRESHOLD") || "150000";
+    const currentSimpleTab =
+      SIMPLE_CONFIG_TABS.find((tab) => tab.id === simpleTab) || SIMPLE_CONFIG_TABS[0];
+
+    function renderSimpleTabPanel() {
+      switch (simpleTab) {
+        case "general":
+          return renderBlock(
+            "General",
+            "Edita los datos principales que el cliente ve cuando entra a la tienda.",
+            <>
+              {renderTextField("NEXT_PUBLIC_STORE_NAME", { half: true })}
+              {renderTextField("NEXT_PUBLIC_STORE_TAGLINE", { half: true })}
+              {renderTextField("NEXT_PUBLIC_STORE_ADDRESS")}
+              {renderTextField("NEXT_PUBLIC_STORE_HOURS")}
+            </>,
+          );
+        case "contacto":
+          return renderBlock(
+            "Contacto",
+            "Estos canales quedan visibles para consultas, seguimiento y asistencia comercial.",
+            <>
+              {renderTextField("NEXT_PUBLIC_SUPPORT_WHATSAPP", { half: true })}
+              {renderTextField("NEXT_PUBLIC_SUPPORT_PHONE", { half: true })}
+              {renderTextField("NEXT_PUBLIC_SUPPORT_EMAIL", { half: true })}
+            </>,
+          );
+        case "envios-retiro":
+          return renderBlock(
+            "Envios y retiro",
+            "APP_FREE_SHIPPING_THRESHOLD sigue siendo la unica variable para envio gratis. Las credenciales de Correo Argentino quedan solo en Avanzada.",
+            <>
+              <div className="admin-simple-inline-note lg:col-span-2">
+                <strong>Estado Correo Argentino</strong>
+                <span>
+                  {shippingEstimateReady
+                    ? "Cotizacion activa. La configuracion tecnica ya esta completa en Avanzada."
+                    : "Cotizacion pendiente. Completa la parte tecnica desde Avanzada si quieres activarla."}
+                </span>
+              </div>
+              {renderTextField("APP_FREE_SHIPPING_THRESHOLD", {
+                half: true,
+                help: "Monto minimo para que el pedido marque envio gratis.",
+              })}
+              {renderTextField("APP_CORREO_ARGENTINO_ORIGIN_POSTAL_CODE", {
+                half: true,
+                help: "Codigo postal desde donde salen los pedidos.",
+              })}
+              {renderBooleanField("APP_ALLOW_PICKUP_CHECKOUT_WITHOUT_ADDRESS", {
+                help: "Permite retiro en local sin pedir direccion completa.",
+              })}
+              {renderTextField("APP_PICKUP_SCHEDULE", {
+                rows: 4,
+                help: "Texto visible para retiro en local.",
+              })}
+            </>,
+          );
+        case "pagos":
+          return renderBlock(
+            "Pagos",
+            "La vista simple solo informa el estado comercial. El token, la URL publica y el resto de datos tecnicos siguen en Avanzada.",
+            <>
+              <div className="admin-simple-inline-note lg:col-span-2">
+                <strong>Estado Mercado Pago</strong>
+                <span>
+                  {mercadoPagoReady
+                    ? "Cobro online activo. Las credenciales quedan resguardadas en la configuracion avanzada."
+                    : "Cobro online pendiente. Completa token y URL publica desde Avanzada para activarlo."}
+                </span>
+              </div>
+            </>,
+          );
+        case "redes-apariencia":
+          return renderBlock(
+            "Redes y apariencia",
+            "Controla enlaces visibles, imagenes principales y mensaje comercial de la portada.",
+            <>
+              {renderTextField("NEXT_PUBLIC_INSTAGRAM_URL", { half: true })}
+              {renderTextField("NEXT_PUBLIC_FACEBOOK_URL", { half: true })}
+              {renderTextField("NEXT_PUBLIC_STORE_LOGO_URL", {
+                half: true,
+                help: "Ruta o URL del logo principal.",
+              })}
+              {renderTextField("NEXT_PUBLIC_HERO_IMAGE_URL", {
+                half: true,
+                help: "Ruta o URL de la imagen principal de portada.",
+              })}
+              {renderTextField("NEXT_PUBLIC_STORE_WELCOME_MESSAGE", {
+                rows: 5,
+                help: "Mensaje corto visible en la portada.",
+              })}
+            </>,
+          );
+        default:
+          return null;
+      }
+    }
 
     return (
       <div className="space-y-6">
@@ -440,127 +577,57 @@ export function AdminConfigWorkspace(props: AdminConfigWorkspaceProps) {
           </div>
         </section>
 
-        {renderBlock(
-          "Datos de la tienda",
-          "Lo basico para identificar el negocio y mostrarle al cliente quien esta comprando.",
-          <>
-            {renderTextField("NEXT_PUBLIC_STORE_NAME", { half: true })}
-            {renderTextField("NEXT_PUBLIC_STORE_TAGLINE", { half: true })}
-            {renderTextField("NEXT_PUBLIC_STORE_ADDRESS")}
-            {renderTextField("NEXT_PUBLIC_STORE_HOURS")}
-          </>,
-        )}
+        <section className="rounded-[28px] border border-[color:var(--admin-pane-line)] bg-[color:var(--admin-pane-bg)] p-6 shadow-sm">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="max-w-3xl">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--admin-text)]">
+                Pestanas simples
+              </div>
+              <h3 className="mt-2 text-xl font-semibold text-[color:var(--admin-title)]">
+                {currentSimpleTab.label}
+              </h3>
+              <p className="mt-2 text-sm leading-6 text-[color:var(--admin-text)]">
+                {currentSimpleTab.description}
+              </p>
+            </div>
+            <div className="admin-simple-inline-note max-w-md">
+              <strong>Solo campos no tecnicos</strong>
+              <span>
+                Tokens, passwords, API URLs y configuraciones de integracion quedan
+                exclusivamente en la vista avanzada.
+              </span>
+            </div>
+          </div>
 
-        {renderBlock(
-          "Contacto",
-          "Canales visibles para que el cliente te ubique rapido desde la tienda.",
-          <>
-            {renderTextField("NEXT_PUBLIC_SUPPORT_PHONE", { half: true })}
-            {renderTextField("NEXT_PUBLIC_SUPPORT_WHATSAPP", { half: true })}
-            {renderTextField("NEXT_PUBLIC_SUPPORT_EMAIL", { half: true })}
-            {renderTextField("NEXT_PUBLIC_SUPPORT_BLURB", {
-              rows: 4,
-              help: "Texto corto sobre atencion, asesoramiento y servicio.",
-            })}
-          </>,
-        )}
+          <div
+            className="admin-simple-tab-strip mt-6"
+            role="tablist"
+            aria-label="Pestanas simples de configuracion"
+          >
+            {SIMPLE_CONFIG_TABS.map((tab) => {
+              const active = tab.id === simpleTab;
 
-        {renderBlock(
-          "Envios y retiro",
-          "El envio gratis sigue usando APP_FREE_SHIPPING_THRESHOLD. La cotizacion con Correo Argentino se activa sola cuando completas estos datos.",
-          <>
-            {renderTextField("APP_FREE_SHIPPING_THRESHOLD", {
-              half: true,
-              help: "Monto minimo para que el resumen del pedido marque envio gratis.",
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  aria-controls={`simple-tab-panel-${tab.id}`}
+                  className={`admin-simple-tab-button ${active ? "active" : ""}`}
+                  onClick={() => setSimpleTab(tab.id)}
+                >
+                  <span>{tab.label}</span>
+                  <small>{tab.description}</small>
+                </button>
+              );
             })}
-            {renderTextField("APP_CORREO_ARGENTINO_ORIGIN_POSTAL_CODE", {
-              half: true,
-              help: "Codigo postal desde donde salen los pedidos.",
-            })}
-            {renderTextField("APP_CORREO_ARGENTINO_API_BASE_URL", {
-              half: false,
-              help: "Base de la API de Correo Argentino. Si la dejas completa, la cotizacion puede activarse.",
-            })}
-            {renderTextField("APP_CORREO_ARGENTINO_CUSTOMER_ID", {
-              half: true,
-              help: "Identificador de cliente entregado por Correo Argentino.",
-            })}
-            {renderTextField("APP_CORREO_ARGENTINO_API_USER", {
-              half: true,
-              help: "Usuario de la API para cotizar envios.",
-            })}
-            {renderTextField("APP_CORREO_ARGENTINO_API_PASSWORD", {
-              half: true,
-              help: "Password de la API de Correo Argentino.",
-            })}
-            {renderBooleanField("APP_ALLOW_PICKUP_CHECKOUT_WITHOUT_ADDRESS", {
-              help: "Permite retiro en local sin pedir direccion completa.",
-            })}
-            {renderTextField("APP_PICKUP_SCHEDULE", {
-              rows: 4,
-              help: "Texto que ve el cliente cuando eliges retiro en local.",
-            })}
-          </>,
-        )}
+          </div>
+        </section>
 
-        {renderBlock(
-          "Pagos",
-          "Mercado Pago se considera activo cuando completas el token y la URL publica real de la tienda.",
-          <>
-            {renderTextField("APP_MP_ACCESS_TOKEN", {
-              half: false,
-              help: "Token privado de Mercado Pago para cobrar online.",
-            })}
-            {renderTextField("APP_PUBLIC_BASE_URL", {
-              half: false,
-              help: "Direccion publica de tu tienda para retornos y links de pago.",
-            })}
-          </>,
-        )}
-
-        {renderBlock(
-          "Carrito y checkout",
-          "Ajustes simples sobre disponibilidad, visibilidad y comportamiento de compra.",
-          <>
-            {renderBooleanField("NEXT_PUBLIC_SHOW_OUT_OF_STOCK", {
-              help: "Si esta activo, los productos sin stock siguen viendose en el catalogo.",
-            })}
-            {renderBooleanField("APP_ALLOW_BACKORDERS", {
-              help: "Si esta activo, el cliente puede pedir productos aunque no haya stock suficiente.",
-            })}
-            {renderBooleanField("APP_SEND_ORDER_RECEIVED_EMAIL", {
-              help: "Envia el email inicial al registrarse un pedido.",
-            })}
-          </>,
-        )}
-
-        {renderBlock(
-          "Redes sociales",
-          "Perfiles visibles en header, footer y zonas de contacto.",
-          <>
-            {renderTextField("NEXT_PUBLIC_INSTAGRAM_URL", { half: true })}
-            {renderTextField("NEXT_PUBLIC_FACEBOOK_URL", { half: true })}
-          </>,
-        )}
-
-        {renderBlock(
-          "Apariencia basica",
-          "Logo, portada y textos principales de la tienda online.",
-          <>
-            {renderTextField("NEXT_PUBLIC_STORE_LOGO_URL", {
-              half: true,
-              help: "Ruta o URL del logo principal.",
-            })}
-            {renderTextField("NEXT_PUBLIC_HERO_IMAGE_URL", {
-              half: true,
-              help: "Ruta o URL de la imagen principal de portada.",
-            })}
-            {renderTextField("NEXT_PUBLIC_STORE_WELCOME_MESSAGE", {
-              rows: 5,
-              help: "Mensaje corto que aparece en la portada.",
-            })}
-          </>,
-        )}
+        <div id={`simple-tab-panel-${simpleTab}`} role="tabpanel">
+          {renderSimpleTabPanel()}
+        </div>
       </div>
     );
   }
