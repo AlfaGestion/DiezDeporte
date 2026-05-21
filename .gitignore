@@ -17,3 +17,10 @@ build/
 *.log
 logs/
 scripts/logs/
+*.log
+logs/
+scripts/logs/
+.env
+.env.local
+.next/
+node_modules/
