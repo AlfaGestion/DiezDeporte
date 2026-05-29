@@ -25,3 +25,8 @@ scripts/logs/
 .next/
 node_modules/
 .vscode/settings.json
+scripts/
+logs/
+*.log
+logs/
+scripts/start-web.cmd

@@ -14,6 +14,7 @@ import type { AdminOrderWatchSnapshot } from "@/lib/types";
 const ORDERS_TABLE = "dbo.WEB_V_MV_PEDIDOS";
 const ORDER_LOGS_TABLE = "dbo.WEB_V_MV_PEDIDOS_LOGS";
 const ORDER_SCHEMA_VERSION = 2;
+const SQL_IN_PARAMETER_CHUNK_SIZE = 1500;
 
 declare global {
   var __diezDeportesOrderSchemaReady:
@@ -175,6 +176,16 @@ function setInput(
   for (const [key, value] of Object.entries(values)) {
     request.input(key, value);
   }
+}
+
+function chunkValues<T>(values: T[], size: number) {
+  const chunks: T[][] = [];
+
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+
+  return chunks;
 }
 
 function buildDateStart(value: string) {
@@ -884,43 +895,47 @@ export async function getDocumentItemStatsByOrderNumbers(orderNumbers: string[])
 
   await ensureSchema();
   const pool = await getConnection();
-  const request = pool.request();
-  const placeholders = normalizedOrderNumbers.map((orderNumber, index) => {
-    const parameterName = `orderNumber${index}`;
-    request.input(parameterName, orderNumber);
-    return `@${parameterName}`;
-  });
+  const statsByOrder = new Map<string, { itemCount: number; lineCount: number }>();
 
-  const result = await request.query<OrderDocumentItemStatsRow>(`
-    IF OBJECT_ID('dbo.V_MV_CpteInsumos') IS NOT NULL
-    BEGIN
-      SELECT
-        LTRIM(RTRIM(ISNULL(IDCOMPROBANTE, ''))) AS IDCOMPROBANTE,
-        SUM(ISNULL(CANTIDAD, 0)) AS TOTAL_ITEMS,
-        COUNT(*) AS LINE_COUNT
-      FROM dbo.V_MV_CpteInsumos WITH (NOLOCK)
-      WHERE LTRIM(RTRIM(ISNULL(IDCOMPROBANTE, ''))) IN (${placeholders.join(", ")})
-      GROUP BY LTRIM(RTRIM(ISNULL(IDCOMPROBANTE, '')));
-    END
-    ELSE
-    BEGIN
-      SELECT
-        CAST('' AS nvarchar(40)) AS IDCOMPROBANTE,
-        CAST(0 AS float) AS TOTAL_ITEMS,
-        CAST(0 AS int) AS LINE_COUNT
-      WHERE 1 = 0;
-    END
-  `);
+  for (const chunk of chunkValues(normalizedOrderNumbers, SQL_IN_PARAMETER_CHUNK_SIZE)) {
+    const request = pool.request();
+    const placeholders = chunk.map((orderNumber, index) => {
+      const parameterName = `orderNumber${index}`;
+      request.input(parameterName, orderNumber);
+      return `@${parameterName}`;
+    });
 
-  return new Map(
-    result.recordset.map((row) => [
-      row.IDCOMPROBANTE.trim(),
-      {
-        itemCount: Number(row.TOTAL_ITEMS || 0),
-        lineCount: Number(row.LINE_COUNT || 0),
-      },
-    ]),
-  );
+    const result = await request.query<OrderDocumentItemStatsRow>(`
+      IF OBJECT_ID('dbo.V_MV_CpteInsumos') IS NOT NULL
+      BEGIN
+        SELECT
+          LTRIM(RTRIM(ISNULL(IDCOMPROBANTE, ''))) AS IDCOMPROBANTE,
+          SUM(ISNULL(CANTIDAD, 0)) AS TOTAL_ITEMS,
+          COUNT(*) AS LINE_COUNT
+        FROM dbo.V_MV_CpteInsumos WITH (NOLOCK)
+        WHERE LTRIM(RTRIM(ISNULL(IDCOMPROBANTE, ''))) IN (${placeholders.join(", ")})
+        GROUP BY LTRIM(RTRIM(ISNULL(IDCOMPROBANTE, '')));
+      END
+      ELSE
+      BEGIN
+        SELECT
+          CAST('' AS nvarchar(40)) AS IDCOMPROBANTE,
+          CAST(0 AS float) AS TOTAL_ITEMS,
+          CAST(0 AS int) AS LINE_COUNT
+        WHERE 1 = 0;
+      END
+    `);
+
+    for (const row of result.recordset) {
+      const orderNumber = row.IDCOMPROBANTE.trim();
+      const current = statsByOrder.get(orderNumber) || { itemCount: 0, lineCount: 0 };
+      current.itemCount += Number(row.TOTAL_ITEMS || 0);
+      current.lineCount += Number(row.LINE_COUNT || 0);
+      statsByOrder.set(orderNumber, current);
+    }
+  }
+
+  return statsByOrder;
 }
 
 export async function markPickupAsRedeemed(input: {

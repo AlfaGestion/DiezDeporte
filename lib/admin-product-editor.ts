@@ -34,6 +34,7 @@ export type AdminArticleVariantUpdate = {
 };
 
 const PRODUCT_OVERRIDE_TABLE = "dbo.WEB_MA_ARTICULOS_OVERRIDES";
+const SQL_IN_PARAMETER_CHUNK_SIZE = 1500;
 
 function createRequest(executor: Executor) {
   if ("begin" in executor) {
@@ -45,6 +46,16 @@ function createRequest(executor: Executor) {
 
 function normalizeId(value: string | null | undefined) {
   return getLegacyArticleId(value);
+}
+
+function chunkValues<T>(values: T[], size: number) {
+  const chunks: T[][] = [];
+
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+
+  return chunks;
 }
 
 function normalizeLabel(value: string | null | undefined) {
@@ -146,43 +157,40 @@ async function getArticleGroupingMap(
   }
 
   const connection = executor || (await getConnection());
-  const request = createRequest(connection);
+  const map = new Map<string, { productId: string; procedencia: string }>();
 
-  normalizedIds.forEach((productId, index) => {
-    request.input(`productId${index}`, productId);
-  });
+  for (const chunk of chunkValues(normalizedIds, SQL_IN_PARAMETER_CHUNK_SIZE)) {
+    const request = createRequest(connection);
 
-  const result: IResult<ArticleGroupingRow> = await request.query(`
-    SELECT
-      IDARTICULO AS RawId,
-      Procedencia
-    FROM dbo.V_MA_ARTICULOS WITH (NOLOCK)
-    WHERE IDARTICULO IN (
-      ${normalizedIds.map((_, index) => `@productId${index}`).join(", ")}
-    );
-  `);
+    chunk.forEach((productId, index) => {
+      request.input(`productId${index}`, productId);
+    });
 
-  return new Map(
-    result.recordset
-      .map((row) => {
-        const productId = normalizeId(row.RawId);
+    const result: IResult<ArticleGroupingRow> = await request.query(`
+      SELECT
+        IDARTICULO AS RawId,
+        Procedencia
+      FROM dbo.V_MA_ARTICULOS WITH (NOLOCK)
+      WHERE IDARTICULO IN (
+        ${chunk.map((_, index) => `@productId${index}`).join(", ")}
+      );
+    `);
 
-        if (!productId) {
-          return null;
-        }
+    for (const row of result.recordset) {
+      const productId = normalizeId(row.RawId);
 
-        return [
-          productId,
-          {
-            productId,
-            procedencia: normalizeId(row.Procedencia),
-          },
-        ] as const;
-      })
-      .filter((entry): entry is readonly [string, { productId: string; procedencia: string }] =>
-        Boolean(entry),
-      ),
-  );
+      if (!productId) {
+        continue;
+      }
+
+      map.set(productId, {
+        productId,
+        procedencia: normalizeId(row.Procedencia),
+      });
+    }
+  }
+
+  return map;
 }
 
 export async function listAdminArticleBrandOptions() {
@@ -365,21 +373,23 @@ export async function saveAdminArticleEdits(input: {
     );
 
     if (overrideIds.length > 0) {
-      const overrideRequest = createRequest(transaction);
+      for (const chunk of chunkValues(overrideIds, SQL_IN_PARAMETER_CHUNK_SIZE)) {
+        const overrideRequest = createRequest(transaction);
 
-      overrideIds.forEach((overrideId, index) => {
-        overrideRequest.input(`overrideId${index}`, overrideId);
-      });
+        chunk.forEach((overrideId, index) => {
+          overrideRequest.input(`overrideId${index}`, overrideId);
+        });
 
-      await overrideRequest.query(`
-        IF OBJECT_ID('${PRODUCT_OVERRIDE_TABLE}', 'U') IS NOT NULL
-        BEGIN
-          DELETE FROM ${PRODUCT_OVERRIDE_TABLE}
-          WHERE IDARTICULO IN (
-            ${overrideIds.map((_, index) => `@overrideId${index}`).join(", ")}
-          );
-        END
-      `);
+        await overrideRequest.query(`
+          IF OBJECT_ID('${PRODUCT_OVERRIDE_TABLE}', 'U') IS NOT NULL
+          BEGIN
+            DELETE FROM ${PRODUCT_OVERRIDE_TABLE}
+            WHERE IDARTICULO IN (
+              ${chunk.map((_, index) => `@overrideId${index}`).join(", ")}
+            );
+          END
+        `);
+      }
     }
 
     await transaction.commit();
