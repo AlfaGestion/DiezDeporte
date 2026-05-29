@@ -24,3 +24,4 @@ scripts/logs/
 .env.local
 .next/
 node_modules/
+.vscode/settings.json
