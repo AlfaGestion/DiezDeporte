@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   buildImageProxyUrl,
@@ -363,6 +363,7 @@ export function Storefront({
   const [webImageOverrides, setWebImageOverrides] = useState<
     Record<string, WebImageOverride | null>
   >({});
+  const [backgroundPrefetchReady, setBackgroundPrefetchReady] = useState(false);
   const pendingWebImageSearchesRef = useRef(new Set<string>());
   const latestCatalogRequestRef = useRef(0);
 
@@ -451,6 +452,44 @@ export function Storefront({
   }, [cart.length]);
 
   useEffect(() => {
+    let cancelled = false;
+    let idleId: number | null = null;
+    const timeoutId = window.setTimeout(() => {
+      if ("requestIdleCallback" in window) {
+        idleId = (
+          window as Window & {
+            requestIdleCallback: (
+              callback: IdleRequestCallback,
+              options?: IdleRequestOptions,
+            ) => number;
+          }
+        ).requestIdleCallback(() => {
+          if (!cancelled) {
+            setBackgroundPrefetchReady(true);
+          }
+        }, { timeout: 1600 });
+        return;
+      }
+
+      if (!cancelled) {
+        setBackgroundPrefetchReady(true);
+      }
+    }, 900);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+      if (idleId !== null && "cancelIdleCallback" in window) {
+        (
+          window as Window & {
+            cancelIdleCallback: (handle: number) => void;
+          }
+        ).cancelIdleCallback(idleId);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     const shouldLockUi =
       postalCodePromptOpen ||
       mobileCartOpen ||
@@ -498,32 +537,53 @@ export function Storefront({
     selectedProduct,
   ]);
 
-  const resolvedInitialProducts = initialProducts.map(resolveProductImage);
-  const resolvedCatalogProducts = catalogProducts.map(resolveProductImage);
-  const filterOptionGroups = buildProductGroups(
-    Array.from(
+  const resolvedInitialProducts = useMemo(
+    () => initialProducts.map(resolveProductImage),
+    [initialProducts, webImageOverrides],
+  );
+  const resolvedCatalogProducts = useMemo(
+    () => catalogProducts.map(resolveProductImage),
+    [catalogProducts, webImageOverrides],
+  );
+  const filterOptionGroups = useMemo(
+    () =>
+      buildProductGroups(
+        Array.from(
+          new Map(
+            [...resolvedInitialProducts, ...resolvedCatalogProducts].map((product) => [
+              product.id,
+              product,
+            ]),
+          ).values(),
+        ),
+      ),
+    [resolvedCatalogProducts, resolvedInitialProducts],
+  );
+  const productGroups = useMemo(
+    () => buildProductGroups(resolvedCatalogProducts),
+    [resolvedCatalogProducts],
+  );
+  const groupedParentCodeByProductId = useMemo(
+    () =>
       new Map(
-        [...resolvedInitialProducts, ...resolvedCatalogProducts].map((product) => [
-          product.id,
-          product,
-        ]),
-      ).values(),
-    ),
+        filterOptionGroups.flatMap((group) =>
+          group.members.map((product) => [product.id, group.parentCode] as const),
+        ),
+      ),
+    [filterOptionGroups],
   );
-  const productGroups = buildProductGroups(resolvedCatalogProducts);
-  const groupedParentCodeByProductId = new Map(
-    filterOptionGroups.flatMap((group) =>
-      group.members.map((product) => [product.id, group.parentCode] as const),
-    ),
-  );
-  const categories = Array.from(
-    new Set(
-      filterOptionGroups
-        .flatMap((group) => group.members.map((product) => product.category))
-        .filter(Boolean),
-    ),
-  ).sort((left, right) =>
-    left.localeCompare(right, "es", { sensitivity: "base" }),
+  const categories = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          filterOptionGroups
+            .flatMap((group) => group.members.map((product) => product.category))
+            .filter(Boolean),
+        ),
+      ).sort((left, right) =>
+        left.localeCompare(right, "es", { sensitivity: "base" }),
+      ),
+    [filterOptionGroups],
   );
 
   const prices = productGroups.map((group) => group.catalogProduct.price);
@@ -545,40 +605,47 @@ export function Storefront({
     setSelectedMaxPrice(maxPrice);
   }, [minPrice, maxPrice]);
 
-  const normalizedBrandImages = brandImages.slice(0, 6).map((brand, index) => {
-    const label =
-      brand.label ||
-      ["Puma", "Reebok", "Topper", "Salomon", "Montagne", "Merrell"][index] ||
-      brand.alt;
-    return {
-      ...brand,
-      label,
-      aliases: brand.aliases?.length ? brand.aliases : [label.toUpperCase()],
-    };
-  });
-  const brandOptions = [
-    ...normalizedBrandImages.filter((brand) => Boolean(brand.label)),
-    ...Array.from(
-      new Set(
-        filterOptionGroups
-          .map((group) => group.catalogProduct.brand.trim())
-          .filter(Boolean),
-      ),
-    )
-      .filter(
-        (label) =>
-          !normalizedBrandImages.some(
-            (brand) =>
-              normalizeFilterValue(brand.label) === normalizeFilterValue(label),
-          ),
+  const normalizedBrandImages = useMemo(
+    () =>
+      brandImages.slice(0, 6).map((brand, index) => {
+        const label =
+          brand.label ||
+          ["Puma", "Reebok", "Topper", "Salomon", "Montagne", "Merrell"][index] ||
+          brand.alt;
+        return {
+          ...brand,
+          label,
+          aliases: brand.aliases?.length ? brand.aliases : [label.toUpperCase()],
+        };
+      }),
+    [brandImages],
+  );
+  const brandOptions = useMemo(
+    () => [
+      ...normalizedBrandImages.filter((brand) => Boolean(brand.label)),
+      ...Array.from(
+        new Set(
+          filterOptionGroups
+            .map((group) => group.catalogProduct.brand.trim())
+            .filter(Boolean),
+        ),
       )
-      .map((label) => ({
-        src: "",
-        alt: label,
-        label,
-        aliases: [label.toUpperCase()],
-      })),
-  ];
+        .filter(
+          (label) =>
+            !normalizedBrandImages.some(
+              (brand) =>
+                normalizeFilterValue(brand.label) === normalizeFilterValue(label),
+            ),
+        )
+        .map((label) => ({
+          src: "",
+          alt: label,
+          label,
+          aliases: [label.toUpperCase()],
+        })),
+    ],
+    [filterOptionGroups, normalizedBrandImages],
+  );
   const activeBrand =
     selectedBrand === "all"
       ? null
@@ -604,88 +671,103 @@ export function Storefront({
   const hasServerFilters = Boolean(
     search.trim() || selectedCategory !== "all" || selectedBrand !== "all",
   );
-  const filteredProductGroups = productGroups
-    .filter((group) => {
-      const matchesSearch =
-        normalizedSearch === "" ||
-        group.members.some((product) => {
-          const normalizedDescription = normalizeFilterValue(
-            product.description,
+  const filteredProductGroups = useMemo(
+    () =>
+      productGroups
+        .filter((group) => {
+          const matchesSearch =
+            normalizedSearch === "" ||
+            group.members.some((product) => {
+              const normalizedDescription = normalizeFilterValue(
+                product.description,
+              );
+              const normalizedCode = normalizeFilterValue(product.code);
+              const normalizedBrand = normalizeFilterValue(product.brand);
+              const normalizedCategory = normalizeFilterValue(product.category);
+
+              return (
+                normalizedDescription.includes(normalizedSearch) ||
+                normalizedCode.includes(normalizedSearch) ||
+                normalizedBrand.includes(normalizedSearch) ||
+                normalizedCategory.includes(normalizedSearch)
+              );
+            });
+
+          const matchesCategory =
+            selectedCategory === "all" ||
+            group.members.some(
+              (product) =>
+                normalizeFilterValue(product.category) === normalizedSelectedCategory,
+            );
+
+          const matchesAudience = group.members.some((product) =>
+            matchesAudienceFilter(
+              normalizeFilterValue(product.description),
+              selectedAudience,
+            ),
           );
-          const normalizedCode = normalizeFilterValue(product.code);
-          const normalizedBrand = normalizeFilterValue(product.brand);
-          const normalizedCategory = normalizeFilterValue(product.category);
+          const matchesBrand = group.members.some((product) =>
+            matchesBrandFilter(
+              normalizeFilterValue(product.description),
+              normalizeFilterValue(product.code),
+              normalizeFilterValue(product.brand),
+              activeBrand?.aliases || [],
+            ),
+          );
+          const matchesPrice =
+            group.catalogProduct.price >= effectiveMinPrice &&
+            group.catalogProduct.price <= effectiveMaxPrice;
+
+          if (
+            !matchesSearch ||
+            !matchesCategory ||
+            !matchesAudience ||
+            !matchesBrand ||
+            !matchesPrice
+          ) {
+            return false;
+          }
+
+          if (settings.showOutOfStock) {
+            return true;
+          }
+
+          return group.groupStock > 0;
+        })
+        .sort((left, right) => {
+          const leftProduct = left.catalogProduct;
+          const rightProduct = right.catalogProduct;
+
+          if (sortBy === "name-asc") {
+            return leftProduct.description.localeCompare(rightProduct.description);
+          }
+
+          if (sortBy === "price-asc") {
+            return leftProduct.price - rightProduct.price;
+          }
+
+          if (sortBy === "price-desc") {
+            return rightProduct.price - leftProduct.price;
+          }
 
           return (
-            normalizedDescription.includes(normalizedSearch) ||
-            normalizedCode.includes(normalizedSearch) ||
-            normalizedBrand.includes(normalizedSearch) ||
-            normalizedCategory.includes(normalizedSearch)
+            right.groupStock - left.groupStock ||
+            leftProduct.description.localeCompare(rightProduct.description)
           );
-        });
-
-      const matchesCategory =
-        selectedCategory === "all" ||
-        group.members.some(
-          (product) =>
-            normalizeFilterValue(product.category) === normalizedSelectedCategory,
-        );
-
-      const matchesAudience = group.members.some((product) =>
-        matchesAudienceFilter(
-          normalizeFilterValue(product.description),
-          selectedAudience,
-        ),
-      );
-      const matchesBrand = group.members.some((product) =>
-        matchesBrandFilter(
-          normalizeFilterValue(product.description),
-          normalizeFilterValue(product.code),
-          normalizeFilterValue(product.brand),
-          activeBrand?.aliases || [],
-        ),
-      );
-      const matchesPrice =
-        group.catalogProduct.price >= effectiveMinPrice &&
-        group.catalogProduct.price <= effectiveMaxPrice;
-
-      if (
-        !matchesSearch ||
-        !matchesCategory ||
-        !matchesAudience ||
-        !matchesBrand ||
-        !matchesPrice
-      ) {
-        return false;
-      }
-
-      if (settings.showOutOfStock) {
-        return true;
-      }
-
-      return group.groupStock > 0;
-    })
-    .sort((left, right) => {
-      const leftProduct = left.catalogProduct;
-      const rightProduct = right.catalogProduct;
-
-      if (sortBy === "name-asc") {
-        return leftProduct.description.localeCompare(rightProduct.description);
-      }
-
-      if (sortBy === "price-asc") {
-        return leftProduct.price - rightProduct.price;
-      }
-
-      if (sortBy === "price-desc") {
-        return rightProduct.price - leftProduct.price;
-      }
-
-      return (
-        right.groupStock - left.groupStock ||
-        leftProduct.description.localeCompare(rightProduct.description)
-      );
-    });
+        }),
+    [
+      activeBrand?.aliases,
+      effectiveMaxPrice,
+      effectiveMinPrice,
+      normalizedSearch,
+      normalizedSelectedCategory,
+      productGroups,
+      selectedAudience,
+      selectedCategory,
+      settings.showOutOfStock,
+      sortBy,
+    ],
+  );
   const totalCatalogPages = Math.max(
     1,
     Math.ceil(filteredProductGroups.length / PRODUCTS_PER_PAGE),
@@ -938,6 +1020,10 @@ export function Storefront({
   ]);
 
   useEffect(() => {
+    if (!backgroundPrefetchReady) {
+      return;
+    }
+
     const candidates = filteredProductGroups
       .map((group) => group.catalogProduct)
       .filter(shouldAttemptWebImageSearch)
@@ -962,7 +1048,12 @@ export function Storefront({
     uniqueCandidates.forEach((product) => {
       void fetchWebImageForProduct(product);
     });
-  }, [filteredProductGroups, selectedDetailProduct, selectedProductGroup]);
+  }, [
+    backgroundPrefetchReady,
+    filteredProductGroups,
+    selectedDetailProduct,
+    selectedProductGroup,
+  ]);
 
   useEffect(() => {
     if (!hasServerFilters) {
