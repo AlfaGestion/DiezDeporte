@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { createAdminUserAction, loginAdminAction } from "@/app/admin/actions";
 import { AdminThemeToggle } from "@/components/admin-theme-toggle";
+import { PasswordField } from "@/components/password-field";
 import {
   ADMIN_SESSION_COOKIE,
   getAdminSessionUser,
@@ -142,29 +143,25 @@ export default async function AdminLoginPage({
                     <input name="username" required />
                   </label>
 
-                  <label className="field">
-                    <span>Clave</span>
-                    <input
-                      name="password"
-                      type="password"
-                      required
-                      minLength={8}
-                      pattern={ADMIN_PASSWORD_PATTERN}
-                      title={ADMIN_PASSWORD_POLICY_HINT}
-                    />
-                  </label>
+                  <PasswordField
+                    label="Clave"
+                    name="password"
+                    required
+                    minLength={8}
+                    pattern={ADMIN_PASSWORD_PATTERN}
+                    title={ADMIN_PASSWORD_POLICY_HINT}
+                    autoComplete="new-password"
+                  />
 
-                  <label className="field">
-                    <span>Confirmar clave</span>
-                    <input
-                      name="passwordConfirm"
-                      type="password"
-                      required
-                      minLength={8}
-                      pattern={ADMIN_PASSWORD_PATTERN}
-                      title={ADMIN_PASSWORD_POLICY_HINT}
-                    />
-                  </label>
+                  <PasswordField
+                    label="Confirmar clave"
+                    name="passwordConfirm"
+                    required
+                    minLength={8}
+                    pattern={ADMIN_PASSWORD_PATTERN}
+                    title={ADMIN_PASSWORD_POLICY_HINT}
+                    autoComplete="new-password"
+                  />
 
                   <div className="message">
                     La clave se guarda hasheada y debe cumplir:{" "}
@@ -183,10 +180,12 @@ export default async function AdminLoginPage({
                   <input name="username" required />
                 </label>
 
-                <label className="field">
-                  <span>Clave</span>
-                  <input name="password" type="password" required />
-                </label>
+                <PasswordField
+                  label="Clave"
+                  name="password"
+                  required
+                  autoComplete="current-password"
+                />
 
                 <button type="submit" className="submit-order-button">
                   Entrar al panel

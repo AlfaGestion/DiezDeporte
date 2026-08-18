@@ -5753,6 +5753,46 @@ html[data-theme="dark"] .admin-header-actions .submit-order-button {
   min-height: 52px;
 }
 
+.password-field-control {
+  position: relative;
+  display: flex;
+}
+
+.password-field-control input {
+  padding-right: 2.75rem;
+}
+
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 0.6rem;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--admin-field-label);
+  cursor: pointer;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease;
+}
+
+.password-toggle:hover {
+  background: color-mix(in srgb, var(--admin-input-line) 30%, transparent);
+  color: var(--admin-table-cell-text);
+}
+
+.password-toggle svg {
+  width: 18px;
+  height: 18px;
+}
+
 .admin-login-panel .submit-order-button {
   width: 100%;
   justify-content: center;
