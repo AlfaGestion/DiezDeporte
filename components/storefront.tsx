@@ -82,14 +82,6 @@ type StorefrontProps = {
   loadError?: string;
 };
 
-type WebImageOverride = {
-  imageUrl: string;
-  imageMode: "illustrative";
-  imageNote: string | null;
-  imageSourceUrl: string | null;
-  imageGalleryUrls?: string[];
-};
-
 type ProductGroup = {
   parentCode: string;
   parentProduct: Product | null;
@@ -360,11 +352,6 @@ export function Storefront({
   const [catalogPreviewImageIndexes, setCatalogPreviewImageIndexes] = useState<
     Record<string, number>
   >({});
-  const [webImageOverrides, setWebImageOverrides] = useState<
-    Record<string, WebImageOverride | null>
-  >({});
-  const [backgroundPrefetchReady, setBackgroundPrefetchReady] = useState(false);
-  const pendingWebImageSearchesRef = useRef(new Set<string>());
   const latestCatalogRequestRef = useRef(0);
 
   useEffect(() => {
@@ -452,44 +439,6 @@ export function Storefront({
   }, [cart.length]);
 
   useEffect(() => {
-    let cancelled = false;
-    let idleId: number | null = null;
-    const timeoutId = window.setTimeout(() => {
-      if ("requestIdleCallback" in window) {
-        idleId = (
-          window as Window & {
-            requestIdleCallback: (
-              callback: IdleRequestCallback,
-              options?: IdleRequestOptions,
-            ) => number;
-          }
-        ).requestIdleCallback(() => {
-          if (!cancelled) {
-            setBackgroundPrefetchReady(true);
-          }
-        }, { timeout: 1600 });
-        return;
-      }
-
-      if (!cancelled) {
-        setBackgroundPrefetchReady(true);
-      }
-    }, 900);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeoutId);
-      if (idleId !== null && "cancelIdleCallback" in window) {
-        (
-          window as Window & {
-            cancelIdleCallback: (handle: number) => void;
-          }
-        ).cancelIdleCallback(idleId);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
     const shouldLockUi =
       postalCodePromptOpen ||
       mobileCartOpen ||
@@ -537,14 +486,8 @@ export function Storefront({
     selectedProduct,
   ]);
 
-  const resolvedInitialProducts = useMemo(
-    () => initialProducts.map(resolveProductImage),
-    [initialProducts, webImageOverrides],
-  );
-  const resolvedCatalogProducts = useMemo(
-    () => catalogProducts.map(resolveProductImage),
-    [catalogProducts, webImageOverrides],
-  );
+  const resolvedInitialProducts = initialProducts;
+  const resolvedCatalogProducts = catalogProducts;
   const filterOptionGroups = useMemo(
     () =>
       buildProductGroups(
@@ -1020,42 +963,6 @@ export function Storefront({
   ]);
 
   useEffect(() => {
-    if (!backgroundPrefetchReady) {
-      return;
-    }
-
-    const candidates = filteredProductGroups
-      .map((group) => group.catalogProduct)
-      .filter(shouldAttemptWebImageSearch)
-      .slice(0, 12);
-
-    if (selectedDetailProduct && shouldAttemptWebImageSearch(selectedDetailProduct)) {
-      candidates.unshift(selectedDetailProduct);
-    }
-
-    if (selectedProductGroup) {
-      candidates.push(
-        ...selectedProductGroup.children
-          .filter(shouldAttemptWebImageSearch)
-          .slice(0, 8),
-      );
-    }
-
-    const uniqueCandidates = Array.from(
-      new Map(candidates.map((product) => [product.id, product])).values(),
-    );
-
-    uniqueCandidates.forEach((product) => {
-      void fetchWebImageForProduct(product);
-    });
-  }, [
-    backgroundPrefetchReady,
-    filteredProductGroups,
-    selectedDetailProduct,
-    selectedProductGroup,
-  ]);
-
-  useEffect(() => {
     if (!hasServerFilters) {
       latestCatalogRequestRef.current += 1;
       setCatalogProducts(initialProducts);
@@ -1225,73 +1132,6 @@ export function Storefront({
   useEffect(() => {
     setSelectedDetailImageUrl(selectedDetailGallery[0] || null);
   }, [selectedDetailProduct?.id, selectedDetailGallery[0]]);
-
-  function resolveProductImage(product: Product): Product {
-    const override = webImageOverrides[product.id];
-    if (!override) {
-      return product;
-    }
-
-    return {
-      ...product,
-      imageUrl: override.imageUrl,
-      imageGalleryUrls:
-        override.imageGalleryUrls?.length
-          ? override.imageGalleryUrls
-          : [override.imageUrl],
-      imageMode: override.imageMode,
-      imageNote: override.imageNote,
-      imageSourceUrl: override.imageSourceUrl,
-    };
-  }
-
-  async function fetchWebImageForProduct(product: Product) {
-    if (!shouldAttemptWebImageSearch(product)) return;
-    if (Object.prototype.hasOwnProperty.call(webImageOverrides, product.id))
-      return;
-    if (pendingWebImageSearchesRef.current.has(product.id)) return;
-
-    pendingWebImageSearchesRef.current.add(product.id);
-
-    try {
-      const response = await fetch(
-        `/api/product-image-search?code=${encodeURIComponent(product.code)}&description=${encodeURIComponent(product.description)}&currentImageUrl=${encodeURIComponent(product.imageUrl || "")}`,
-      );
-
-      if (!response.ok) {
-        throw new Error("No se pudo buscar la imagen web.");
-      }
-
-      const result = (await response.json()) as {
-        result?: WebImageOverride | null;
-      };
-
-      setWebImageOverrides((current) => ({
-        ...current,
-        [product.id]: result.result ?? null,
-      }));
-    } catch {
-      setWebImageOverrides((current) => ({
-        ...current,
-        [product.id]: null,
-      }));
-    } finally {
-      pendingWebImageSearchesRef.current.delete(product.id);
-    }
-  }
-
-  function shouldAttemptWebImageSearch(product: Product) {
-    if (product.imageMode === "none") {
-      return true;
-    }
-
-    return Boolean(
-      product.imageUrl &&
-      /https?:\/\/diezdeportes\.odoo\.com\/web\/image\/product\.template\//i.test(
-        product.imageUrl,
-      ),
-    );
-  }
 
   function applyAudienceFilter(nextAudience: AudienceFilter) {
     setSelectedAudience((current) =>
