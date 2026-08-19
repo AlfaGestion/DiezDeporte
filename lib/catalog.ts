@@ -51,6 +51,7 @@ type ProductRecord = {
 };
 
 const SQL_IN_PARAMETER_CHUNK_SIZE = 1800;
+const DESCENDANT_CHUNK_SIZE = 400;
 
 export type AdminProductImageEntry = {
   product: Product;
@@ -72,6 +73,9 @@ export type AdminProductSearchPage = {
 declare global {
   var __diezDeportesProductImageGalleryCache:
     | Map<string, string[]>
+    | undefined;
+  var __diezDeportesListProductsCache:
+    | { at: number; promise: Promise<Product[]> }
     | undefined;
 }
 
@@ -363,71 +367,72 @@ async function fetchStoreDescendantProductRecords(
   }
 
   const pool = await getConnection();
-  const records: ProductRecord[] = [];
 
-  for (const chunk of chunkValues(requestedIds, 40)) {
-    const request = createRequest(pool);
-    setInput(request, "depositId", settings.stockDepositId || null);
+  const chunkResults = await Promise.all(
+    chunkValues(requestedIds, DESCENDANT_CHUNK_SIZE).map(async (chunk) => {
+      const request = createRequest(pool);
+      setInput(request, "depositId", settings.stockDepositId || null);
 
-    const procedenciaPlaceholders = chunk.map((_, index) => `@seedId${index}`);
-    const prefixConditions = chunk.map((_, index) => `a.IDARTICULO LIKE @seedPrefix${index}`);
+      const procedenciaPlaceholders = chunk.map((_, index) => `@seedId${index}`);
+      const prefixConditions = chunk.map((_, index) => `a.IDARTICULO LIKE @seedPrefix${index}`);
 
-    chunk.forEach((seedId, index) => {
-      setInput(request, `seedId${index}`, seedId);
-      setInput(request, `seedPrefix${index}`, `${seedId}|%`);
-    });
+      chunk.forEach((seedId, index) => {
+        setInput(request, `seedId${index}`, seedId);
+        setInput(request, `seedPrefix${index}`, `${seedId}|%`);
+      });
 
-    const result = await request.query<ProductRecord>(`
-      WITH StockActual AS (
+      const result = await request.query<ProductRecord>(`
+        WITH StockActual AS (
+          SELECT
+            ISNULL(IDArticulo, '') AS IDArticulo,
+            SUM(ISNULL(CantidadUD, 0)) AS StockActual
+          FROM dbo.V_MV_Stock WITH (NOLOCK)
+          WHERE (Anulado = 0 OR Anulado IS NULL)
+            AND (@depositId IS NULL OR LTRIM(RTRIM(ISNULL(IdDeposito, ''))) = @depositId)
+          GROUP BY ISNULL(IDArticulo, '')
+        )
         SELECT
-          ISNULL(IDArticulo, '') AS IDArticulo,
-          SUM(ISNULL(CantidadUD, 0)) AS StockActual
-        FROM dbo.V_MV_Stock WITH (NOLOCK)
-        WHERE (Anulado = 0 OR Anulado IS NULL)
-          AND (@depositId IS NULL OR LTRIM(RTRIM(ISNULL(IdDeposito, ''))) = @depositId)
-        GROUP BY ISNULL(IDArticulo, '')
-      )
-      SELECT
-        a.IDARTICULO,
-        a.DESCRIPCION,
-        a.Procedencia,
-        CAST(ISNULL(a.${settings.priceColumn}, 0) AS float) AS RawPrice,
-        CAST(ISNULL(a.COSTO, 0) AS float) AS COSTO,
-        CAST(ISNULL(s.StockActual, 0) AS float) AS StockActual,
-        CAST(ISNULL(a.TasaIVA, ${settings.defaultTaxRate}) AS float) AS TasaIVA,
-        a.Moneda,
-        a.IDUNIDAD,
-        a.IdFamilia,
-        a.IDTIPO,
-        a.IDRUBRO,
-        a.TalleDefault,
-        a.ColorDefault,
-        a.Presentacion,
-        a.CUENTAPROVEEDOR,
-        a.CODIGOBARRA,
-        a.RutaImagen,
-        a.URL1,
-        tipo.Descripcion AS BrandDescription,
-        rubro.Descripcion AS CategoryDescription
-      FROM dbo.V_MA_ARTICULOS a WITH (NOLOCK)
-      LEFT JOIN StockActual s
-        ON s.IDArticulo = ISNULL(a.IDARTICULO, '')
-      LEFT JOIN dbo.V_TA_TipoArticulo tipo WITH (NOLOCK)
-        ON LTRIM(RTRIM(tipo.IdTipo)) = LTRIM(RTRIM(a.IDTIPO))
-      LEFT JOIN dbo.V_TA_Rubros rubro WITH (NOLOCK)
-        ON LTRIM(RTRIM(rubro.IdRubro)) = LTRIM(RTRIM(a.IDRUBRO))
-      WHERE ISNULL(a.SUSPENDIDO, 0) = 0
-        AND ISNULL(a.SuspendidoV, 0) = 0
-        AND (
-          ISNULL(a.Procedencia, '') IN (${procedenciaPlaceholders.join(", ")})
-          OR ${prefixConditions.join("\n          OR ")}
-        );
-    `);
+          a.IDARTICULO,
+          a.DESCRIPCION,
+          a.Procedencia,
+          CAST(ISNULL(a.${settings.priceColumn}, 0) AS float) AS RawPrice,
+          CAST(ISNULL(a.COSTO, 0) AS float) AS COSTO,
+          CAST(ISNULL(s.StockActual, 0) AS float) AS StockActual,
+          CAST(ISNULL(a.TasaIVA, ${settings.defaultTaxRate}) AS float) AS TasaIVA,
+          a.Moneda,
+          a.IDUNIDAD,
+          a.IdFamilia,
+          a.IDTIPO,
+          a.IDRUBRO,
+          a.TalleDefault,
+          a.ColorDefault,
+          a.Presentacion,
+          a.CUENTAPROVEEDOR,
+          a.CODIGOBARRA,
+          a.RutaImagen,
+          a.URL1,
+          tipo.Descripcion AS BrandDescription,
+          rubro.Descripcion AS CategoryDescription
+        FROM dbo.V_MA_ARTICULOS a WITH (NOLOCK)
+        LEFT JOIN StockActual s
+          ON s.IDArticulo = ISNULL(a.IDARTICULO, '')
+        LEFT JOIN dbo.V_TA_TipoArticulo tipo WITH (NOLOCK)
+          ON LTRIM(RTRIM(tipo.IdTipo)) = LTRIM(RTRIM(a.IDTIPO))
+        LEFT JOIN dbo.V_TA_Rubros rubro WITH (NOLOCK)
+          ON LTRIM(RTRIM(rubro.IdRubro)) = LTRIM(RTRIM(a.IDRUBRO))
+        WHERE ISNULL(a.SUSPENDIDO, 0) = 0
+          AND ISNULL(a.SuspendidoV, 0) = 0
+          AND (
+            ISNULL(a.Procedencia, '') IN (${procedenciaPlaceholders.join(", ")})
+            OR ${prefixConditions.join("\n          OR ")}
+          );
+      `);
 
-    records.push(...result.recordset);
-  }
+      return result.recordset;
+    }),
+  );
 
-  return records;
+  return chunkResults.flat();
 }
 
 async function expandStoreProductRecords(
@@ -470,11 +475,38 @@ async function expandStoreProductRecords(
   return Array.from(recordById.values());
 }
 
-export async function listProducts() {
+const LIST_PRODUCTS_CACHE_TTL_MS = 45_000;
+
+async function computeListProducts() {
   const { settings, records } = await fetchPublishedStoreProductRecords();
   const expandedRecords = await expandStoreProductRecords(records, settings);
   const entries = await buildAdminProductImageEntries(expandedRecords, settings);
   return entries.map((entry) => entry.product);
+}
+
+export function invalidateListProductsCache() {
+  global.__diezDeportesListProductsCache = undefined;
+}
+
+export async function listProducts() {
+  const cached = global.__diezDeportesListProductsCache;
+
+  if (cached && Date.now() - cached.at < LIST_PRODUCTS_CACHE_TTL_MS) {
+    return cached.promise;
+  }
+
+  const promise = computeListProducts();
+  global.__diezDeportesListProductsCache = { at: Date.now(), promise };
+
+  try {
+    return await promise;
+  } catch (error) {
+    if (global.__diezDeportesListProductsCache?.promise === promise) {
+      global.__diezDeportesListProductsCache = undefined;
+    }
+
+    throw error;
+  }
 }
 
 export async function getProductsByIds(
