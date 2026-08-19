@@ -432,9 +432,12 @@ export async function resolveManagedProductImageUrls(input: {
     : ["jpg", "jpeg", "png", "webp"];
   const fileIndex = await getManagedProductImageFileIndex();
   const urls: string[] = [];
+  const candidateSuffixes = ["", ...suffixes.filter((suffix) => suffix !== "")];
 
-  for (const rawSuffix of suffixes) {
-    const suffix = rawSuffix.startsWith("-") ? rawSuffix : `-${rawSuffix}`;
+  for (const rawSuffix of candidateSuffixes) {
+    const suffix = rawSuffix
+      ? (rawSuffix.startsWith("-") ? rawSuffix : `-${rawSuffix}`)
+      : "";
 
     for (const rawExtension of extensions) {
       const extension = rawExtension.replace(/^\./, "").trim().toLowerCase();
