@@ -475,7 +475,7 @@ async function expandStoreProductRecords(
   return Array.from(recordById.values());
 }
 
-const LIST_PRODUCTS_CACHE_TTL_MS = 45_000;
+const LIST_PRODUCTS_CACHE_TTL_MS = 5_000;
 
 async function computeListProducts() {
   const { settings, records } = await fetchPublishedStoreProductRecords();

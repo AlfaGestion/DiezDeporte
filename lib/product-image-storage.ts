@@ -45,7 +45,7 @@ declare global {
     | { key: string; promise: Promise<void> }
     | undefined;
   var __diezDeportesProductImageFileIndex:
-    | { key: string; promise: Promise<Set<string>> }
+    | { key: string; at: number; promise: Promise<Set<string>> }
     | undefined;
 }
 
@@ -73,6 +73,15 @@ function buildAlphabeticSequenceLabel(index: number) {
   } while (current >= 0);
 
   return label;
+}
+
+const MANAGED_PRODUCT_IMAGE_FILE_INDEX_CACHE_TTL_MS = 5_000;
+
+function normalizeManagedStorageFileName(value: string) {
+  const normalized = value.replace(/\\/g, "/");
+  const baseName = path.posix.basename(normalized);
+
+  return baseName.trim().toLowerCase();
 }
 
 function parseAlphabeticSequenceLabel(value: string) {
@@ -367,6 +376,8 @@ async function getManagedProductImageFileIndex() {
   if (
     global.__diezDeportesProductImageFileIndex &&
     global.__diezDeportesProductImageFileIndex.key === cacheKey
+    && Date.now() - global.__diezDeportesProductImageFileIndex.at <
+      MANAGED_PRODUCT_IMAGE_FILE_INDEX_CACHE_TTL_MS
   ) {
     return global.__diezDeportesProductImageFileIndex.promise;
   }
@@ -376,13 +387,14 @@ async function getManagedProductImageFileIndex() {
 
     return new Set(
       fileNames
-        .map((fileName) => fileName.trim().toLowerCase())
+        .map((fileName) => normalizeManagedStorageFileName(fileName))
         .filter(Boolean),
     );
   })();
 
   global.__diezDeportesProductImageFileIndex = {
     key: cacheKey,
+    at: Date.now(),
     promise,
   };
 
