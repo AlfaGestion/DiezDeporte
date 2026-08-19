@@ -28,7 +28,7 @@ import {
   getAdminUserErrorCode,
   updateAdminUser,
 } from "@/lib/admin-users";
-import { getAdminProductsByIds } from "@/lib/catalog";
+import { getAdminProductsByIds, invalidateListProductsCache } from "@/lib/catalog";
 import { saveAdminArticleEdits } from "@/lib/admin-product-editor";
 import { saveAdminConfig } from "@/lib/admin-config";
 import {
@@ -1117,6 +1117,7 @@ export async function saveAdminProductImagesAction(
     }
   }
 
+  invalidateListProductsCache();
   revalidatePath("/");
   revalidatePath("/admin");
 
@@ -1161,6 +1162,7 @@ export async function clearAdminProductImagesAction(
     }
   }
 
+  invalidateListProductsCache();
   revalidatePath("/");
   revalidatePath("/admin");
 
