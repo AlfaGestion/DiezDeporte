@@ -445,6 +445,8 @@ export async function resolveManagedProductImageUrls(input: {
   const fileIndex = await getManagedProductImageFileIndex();
   const urls: string[] = [];
   const candidateSuffixes = ["", ...suffixes.filter((suffix) => suffix !== "")];
+  const config = getProductImageStorageConfig();
+  const candidateNames: string[] = [];
 
   for (const rawSuffix of candidateSuffixes) {
     const suffix = rawSuffix
@@ -458,16 +460,51 @@ export async function resolveManagedProductImageUrls(input: {
       }
 
       const fileName = `${safeProductId}${suffix}.${extension}`;
-      if (!fileIndex.has(fileName.toLowerCase())) {
+      const normalizedFileName = fileName.toLowerCase();
+      if (!fileIndex.has(normalizedFileName)) {
+        candidateNames.push(normalizedFileName);
         continue;
       }
 
-      urls.push(buildManagedProductImageUrl(fileName));
+      urls.push(buildManagedProductImageUrl(normalizedFileName));
       break;
     }
   }
 
-  return urls;
+  if (candidateNames.length === 0) {
+    return urls;
+  }
+
+  if (config.type === "local") {
+    for (const fileName of candidateNames) {
+      const filePath = toManagedLocalFilePathFromFileName(fileName);
+      if (!filePath) {
+        continue;
+      }
+
+      try {
+        await fs.access(filePath);
+        urls.push(buildManagedProductImageUrl(fileName));
+      } catch {
+        // Ignore missing local files and keep checking the rest.
+      }
+    }
+
+    return urls;
+  }
+
+  return withFtpClient(async (client) => {
+    for (const fileName of candidateNames) {
+      try {
+        await client.size(buildFtpRemoteFilePath(fileName));
+        urls.push(buildManagedProductImageUrl(fileName));
+      } catch {
+        // Ignore missing FTP files and keep checking the rest.
+      }
+    }
+
+    return urls;
+  });
 }
 
 export async function ensureProductImageStorageReady() {
