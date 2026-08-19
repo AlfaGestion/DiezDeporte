@@ -38,6 +38,12 @@ Copiar `.env.example` a `.env` y completar:
 - `ODOO_SHOP_URL` si quieren tomar imagenes y logos del shop actual
 - `APP_PRODUCT_IMAGE_UPLOAD_DIRECTORY` si guardan imagenes en carpeta local/UNC, o `APP_PRODUCT_IMAGE_FTP_*` si las suben por FTP
 
+## Scripts de imagenes por FTP
+
+- `scripts/upload-product-images.bat` sube todas las imagenes validas al FTP.
+- `scripts/upload-missing-product-images.bat` sube solo las imagenes que no existen todavia en el FTP.
+- Ambos ignoran archivos que empiezan con `tmp_`.
+
 ## Correr
 
 ```bash

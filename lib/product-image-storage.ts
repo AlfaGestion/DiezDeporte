@@ -45,7 +45,7 @@ declare global {
     | { key: string; promise: Promise<void> }
     | undefined;
   var __diezDeportesProductImageFileIndex:
-    | { key: string; promise: Promise<Set<string>> }
+    | { key: string; at: number; promise: Promise<Set<string>> }
     | undefined;
 }
 
@@ -73,6 +73,15 @@ function buildAlphabeticSequenceLabel(index: number) {
   } while (current >= 0);
 
   return label;
+}
+
+const MANAGED_PRODUCT_IMAGE_FILE_INDEX_CACHE_TTL_MS = 5_000;
+
+function normalizeManagedStorageFileName(value: string) {
+  const normalized = value.replace(/\\/g, "/");
+  const baseName = path.posix.basename(normalized);
+
+  return baseName.trim().toLowerCase();
 }
 
 function parseAlphabeticSequenceLabel(value: string) {
@@ -367,6 +376,8 @@ async function getManagedProductImageFileIndex() {
   if (
     global.__diezDeportesProductImageFileIndex &&
     global.__diezDeportesProductImageFileIndex.key === cacheKey
+    && Date.now() - global.__diezDeportesProductImageFileIndex.at <
+      MANAGED_PRODUCT_IMAGE_FILE_INDEX_CACHE_TTL_MS
   ) {
     return global.__diezDeportesProductImageFileIndex.promise;
   }
@@ -376,13 +387,14 @@ async function getManagedProductImageFileIndex() {
 
     return new Set(
       fileNames
-        .map((fileName) => fileName.trim().toLowerCase())
+        .map((fileName) => normalizeManagedStorageFileName(fileName))
         .filter(Boolean),
     );
   })();
 
   global.__diezDeportesProductImageFileIndex = {
     key: cacheKey,
+    at: Date.now(),
     promise,
   };
 
@@ -432,9 +444,14 @@ export async function resolveManagedProductImageUrls(input: {
     : ["jpg", "jpeg", "png", "webp"];
   const fileIndex = await getManagedProductImageFileIndex();
   const urls: string[] = [];
+  const candidateSuffixes = ["", ...suffixes.filter((suffix) => suffix !== "")];
+  const config = getProductImageStorageConfig();
+  const candidateNames: string[] = [];
 
-  for (const rawSuffix of suffixes) {
-    const suffix = rawSuffix.startsWith("-") ? rawSuffix : `-${rawSuffix}`;
+  for (const rawSuffix of candidateSuffixes) {
+    const suffix = rawSuffix
+      ? (rawSuffix.startsWith("-") ? rawSuffix : `-${rawSuffix}`)
+      : "";
 
     for (const rawExtension of extensions) {
       const extension = rawExtension.replace(/^\./, "").trim().toLowerCase();
@@ -443,16 +460,51 @@ export async function resolveManagedProductImageUrls(input: {
       }
 
       const fileName = `${safeProductId}${suffix}.${extension}`;
-      if (!fileIndex.has(fileName.toLowerCase())) {
+      const normalizedFileName = fileName.toLowerCase();
+      if (!fileIndex.has(normalizedFileName)) {
+        candidateNames.push(normalizedFileName);
         continue;
       }
 
-      urls.push(buildManagedProductImageUrl(fileName));
+      urls.push(buildManagedProductImageUrl(normalizedFileName));
       break;
     }
   }
 
-  return urls;
+  if (candidateNames.length === 0) {
+    return urls;
+  }
+
+  if (config.type === "local") {
+    for (const fileName of candidateNames) {
+      const filePath = toManagedLocalFilePathFromFileName(fileName);
+      if (!filePath) {
+        continue;
+      }
+
+      try {
+        await fs.access(filePath);
+        urls.push(buildManagedProductImageUrl(fileName));
+      } catch {
+        // Ignore missing local files and keep checking the rest.
+      }
+    }
+
+    return urls;
+  }
+
+  return withFtpClient(async (client) => {
+    for (const fileName of candidateNames) {
+      try {
+        await client.size(buildFtpRemoteFilePath(fileName));
+        urls.push(buildManagedProductImageUrl(fileName));
+      } catch {
+        // Ignore missing FTP files and keep checking the rest.
+      }
+    }
+
+    return urls;
+  });
 }
 
 export async function ensureProductImageStorageReady() {
