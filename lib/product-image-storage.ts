@@ -45,7 +45,7 @@ declare global {
     | { key: string; promise: Promise<void> }
     | undefined;
   var __diezDeportesProductImageFileIndex:
-    | { key: string; at: number; promise: Promise<Set<string>> }
+    | { key: string; at: number; promise: Promise<Map<string, string>> }
     | undefined;
 }
 
@@ -81,7 +81,7 @@ function normalizeManagedStorageFileName(value: string) {
   const normalized = value.replace(/\\/g, "/");
   const baseName = path.posix.basename(normalized);
 
-  return baseName.trim().toLowerCase();
+  return baseName.toLowerCase();
 }
 
 function parseAlphabeticSequenceLabel(value: string) {
@@ -226,7 +226,7 @@ export function buildManagedProductImageUrl(fileName: string) {
 }
 
 function normalizeManagedFileName(value: string) {
-  const decoded = decodeURIComponent(value || "").trim();
+  const decoded = decodeURIComponent(value || "");
 
   if (!decoded || decoded === "." || decoded === "..") {
     return null;
@@ -384,12 +384,18 @@ async function getManagedProductImageFileIndex() {
 
   const promise = (async () => {
     const fileNames = await listManagedProductImageFileNames();
+    const index = new Map<string, string>();
 
-    return new Set(
-      fileNames
-        .map((fileName) => normalizeManagedStorageFileName(fileName))
-        .filter(Boolean),
-    );
+    for (const fileName of fileNames) {
+      const normalizedFileName = normalizeManagedStorageFileName(fileName);
+      if (!normalizedFileName || index.has(normalizedFileName)) {
+        continue;
+      }
+
+      index.set(normalizedFileName, path.posix.basename(fileName.replace(/\\/g, "/")));
+    }
+
+    return index;
   })();
 
   global.__diezDeportesProductImageFileIndex = {
@@ -413,7 +419,7 @@ async function getNextStoredFileIndex(productId: string) {
   const fileIndex = await getManagedProductImageFileIndex();
   let nextIndex = 0;
 
-  for (const fileName of fileIndex) {
+  for (const fileName of fileIndex.values()) {
     const storedIndex = getStoredFileSequenceIndex(fileName, productId);
 
     if (storedIndex === null) {
@@ -445,8 +451,6 @@ export async function resolveManagedProductImageUrls(input: {
   const fileIndex = await getManagedProductImageFileIndex();
   const urls: string[] = [];
   const candidateSuffixes = ["", ...suffixes.filter((suffix) => suffix !== "")];
-  const config = getProductImageStorageConfig();
-  const candidateNames: string[] = [];
 
   for (const rawSuffix of candidateSuffixes) {
     const suffix = rawSuffix
@@ -461,50 +465,20 @@ export async function resolveManagedProductImageUrls(input: {
 
       const fileName = `${safeProductId}${suffix}.${extension}`;
       const normalizedFileName = fileName.toLowerCase();
-      if (!fileIndex.has(normalizedFileName)) {
-        candidateNames.push(normalizedFileName);
+      const matchedFileName = fileIndex.get(normalizedFileName);
+      if (!matchedFileName) {
         continue;
       }
 
-      urls.push(buildManagedProductImageUrl(normalizedFileName));
+      urls.push(buildManagedProductImageUrl(matchedFileName));
       break;
     }
   }
 
-  if (candidateNames.length === 0) {
-    return urls;
-  }
-
-  if (config.type === "local") {
-    for (const fileName of candidateNames) {
-      const filePath = toManagedLocalFilePathFromFileName(fileName);
-      if (!filePath) {
-        continue;
-      }
-
-      try {
-        await fs.access(filePath);
-        urls.push(buildManagedProductImageUrl(fileName));
-      } catch {
-        // Ignore missing local files and keep checking the rest.
-      }
-    }
-
-    return urls;
-  }
-
-  return withFtpClient(async (client) => {
-    for (const fileName of candidateNames) {
-      try {
-        await client.size(buildFtpRemoteFilePath(fileName));
-        urls.push(buildManagedProductImageUrl(fileName));
-      } catch {
-        // Ignore missing FTP files and keep checking the rest.
-      }
-    }
-
-    return urls;
-  });
+  // El indice ya contiene todos los archivos disponibles. No volver a consultar
+  // el filesystem ni abrir una conexion FTP por cada articulo faltante.
+  // Esto evita cientos de accesos seriales durante la carga inicial del catalogo.
+  return urls;
 }
 
 export async function ensureProductImageStorageReady() {
@@ -560,9 +534,11 @@ export async function readManagedProductImage(fileName: string) {
   }
 
   const config = getProductImageStorageConfig();
+  const fileIndex = await getManagedProductImageFileIndex();
+  const storedFileName = fileIndex.get(normalizedFileName) || normalizedFileName;
 
   if (config.type === "local") {
-    const filePath = toManagedLocalFilePathFromFileName(normalizedFileName);
+    const filePath = toManagedLocalFilePathFromFileName(storedFileName);
     if (!filePath) {
       throw new Error("Imagen no encontrada.");
     }
@@ -570,7 +546,7 @@ export async function readManagedProductImage(fileName: string) {
     return fs.readFile(filePath);
   }
 
-  return readManagedProductImageFromFtp(normalizedFileName);
+  return readManagedProductImageFromFtp(storedFileName);
 }
 
 // Guarda la imagen ilustrativa descargada desde una URL remota
@@ -707,10 +683,19 @@ export async function deleteManagedProductImages(urls: string[]) {
   }
 
   const config = getProductImageStorageConfig();
+  const fileIndex = await getManagedProductImageFileIndex();
+  const resolvedFileNames = fileNames.map((fileName) => {
+    const normalizedFileName = normalizeManagedFileName(fileName);
+    if (!normalizedFileName) {
+      return null;
+    }
+
+    return fileIndex.get(normalizedFileName) || normalizedFileName;
+  }).filter((value): value is string => Boolean(value));
 
   if (config.type === "local") {
     await Promise.all(
-      fileNames.map(async (fileName) => {
+      resolvedFileNames.map(async (fileName) => {
         const filePath = toManagedLocalFilePathFromFileName(fileName);
         if (!filePath) {
           return;
@@ -739,7 +724,7 @@ export async function deleteManagedProductImages(urls: string[]) {
   }
 
   await withFtpClient(async (client) => {
-    for (const fileName of fileNames) {
+    for (const fileName of resolvedFileNames) {
       try {
         await client.remove(buildFtpRemoteFilePath(fileName));
       } catch (error) {

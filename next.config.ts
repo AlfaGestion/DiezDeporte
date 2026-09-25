@@ -12,6 +12,8 @@ function readAllowedDevOrigins() {
       "*.ngrok.app",
       "*.ngrok.dev",
       "*.loca.lt",
+      "www.diezdeportes.com.ar",
+      "diezdeportes.com.ar",
       ...configured,
     ]),
   );

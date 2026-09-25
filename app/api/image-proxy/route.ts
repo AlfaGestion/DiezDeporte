@@ -7,7 +7,9 @@ export const runtime = "nodejs";
 export async function GET(request: NextRequest) {
   try {
     const rawUrl = request.nextUrl.searchParams.get("url")?.trim() || "";
-    const transparent = request.nextUrl.searchParams.get("transparent") === "1";
+    const transparent = ["1", "2"].includes(
+      request.nextUrl.searchParams.get("transparent") || "",
+    );
     if (!rawUrl) {
       return NextResponse.json({ error: "Falta la URL de la imagen." }, { status: 400 });
     }

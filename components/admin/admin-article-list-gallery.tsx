@@ -13,11 +13,85 @@ function getUniqueImages(images: string[]) {
   return Array.from(new Set(images.filter(Boolean)));
 }
 
+async function getImageFingerprint(imageUrl: string) {
+  return new Promise<string | null>((resolve) => {
+    const image = new Image();
+    image.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = 16;
+        canvas.height = 16;
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        if (!context) {
+          resolve(null);
+          return;
+        }
+
+        context.drawImage(image, 0, 0, 16, 16);
+        const pixels = context.getImageData(0, 0, 16, 16).data;
+        let hash = 2166136261;
+        for (let index = 0; index < pixels.length; index += 4) {
+          hash ^= pixels[index] || 0;
+          hash = Math.imul(hash, 16777619);
+          hash ^= pixels[index + 1] || 0;
+          hash = Math.imul(hash, 16777619);
+          hash ^= pixels[index + 2] || 0;
+          hash = Math.imul(hash, 16777619);
+          hash ^= pixels[index + 3] || 0;
+          hash = Math.imul(hash, 16777619);
+        }
+        resolve(String(hash >>> 0));
+      } catch {
+        resolve(null);
+      }
+    };
+    image.onerror = () => resolve(null);
+    image.src = imageUrl;
+  });
+}
+
 export function AdminArticleListGallery(props: AdminArticleListGalleryProps) {
   const { description, code, images } = props;
-  const gallery = useMemo(() => getUniqueImages(images), [images]);
+  const sourceGallery = useMemo(() => getUniqueImages(images), [images]);
+  const [gallery, setGallery] = useState(sourceGallery);
   const [activeIndex, setActiveIndex] = useState(0);
   const activeImageUrl = gallery[activeIndex] || null;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function removeVisualDuplicates() {
+      const fingerprints = await Promise.all(
+        sourceGallery.map((imageUrl) =>
+          getImageFingerprint(
+            buildImageProxyUrl(imageUrl, { transparentBackground: true }) || imageUrl,
+          ),
+        ),
+      );
+      const seen = new Set<string>();
+      const nextGallery = sourceGallery.filter((imageUrl, index) => {
+        const fingerprint = fingerprints[index];
+        if (!fingerprint) {
+          return true;
+        }
+        if (seen.has(fingerprint)) {
+          return false;
+        }
+        seen.add(fingerprint);
+        return true;
+      });
+
+      if (!cancelled) {
+        setGallery(nextGallery);
+      }
+    }
+
+    setGallery(sourceGallery);
+    void removeVisualDuplicates();
+    return () => {
+      cancelled = true;
+    };
+  }, [sourceGallery]);
 
   useEffect(() => {
     setActiveIndex((current) => {

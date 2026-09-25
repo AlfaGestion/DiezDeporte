@@ -431,6 +431,13 @@ export function AdminSystemArticleImageEditorFrame(props: {
   );
   const imageManifest = JSON.stringify(manifestItems);
   const hasCustomImages = Boolean(entry.imageOverride?.imageGalleryUrls.length);
+  const variantPrimaryImages = (variantSummary?.variants || [])
+    .map((variant) => variant.imageGalleryUrls[0] || variant.imageUrl || "")
+    .filter(Boolean);
+  const allVariantsSharePrimaryImage =
+    Boolean(variantSummary?.variants.length)
+    && variantPrimaryImages.length === variantSummary?.variants.length
+    && new Set(variantPrimaryImages).size === 1;
   const parentCode = variantSummary?.parentCode || getParentCode(entry);
   const effectiveBrandOptions = ensureCurrentOption(
     brandOptions,
@@ -1045,14 +1052,24 @@ export function AdminSystemArticleImageEditorFrame(props: {
             </p>
           </div>
 
-          <button
-            type="button"
-            className="admin-detail-close-button"
-            aria-label="Cerrar editor"
-            onClick={handleClose}
-          >
-            X
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className={cn(adminPrimaryButtonClass, "h-10 px-4")}
+              onClick={() => void runMutation("save")}
+              disabled={isBusy}
+            >
+              {submitMode === "save" ? "Guardando..." : "Guardar"}
+            </button>
+            <button
+              type="button"
+              className="admin-detail-close-button"
+              aria-label="Cerrar editor"
+              onClick={handleClose}
+            >
+              X
+            </button>
+          </div>
         </div>
 
         <div className="admin-detail-frame overflow-hidden rounded-[18px] border border-[color:var(--admin-card-line)] bg-[color:var(--surface)]">
@@ -1524,7 +1541,7 @@ export function AdminSystemArticleImageEditorFrame(props: {
                   </div>
 
                   <button type="submit" className={adminPrimaryButtonClass} disabled={isBusy}>
-                    {submitMode === "save" ? "Guardando..." : "Guardar cambios"}
+                      {submitMode === "save" ? "Guardando..." : "Guardar"}
                   </button>
                 </div>
               </section>
@@ -1547,10 +1564,16 @@ export function AdminSystemArticleImageEditorFrame(props: {
                   ) : null}
                 </div>
 
+                {allVariantsSharePrimaryImage ? (
+                  <div className="rounded-[14px] border border-amber-300/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
+                    Todos los artículos hijos tienen la misma imagen principal.
+                  </div>
+                ) : null}
+
                 {variantDrafts.length > 0 ? (
                   <>
                     <div className="overflow-hidden rounded-[18px] border border-[color:var(--admin-card-line)]">
-                      <div className="max-h-[360px] overflow-auto">
+                      <div className="max-h-[min(68vh,720px)] overflow-auto">
                         <table className="min-w-[1040px] border-collapse text-sm">
                           <thead className="sticky top-0 bg-[color:var(--admin-pane-bg)]">
                             <tr className="border-b border-[color:var(--admin-card-line)] text-left text-xs uppercase tracking-[0.18em] text-[color:var(--admin-text)]">

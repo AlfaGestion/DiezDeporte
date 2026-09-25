@@ -95,6 +95,10 @@ function setInput(
   request.input(name, value);
 }
 
+function splitAdminFilterIds(value: string | undefined) {
+  return value ? value.split(",").filter((id) => id !== "") : [];
+}
+
 function chunkValues<T>(values: T[], size: number) {
   const chunks: T[][] = [];
 
@@ -152,7 +156,7 @@ async function mapBaseProduct(record: ProductRecord, settings: ServerSettings) {
     settings.pricesIncludeTax,
   );
   const resolvedImageUrl = resolveImageUrl(
-    record.RutaImagen?.trim() || null,
+    record.RutaImagen || null,
     null,
     settings.imageBaseUrl,
   );
@@ -168,7 +172,7 @@ async function mapBaseProduct(record: ProductRecord, settings: ServerSettings) {
     description: record.DESCRIPCION.trim(),
     brand: record.BrandDescription?.trim() || "",
     category: record.CategoryDescription?.trim() || "",
-    categoryId: record.IDRUBRO?.trim() || "",
+    categoryId: record.IDRUBRO || "",
     price: pricing.grossPrice,
     netPrice: pricing.netPrice,
     taxAmount: pricing.taxAmount,
@@ -178,7 +182,7 @@ async function mapBaseProduct(record: ProductRecord, settings: ServerSettings) {
     currency: record.Moneda?.trim() || "ARS",
     unitId: record.IDUNIDAD?.trim() || "",
     familyId: record.IdFamilia?.trim() || "",
-    typeId: record.IDTIPO?.trim() || "",
+    typeId: record.IDTIPO || "",
     defaultSize: formatSizeLabel(record.TalleDefault),
     defaultColor: record.ColorDefault?.trim() || "",
     presentation: record.Presentacion?.trim() || "",
@@ -475,7 +479,7 @@ async function expandStoreProductRecords(
   return Array.from(recordById.values());
 }
 
-const LIST_PRODUCTS_CACHE_TTL_MS = 5_000;
+const LIST_PRODUCTS_CACHE_TTL_MS = 60_000;
 
 async function computeListProducts() {
   const { settings, records } = await fetchPublishedStoreProductRecords();
@@ -766,8 +770,14 @@ export async function searchProductsForAdminPage(input: {
   const safePage = Math.max(1, Math.trunc(input.page ?? 1));
   const offset = (safePage - 1) * safeLimit;
   const normalizedQuery = input.query.trim();
-  const brandId = input.brandId || "";
-  const categoryId = input.categoryId || "";
+  const brandIds = splitAdminFilterIds(input.brandId);
+  const categoryIds = splitAdminFilterIds(input.categoryId);
+  const brandFilter = brandIds.length
+    ? `a.IDTIPO IN (${brandIds.map((_, index) => `@brandId${index}`).join(", ")})`
+    : "1 = 1";
+  const categoryFilter = categoryIds.length
+    ? `a.IDRUBRO IN (${categoryIds.map((_, index) => `@categoryId${index}`).join(", ")})`
+    : "1 = 1";
   const searchLike = normalizedQuery ? `%${normalizedQuery}%` : "";
   const searchPrefix = normalizedQuery ? `${normalizedQuery}%` : "";
   const publishedOnly = input.publishedOnly ? 1 : 0;
@@ -775,16 +785,16 @@ export async function searchProductsForAdminPage(input: {
   const countRequest = createRequest(pool);
   setInput(countRequest, "search", normalizedQuery);
   setInput(countRequest, "searchLike", searchLike);
-  setInput(countRequest, "brandId", brandId);
-  setInput(countRequest, "categoryId", categoryId);
+  brandIds.forEach((id, index) => setInput(countRequest, `brandId${index}`, id));
+  categoryIds.forEach((id, index) => setInput(countRequest, `categoryId${index}`, id));
 
   const pageRequest = createRequest(pool);
   setInput(pageRequest, "depositId", settings.stockDepositId || null);
   setInput(pageRequest, "search", normalizedQuery);
   setInput(pageRequest, "searchLike", searchLike);
   setInput(pageRequest, "searchPrefix", searchPrefix);
-  setInput(pageRequest, "brandId", brandId);
-  setInput(pageRequest, "categoryId", categoryId);
+  brandIds.forEach((id, index) => setInput(pageRequest, `brandId${index}`, id));
+  categoryIds.forEach((id, index) => setInput(pageRequest, `categoryId${index}`, id));
   setInput(pageRequest, "publishedOnly", publishedOnly);
   setInput(pageRequest, "offsetRows", offset);
   setInput(pageRequest, "fetchRows", safeLimit);
@@ -803,8 +813,8 @@ export async function searchProductsForAdminPage(input: {
         FROM dbo.V_MA_ARTICULOS a WITH (NOLOCK)
         WHERE ISNULL(a.SUSPENDIDO, 0) = 0
           AND ISNULL(a.SuspendidoV, 0) = 0
-          AND (@brandId = '' OR ISNULL(a.IDTIPO, '') = @brandId)
-          AND (@categoryId = '' OR ISNULL(a.IDRUBRO, '') = @categoryId)
+          AND (${brandFilter})
+          AND (${categoryFilter})
           AND (
             @search = ''
             OR a.IDARTICULO LIKE @searchLike
@@ -863,8 +873,8 @@ export async function searchProductsForAdminPage(input: {
           ON LTRIM(RTRIM(rubro.IdRubro)) = LTRIM(RTRIM(a.IDRUBRO))
         WHERE ISNULL(a.SUSPENDIDO, 0) = 0
           AND ISNULL(a.SuspendidoV, 0) = 0
-          AND (@brandId = '' OR ISNULL(a.IDTIPO, '') = @brandId)
-          AND (@categoryId = '' OR ISNULL(a.IDRUBRO, '') = @categoryId)
+          AND (${brandFilter})
+          AND (${categoryFilter})
           AND (
             @search = ''
             OR a.IDARTICULO LIKE @searchLike

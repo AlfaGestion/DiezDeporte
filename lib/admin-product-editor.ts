@@ -13,6 +13,7 @@ type Executor = ConnectionPool | Transaction;
 type LookupRow = {
   RawId: string | null;
   Description: string | null;
+  UsageCount: number | null;
 };
 
 type ArticleGroupingRow = {
@@ -24,6 +25,7 @@ export type AdminArticleLookupOption = {
   id: string;
   rawId: string;
   label: string;
+  usageCount: number;
 };
 
 export type AdminArticleVariantUpdate = {
@@ -88,10 +90,14 @@ function mapLookupRows(rows: LookupRow[]) {
         id,
         rawId: row.RawId || id,
         label: resolveLookupLabel(id, row.Description),
+        usageCount: Number(row.UsageCount || 0),
       } satisfies AdminArticleLookupOption;
     })
     .filter((value): value is AdminArticleLookupOption => Boolean(value))
-    .sort((left, right) => left.label.localeCompare(right.label, "es", { sensitivity: "base" }));
+    .sort((left, right) =>
+      right.usageCount - left.usageCount
+      || left.label.localeCompare(right.label, "es", { sensitivity: "base" }),
+    );
 }
 
 async function listLookupOptions(input: {
@@ -102,10 +108,16 @@ async function listLookupOptions(input: {
   const request = createRequest(connection);
   const result: IResult<LookupRow> = await request.query(`
     SELECT
-      ${input.idColumn} AS RawId,
-      Descripcion AS Description
-    FROM ${input.tableName} WITH (NOLOCK)
-    ORDER BY Descripcion ASC, ${input.idColumn} ASC;
+      lookup.${input.idColumn} AS RawId,
+      lookup.Descripcion AS Description,
+      COUNT(article.IDARTICULO) AS UsageCount
+    FROM ${input.tableName} AS lookup WITH (NOLOCK)
+    LEFT JOIN dbo.V_MA_ARTICULOS AS article WITH (NOLOCK)
+      ON article.${input.idColumn === "IdTipo" ? "IDTIPO" : "IDRUBRO"} = lookup.${input.idColumn}
+      AND ISNULL(article.SUSPENDIDO, 0) = 0
+      AND ISNULL(article.SuspendidoV, 0) = 0
+    GROUP BY lookup.${input.idColumn}, lookup.Descripcion
+    ORDER BY COUNT(article.IDARTICULO) DESC, lookup.Descripcion ASC, lookup.${input.idColumn} ASC;
   `);
 
   return mapLookupRows(result.recordset);

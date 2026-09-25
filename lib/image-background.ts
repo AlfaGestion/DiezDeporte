@@ -104,28 +104,21 @@ function estimateBorderBackgroundColor(
   forEachBorderBandPixel(width, height, borderThickness, (x, y) => {
     const stats = readPixelStats(data, width, channels, x, y);
     if (stats.alpha < 8) return;
-    if (stats.average < 208) return;
-    if (stats.spread > 54) return;
+    if (stats.average < 180) return;
+    if (stats.spread > 72) return;
 
     samples.push(stats);
   });
 
-  if (samples.length === 0) {
+  if (samples.length < 8) {
     return null;
   }
 
-  const totals = samples.reduce(
-    (accumulator, sample) => ({
-      red: accumulator.red + sample.red,
-      green: accumulator.green + sample.green,
-      blue: accumulator.blue + sample.blue,
-    }),
-    { red: 0, green: 0, blue: 0 },
-  );
-
-  const red = totals.red / samples.length;
-  const green = totals.green / samples.length;
-  const blue = totals.blue / samples.length;
+  // La mediana evita que un producto que toque el borde contamine el color
+  // estimado del fondo y haga fallar toda la segmentación.
+  const red = getMedian(samples.map((sample) => sample.red));
+  const green = getMedian(samples.map((sample) => sample.green));
+  const blue = getMedian(samples.map((sample) => sample.blue));
 
   return {
     red,
@@ -377,10 +370,10 @@ function isSeedBackgroundPixel(
 ) {
   return (
     stats.alpha >= 8 &&
-    stats.average >= Math.max(208, backgroundColor.average - 18) &&
-    stats.spread <= 58 &&
-    getBackgroundColorDistance(stats, backgroundColor) <= 42 &&
-    backgroundScore >= 0.78
+    stats.average >= Math.max(190, backgroundColor.average - 24) &&
+    stats.spread <= 70 &&
+    getBackgroundColorDistance(stats, backgroundColor) <= 52 &&
+    backgroundScore >= 0.72
   );
 }
 
@@ -394,10 +387,10 @@ function isConnectedBackgroundPixel(
   if (
     !(
       stats.alpha >= 8 &&
-      stats.average >= Math.max(188, backgroundColor.average - 42) &&
-      stats.spread <= 76 &&
-      getBackgroundColorDistance(stats, backgroundColor) <= 64 &&
-      backgroundScore >= 0.54
+      stats.average >= Math.max(170, backgroundColor.average - 52) &&
+      stats.spread <= 92 &&
+      getBackgroundColorDistance(stats, backgroundColor) <= 78 &&
+      backgroundScore >= 0.48
     )
   ) {
     return false;
@@ -422,9 +415,9 @@ function isConnectedBackgroundPixel(
 
   return (
     stats.alpha >= 8 &&
-    stats.average >= Math.max(188, backgroundColor.average - 42) &&
-    stats.spread <= 76 &&
-    getBackgroundColorDistance(stats, backgroundColor) <= 64
+    stats.average >= Math.max(170, backgroundColor.average - 52) &&
+    stats.spread <= 92 &&
+    getBackgroundColorDistance(stats, backgroundColor) <= 78
   );
 }
 
@@ -614,4 +607,13 @@ function removeBackgroundSpill(channel: number, backgroundChannel: number, alpha
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
+}
+
+function getMedian(values: number[]) {
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+
+  return sorted.length % 2 === 0
+    ? (sorted[middle - 1] + sorted[middle]) / 2
+    : sorted[middle];
 }

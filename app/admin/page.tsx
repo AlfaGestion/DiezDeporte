@@ -584,7 +584,21 @@ function resolveAdminLookupLabel(
     return null;
   }
 
-  return options.find((option) => option.id === selectedId)?.label || `ID ${selectedId}`;
+  const selectedIds = selectedId.split(",");
+  const labels = selectedIds.map(
+    (id) => options.find((option) => option.id === id)?.label || `ID ${id}`,
+  );
+
+  return labels.join(", ");
+}
+
+function toggleAdminFilterValue(selectedValue: string, optionId: string) {
+  const selectedIds = selectedValue ? selectedValue.split(",") : [];
+  const nextIds = selectedIds.includes(optionId)
+    ? selectedIds.filter((id) => id !== optionId)
+    : [...selectedIds, optionId];
+
+  return nextIds.join(",");
 }
 
 function AdminSystemFilterSection(props: {
@@ -596,17 +610,33 @@ function AdminSystemFilterSection(props: {
   getOptionHref: (optionId: string) => string;
 }) {
   const { title, selectedId, selectedLabel, options, allHref, getOptionHref } = props;
-  const hasSelection = Boolean(selectedId);
+  const selectedIds = selectedId ? selectedId.split(",") : [];
+  const hasSelection = selectedIds.length > 0;
+  const visibleOptions = options.slice(0, 10);
+  const remainingOptions = options.slice(10);
+
+  const renderOption = (option: { id: string; label: string }) => (
+    <Link
+      key={option.id}
+      href={getOptionHref(option.id)}
+      scroll={false}
+      className={cn("admin-filter-chip", selectedIds.includes(option.id) && "is-active")}
+      title={option.label}
+    >
+      {option.label}
+    </Link>
+  );
 
   return (
     <div className="admin-store-filter-block">
-      <details className="admin-filter-accordion" open={hasSelection || options.length <= 14}>
-        <summary className="admin-filter-accordion-summary">
+      <div className="admin-filter-accordion">
+        <div className="admin-filter-accordion-summary">
           <span className="admin-filter-accordion-title">{title}</span>
           <span className="admin-filter-accordion-trailing">
             {selectedLabel ? (
               <Link
                 href={allHref}
+                scroll={false}
                 className="admin-filter-current-chip admin-filter-current-chip-removable"
                 title={`Quitar filtro de ${title.toLowerCase()}: ${selectedLabel}`}
               >
@@ -616,26 +646,28 @@ function AdminSystemFilterSection(props: {
                 </span>
               </Link>
             ) : null}
-            <span className="admin-filter-accordion-chevron" aria-hidden="true" />
           </span>
-        </summary>
+        </div>
 
         <div className="admin-filter-chip-list">
-          <Link href={allHref} className={cn("admin-filter-chip", !hasSelection && "is-active")}>
+          <Link href={allHref} scroll={false} className={cn("admin-filter-chip", !hasSelection && "is-active")}>
             Todas
           </Link>
-          {options.map((option) => (
-            <Link
-              key={option.id}
-              href={getOptionHref(option.id)}
-              className={cn("admin-filter-chip", option.id === selectedId && "is-active")}
-              title={option.label}
-            >
-              {option.label}
-            </Link>
-          ))}
+          {visibleOptions.map(renderOption)}
         </div>
-      </details>
+
+        {remainingOptions.length > 0 ? (
+          <details className="admin-filter-more">
+            <summary className="admin-filter-more-summary">
+              <span>Ver más</span>
+              <span className="admin-filter-accordion-chevron" aria-hidden="true" />
+            </summary>
+            <div className="admin-filter-chip-list admin-filter-chip-list-expanded">
+              {remainingOptions.map(renderOption)}
+            </div>
+          </details>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -767,7 +799,13 @@ function AdminArticleListCard(props: {
         isSelectedGroup && "is-selected",
       )}
     >
-      <div className="admin-article-catalog-main">
+      <Link
+        href={editHref}
+        prefetch={true}
+        scroll={false}
+        className="admin-article-catalog-main block no-underline"
+        aria-label={`Editar articulo ${primaryEntry.product.description}`}
+      >
         <div className="admin-article-catalog-media">
           <AdminArticleListGallery
             description={primaryEntry.product.description}
@@ -892,15 +930,11 @@ function AdminArticleListCard(props: {
             </div>
           </div>
 
-          <Link
-            href={editHref}
-            scroll={false}
-            className="admin-article-catalog-action"
-          >
+          <span className="admin-article-catalog-action">
             {isPrimarySelected ? "Seguir editando" : "Editar articulo"}
-          </Link>
+          </span>
         </div>
-      </div>
+      </Link>
 
       {secondaryEntries.length > 0 ? (
         <details className="admin-article-catalog-details" open={isSelectedGroup}>
@@ -1741,8 +1775,34 @@ function SystemPane(props: {
           system_brand: activeBrandFilterId || null,
           system_category: activeCategoryFilterId || null,
           system_page: currentPage + 1,
-        })
+      })
       : null;
+  const firstPageHref = currentPage > 1
+    ? buildAdminHref({
+        view: "system",
+        system: activeSection,
+        system_tab: catalogScope,
+        system_q: productSearchQuery || null,
+        system_brand: activeBrandFilterId || null,
+        system_category: activeCategoryFilterId || null,
+        system_page: 1,
+      })
+    : null;
+  const lastPageHref = currentPage < totalPages
+    ? buildAdminHref({
+        view: "system",
+        system: activeSection,
+        system_tab: catalogScope,
+        system_q: productSearchQuery || null,
+        system_brand: activeBrandFilterId || null,
+        system_category: activeCategoryFilterId || null,
+        system_page: totalPages,
+      })
+    : null;
+  const headerCategoryOptions = categoryOptions.slice(0, 6);
+  const headerBrandOptions = brandOptions.slice(0, 6);
+  const headerCategoryRest = categoryOptions.slice(6);
+  const headerBrandRest = brandOptions.slice(6);
 
   return (
     <section className="admin-pane space-y-4">
@@ -1767,6 +1827,7 @@ function SystemPane(props: {
                   : null,
               system_page: section === activeSection ? currentPage : null,
             })}
+            scroll={false}
             className={cn(
               "inline-flex min-w-[140px] items-center justify-between rounded-[14px] px-4 py-2.5 text-sm transition",
               activeSection === section
@@ -1785,19 +1846,128 @@ function SystemPane(props: {
         <input type="hidden" name="system_tab" value={catalogScope} />
         <AdminPageHeader
           title={getAdminSystemSectionLabel(activeSection)}
-          subtitle={
-            catalogScope === "published"
-              ? "Busca y edita solo los articulos hoy visibles en la tienda."
-              : "Busca y edita todo el maestro de articulos desde un solo panel."
-          }
           searchDefaultValue={productSearchQuery}
           resultCount={totalCount}
           searchName="system_q"
           searchPlaceholder="Buscar por codigo, descripcion o EAN"
           eyebrow="Sistema"
+          sticky
+          headerExtra={
+            <div className="admin-catalog-header-tools">
+              <div className="admin-catalog-header-filter-rows">
+                <div className="admin-catalog-header-filter-row">
+                  <strong>Categorias</strong>
+                  <Link
+                    href={buildAdminHref({
+                      view: "system",
+                      system: activeSection,
+                      system_tab: catalogScope,
+                      system_q: productSearchQuery || null,
+                      system_brand: activeBrandFilterId || null,
+                    })}
+                    scroll={false}
+                    className={cn("admin-catalog-filter-chip", !activeCategoryFilterId && "is-active")}
+                  >
+                    Todas
+                  </Link>
+                  {headerCategoryOptions.map((option) => (
+                    <Link
+                      key={option.id}
+                      href={buildAdminHref({
+                        view: "system",
+                        system: activeSection,
+                        system_tab: catalogScope,
+                        system_q: productSearchQuery || null,
+                        system_brand: activeBrandFilterId || null,
+                        system_category: toggleAdminFilterValue(activeCategoryFilterId, option.id),
+                      })}
+                      scroll={false}
+                      className={cn("admin-catalog-filter-chip", activeCategoryFilterId.split(",").includes(option.id) && "is-active")}
+                    >
+                      {option.label}
+                    </Link>
+                  ))}
+                  {headerCategoryRest.length > 0 ? (
+                    <details className="admin-catalog-filter-more">
+                      <summary>…</summary>
+                      <div>
+                        {headerCategoryRest.map((option) => (
+                          <Link key={option.id} href={buildAdminHref({ view: "system", system: activeSection, system_tab: catalogScope, system_q: productSearchQuery || null, system_brand: activeBrandFilterId || null, system_category: toggleAdminFilterValue(activeCategoryFilterId, option.id) })} scroll={false}>
+                            {option.label}
+                          </Link>
+                        ))}
+                      </div>
+                    </details>
+                  ) : null}
+                </div>
+
+                <div className="admin-catalog-header-filter-row">
+                  <strong>Marcas</strong>
+                  <Link
+                    href={buildAdminHref({
+                      view: "system",
+                      system: activeSection,
+                      system_tab: catalogScope,
+                      system_q: productSearchQuery || null,
+                      system_category: activeCategoryFilterId || null,
+                    })}
+                    scroll={false}
+                    className={cn("admin-catalog-filter-chip", !activeBrandFilterId && "is-active")}
+                  >
+                    Todas
+                  </Link>
+                  {headerBrandOptions.map((option) => (
+                    <Link
+                      key={option.id}
+                      href={buildAdminHref({
+                        view: "system",
+                        system: activeSection,
+                        system_tab: catalogScope,
+                        system_q: productSearchQuery || null,
+                        system_brand: toggleAdminFilterValue(activeBrandFilterId, option.id),
+                        system_category: activeCategoryFilterId || null,
+                      })}
+                      scroll={false}
+                      className={cn("admin-catalog-filter-chip", activeBrandFilterId.split(",").includes(option.id) && "is-active")}
+                    >
+                      {option.label}
+                    </Link>
+                  ))}
+                  {headerBrandRest.length > 0 ? (
+                    <details className="admin-catalog-filter-more">
+                      <summary>…</summary>
+                      <div>
+                        {headerBrandRest.map((option) => (
+                          <Link key={option.id} href={buildAdminHref({ view: "system", system: activeSection, system_tab: catalogScope, system_q: productSearchQuery || null, system_brand: toggleAdminFilterValue(activeBrandFilterId, option.id), system_category: activeCategoryFilterId || null })} scroll={false}>
+                            {option.label}
+                          </Link>
+                        ))}
+                      </div>
+                    </details>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="admin-catalog-header-pagination" aria-label="Paginacion del catalogo">
+                {firstPageHref ? (
+                  <Link href={firstPageHref} scroll={false} className={adminSecondaryButtonClass} aria-label="Ir a la primera pagina">&lt;&lt;</Link>
+                ) : <span className={cn(adminSecondaryButtonClass, "pointer-events-none opacity-45")} aria-hidden="true">&lt;&lt;</span>}
+                {previousPageHref ? (
+                  <Link href={previousPageHref} scroll={false} className={adminSecondaryButtonClass} aria-label="Pagina anterior">&lt;</Link>
+                ) : <span className={cn(adminSecondaryButtonClass, "pointer-events-none opacity-45")} aria-hidden="true">&lt;</span>}
+                <strong>{currentPage} / {totalPages}</strong>
+                {nextPageHref ? (
+                  <Link href={nextPageHref} scroll={false} className={adminSecondaryButtonClass} aria-label="Pagina siguiente">&gt;</Link>
+                ) : <span className={cn(adminSecondaryButtonClass, "pointer-events-none opacity-45")} aria-hidden="true">&gt;</span>}
+                {lastPageHref ? (
+                  <Link href={lastPageHref} scroll={false} className={adminSecondaryButtonClass} aria-label="Ir a la ultima pagina">&gt;&gt;</Link>
+                ) : <span className={cn(adminSecondaryButtonClass, "pointer-events-none opacity-45")} aria-hidden="true">&gt;&gt;</span>}
+              </div>
+            </div>
+          }
         />
 
-        <section className="rounded-[22px] border border-[color:var(--admin-pane-line)] bg-[color:var(--admin-pane-bg)] p-2">
+        <section className="admin-system-catalog-tabs rounded-[22px] border border-[color:var(--admin-pane-line)] bg-[color:var(--admin-pane-bg)] p-2">
           <nav className="flex gap-2 overflow-x-auto" aria-label="Vistas del catalogo admin">
             {[
               {
@@ -1824,6 +1994,7 @@ function SystemPane(props: {
                     system_brand: activeBrandFilterId || null,
                     system_category: activeCategoryFilterId || null,
                   })}
+                  scroll={false}
                   className={cn(
                     "inline-flex min-w-[180px] items-center justify-between gap-3 rounded-[14px] px-4 py-2.5 text-sm transition",
                     isActive
@@ -1848,7 +2019,7 @@ function SystemPane(props: {
           </nav>
         </section>
 
-        <section className="admin-section-card admin-store-filters-panel">
+        <section style={{ display: "none" }} className="admin-system-filters admin-section-card admin-store-filters-panel">
           <div className="admin-store-filters-head">
             <div>
               <span className="admin-pane-kicker">Filtros</span>
@@ -1861,7 +2032,7 @@ function SystemPane(props: {
             </div>
 
             {hasActiveSystemFilters ? (
-              <Link href={clearFiltersHref} className={adminSecondaryButtonClass}>
+              <Link href={clearFiltersHref} scroll={false} className={adminSecondaryButtonClass}>
                 Limpiar filtros
               </Link>
             ) : null}
@@ -1871,6 +2042,7 @@ function SystemPane(props: {
             <div className="admin-store-active-filter-row">
               <Link
                 href={clearSearchHref}
+                scroll={false}
                 className="admin-filter-current-chip admin-filter-current-chip-removable"
                 title={`Quitar busqueda: ${productSearchQuery}`}
               >
@@ -1903,7 +2075,7 @@ function SystemPane(props: {
                     system_tab: catalogScope,
                     system_q: productSearchQuery || null,
                     system_brand: activeBrandFilterId || null,
-                    system_category: optionId,
+                    system_category: toggleAdminFilterValue(activeCategoryFilterId, optionId),
                   })
                 }
               />
@@ -1928,7 +2100,7 @@ function SystemPane(props: {
                     system: activeSection,
                     system_tab: catalogScope,
                     system_q: productSearchQuery || null,
-                    system_brand: optionId,
+                    system_brand: toggleAdminFilterValue(activeBrandFilterId, optionId),
                     system_category: activeCategoryFilterId || null,
                   })
                 }
@@ -1972,12 +2144,11 @@ function SystemPane(props: {
                   id: child.product.id,
                   code: child.product.code,
                   description: child.product.description,
-                  sizeLabel: child.baseProduct.defaultSize || getAdminVariantLabel(child.product),
-                  colorLabel:
-                    child.baseProduct.defaultColor || extractAdminVariantColor({
-                      childEntry: child,
-                      parentDescription: selectedGroup.displayEntry.product.description,
-                    }) || "Sin dato",
+                  // Enviar al editor los valores reales de la base. Los textos
+                  // derivados del codigo son solo visuales y no deben hacer que
+                  // una variante parezca modificada al guardar una imagen.
+                  sizeLabel: child.baseProduct.defaultSize || "",
+                  colorLabel: child.baseProduct.defaultColor || "",
                   price: child.baseProduct.price,
                   stock: child.product.stock,
                   imageUrl: child.product.imageUrl,
@@ -1989,11 +2160,11 @@ function SystemPane(props: {
         }
       />
 
-      <section className="admin-section-card">
+      <section className="admin-system-results admin-section-card">
         <div className="admin-section-heading">
           <div>
-            <span className="admin-pane-kicker">Listado</span>
-            <h3>Resultados del catalogo</h3>
+            <span className="admin-pane-kicker">Catalogo</span>
+            <h3>Articulos</h3>
           </div>
           {totalCount > 0 ? (
             <div className="text-sm text-[color:var(--admin-text)]">
@@ -2064,44 +2235,6 @@ function SystemPane(props: {
               </article>
             </div>
 
-            {totalPages > 1 ? (
-              <div className="flex flex-col gap-3 rounded-[20px] border border-[color:var(--admin-pane-line)] bg-[color:var(--admin-pane-bg)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="text-sm text-[color:var(--admin-text)]">
-                  Viendo pagina {currentPage} de {totalPages} con {formatAdminInteger(pageVisibleArticleCount)} articulo{pageVisibleArticleCount === 1 ? "" : "s"} en esta tanda.
-                </div>
-                <div className="flex items-center gap-2">
-                  {previousPageHref ? (
-                    <Link href={previousPageHref} className={adminSecondaryButtonClass}>
-                      Anterior
-                    </Link>
-                  ) : (
-                    <span
-                      className={cn(
-                        adminSecondaryButtonClass,
-                        "pointer-events-none opacity-50",
-                      )}
-                    >
-                      Anterior
-                    </span>
-                  )}
-                  {nextPageHref ? (
-                    <Link href={nextPageHref} className={adminSecondaryButtonClass}>
-                      Siguiente
-                    </Link>
-                  ) : (
-                    <span
-                      className={cn(
-                        adminSecondaryButtonClass,
-                        "pointer-events-none opacity-50",
-                      )}
-                    >
-                      Siguiente
-                    </span>
-                  )}
-                </div>
-              </div>
-            ) : null}
-
             <div className="admin-article-catalog-grid">
               {productGroups.map((group) => (
                 <AdminArticleListCard
@@ -2113,7 +2246,7 @@ function SystemPane(props: {
                   activeBrandFilterId={activeBrandFilterId}
                   activeCategoryFilterId={activeCategoryFilterId}
                   currentPage={currentPage}
-                  isSelectedGroup={selectedGroup?.parentCode === group.parentCode}
+                  isSelectedGroup={selectedEntry?.product.id === group.displayEntry.product.id}
                   selectedProductId={selectedEntry?.product.id || null}
                 />
               ))}

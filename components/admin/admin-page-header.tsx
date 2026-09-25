@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { adminInputClass, adminPanelClass, adminPrimaryButtonClass, cn } from "@/components/admin/admin-ui";
 
 export function AdminPageHeader({
@@ -8,6 +9,8 @@ export function AdminPageHeader({
   searchName,
   searchPlaceholder,
   eyebrow,
+  headerExtra,
+  sticky = false,
 }: {
   title: string;
   subtitle?: string;
@@ -16,9 +19,11 @@ export function AdminPageHeader({
   searchName?: string;
   searchPlaceholder?: string;
   eyebrow?: string;
+  headerExtra?: ReactNode;
+  sticky?: boolean;
 }) {
   return (
-    <div className={cn(adminPanelClass, "flex flex-col gap-4 px-5 py-5 lg:flex-row lg:items-center lg:justify-between")}>
+    <div className={cn(adminPanelClass, "flex flex-col gap-4 px-5 py-5 lg:flex-row lg:items-center lg:justify-between", sticky && "admin-system-page-header")}>
       <div className="space-y-1">
         <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--admin-text)]">
           {eyebrow || "Operacion"}
@@ -38,19 +43,22 @@ export function AdminPageHeader({
         ) : null}
       </div>
 
-      <div className="flex w-full flex-col gap-2 sm:flex-row lg:max-w-[560px]">
-        <div className="relative flex-1">
-          <input
-            type="search"
-            name={searchName || "q"}
-            defaultValue={searchDefaultValue || ""}
-            placeholder={searchPlaceholder || "Buscar por numero, cliente o email"}
-            className={cn(adminInputClass, "pr-4")}
-          />
+      <div className="flex w-full flex-col gap-2 lg:max-w-[700px]">
+        <div className="flex w-full flex-col gap-2 sm:flex-row">
+          <div className="relative flex-1">
+            <input
+              type="search"
+              name={searchName || "q"}
+              defaultValue={searchDefaultValue || ""}
+              placeholder={searchPlaceholder || "Buscar por numero, cliente o email"}
+              className={cn(adminInputClass, "pr-4")}
+            />
+          </div>
+          <button type="submit" className={cn(adminPrimaryButtonClass, "min-w-[108px]")}>
+            Buscar
+          </button>
         </div>
-        <button type="submit" className={cn(adminPrimaryButtonClass, "min-w-[108px]")}>
-          Buscar
-        </button>
+        {headerExtra}
       </div>
     </div>
   );

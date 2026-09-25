@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
+import type {
+  FormEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
+} from "react";
 import {
   buildImageProxyUrl,
   cartItemCount,
@@ -109,6 +114,115 @@ type GroupCartSummary = {
   quantity: number;
   total: number;
 };
+
+type CatalogSearchSuggestion = {
+  id: string;
+  label: string;
+  detail: string;
+  value: string;
+};
+
+function CatalogSearch({
+  value,
+  suggestions,
+  placeholder,
+  ariaLabel,
+  onChange,
+  onSelect,
+}: {
+  value: string;
+  suggestions: CatalogSearchSuggestion[];
+  placeholder: string;
+  ariaLabel: string;
+  onChange: (value: string) => void;
+  onSelect: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+
+  function selectSuggestion(suggestion: CatalogSearchSuggestion) {
+    onSelect(suggestion.value);
+    setOpen(false);
+    setActiveIndex(-1);
+  }
+
+  function handleKeyDown(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      setOpen(false);
+      setActiveIndex(-1);
+      return;
+    }
+
+    if (event.key === "ArrowDown" && suggestions.length > 0) {
+      event.preventDefault();
+      setOpen(true);
+      setActiveIndex((current) => (current + 1) % suggestions.length);
+      return;
+    }
+
+    if (event.key === "ArrowUp" && suggestions.length > 0) {
+      event.preventDefault();
+      setOpen(true);
+      setActiveIndex((current) =>
+        current <= 0 ? suggestions.length - 1 : current - 1,
+      );
+      return;
+    }
+
+    if (event.key === "Enter" && activeIndex >= 0) {
+      event.preventDefault();
+      selectSuggestion(suggestions[activeIndex]);
+    }
+  }
+
+  return (
+    <div className="catalog-search">
+      <input
+        className="search-input"
+        type="search"
+        value={value}
+        onChange={(event) => {
+          onChange(event.target.value);
+          setOpen(true);
+          setActiveIndex(-1);
+        }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={handleKeyDown}
+        placeholder={placeholder}
+        aria-label={ariaLabel}
+        aria-autocomplete="list"
+        aria-expanded={open && suggestions.length > 0}
+      />
+      {open && suggestions.length > 0 ? (
+        <div className="catalog-search-suggestions" role="listbox">
+          <div className="catalog-search-suggestions-title">Sugerencias</div>
+          {suggestions.map((suggestion, index) => (
+            <button
+              type="button"
+              className={[
+                "catalog-search-suggestion",
+                activeIndex === index ? "is-active" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              key={suggestion.id}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => selectSuggestion(suggestion)}
+              role="option"
+              aria-selected={activeIndex === index}
+            >
+              <span className="catalog-search-suggestion-icon">⌕</span>
+              <span className="catalog-search-suggestion-copy">
+                <strong>{suggestion.label}</strong>
+                <small>{suggestion.detail}</small>
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 async function readJsonResponse<T>(response: Response): Promise<T | null> {
   const raw = await response.text();
@@ -348,11 +462,37 @@ export function Storefront({
   const [selectedDetailImageUrl, setSelectedDetailImageUrl] = useState<string | null>(
     null,
   );
+  const [detailImageZoom, setDetailImageZoom] = useState(1);
+  const [detailImagePosition, setDetailImagePosition] = useState({ x: 0, y: 0 });
+  const [lightboxImageZoom, setLightboxImageZoom] = useState(1);
+  const [lightboxImagePosition, setLightboxImagePosition] = useState({ x: 0, y: 0 });
+  const [detailImageViewerOpen, setDetailImageViewerOpen] = useState(false);
+  const [unavailableImageUrls, setUnavailableImageUrls] = useState<string[]>([]);
   const [detailQuantity, setDetailQuantity] = useState(1);
   const [catalogPreviewImageIndexes, setCatalogPreviewImageIndexes] = useState<
     Record<string, number>
   >({});
   const latestCatalogRequestRef = useRef(0);
+  const lightboxDragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+  } | null>(null);
+  const detailDragRef = useRef<typeof lightboxDragRef.current>(null);
+  const detailWasDraggedRef = useRef(false);
+
+  const unavailableImageSet = useMemo(
+    () => new Set(unavailableImageUrls),
+    [unavailableImageUrls],
+  );
+
+  function markImageUnavailable(imageUrl: string) {
+    setUnavailableImageUrls((current) =>
+      current.includes(imageUrl) ? current : [...current, imageUrl],
+    );
+  }
 
   useEffect(() => {
     const savedCart = window.localStorage.getItem(LOCAL_STORAGE_CART_KEY);
@@ -443,6 +583,7 @@ export function Storefront({
       postalCodePromptOpen ||
       mobileCartOpen ||
       Boolean(selectedProduct) ||
+      detailImageViewerOpen ||
       (compactCatalogLayout && filtersPanelOpen);
     if (!shouldLockUi) return;
 
@@ -453,7 +594,23 @@ export function Storefront({
       if (event.key !== "Escape") return;
 
       if (selectedProduct) {
+        if (detailImageViewerOpen) {
+          setDetailImageViewerOpen(false);
+          setLightboxImageZoom(1);
+          setDetailImagePosition({ x: 0, y: 0 });
+          resetLightboxImagePosition();
+          return;
+        }
+
         setSelectedProduct(null);
+        return;
+      }
+
+      if (detailImageViewerOpen) {
+        setDetailImageViewerOpen(false);
+        setLightboxImageZoom(1);
+        setDetailImagePosition({ x: 0, y: 0 });
+        resetLightboxImagePosition();
         return;
       }
 
@@ -484,6 +641,7 @@ export function Storefront({
     mobileCartOpen,
     postalCodePromptOpen,
     selectedProduct,
+    detailImageViewerOpen,
   ]);
 
   const resolvedInitialProducts = initialProducts;
@@ -594,6 +752,39 @@ export function Storefront({
       ? null
       : brandOptions.find((brand) => brand.label === selectedBrand) || null;
   const normalizedSearch = normalizeFilterValue(search).trim();
+  const searchSuggestions = useMemo<CatalogSearchSuggestion[]>(() => {
+    if (!normalizedSearch) {
+      return [];
+    }
+
+    const seen = new Set<string>();
+    const suggestions: CatalogSearchSuggestion[] = [];
+
+    for (const group of filterOptionGroups) {
+      const product = group.catalogProduct;
+      const haystack = normalizeFilterValue(
+        [product.description, product.code, product.brand, product.category].join(" "),
+      );
+
+      if (!haystack.includes(normalizedSearch) || seen.has(product.id)) {
+        continue;
+      }
+
+      seen.add(product.id);
+      suggestions.push({
+        id: product.id,
+        label: product.description,
+        detail: [product.brand, product.category].filter(Boolean).join(" · "),
+        value: product.description,
+      });
+
+      if (suggestions.length === 6) {
+        break;
+      }
+    }
+
+    return suggestions;
+  }, [filterOptionGroups, normalizedSearch]);
   const normalizedSelectedCategory = normalizeFilterValue(selectedCategory);
   const activeSearchLabel = search.trim() || null;
   const activeCategoryLabel =
@@ -756,12 +947,13 @@ export function Storefront({
 
   const whatsappHref = resolveWhatsappHref(settings.supportWhatsapp);
   const rawLogoUrl = logoUrl || settings.logoUrl;
-  const resolvedLogoUrl =
-    rawLogoUrl === LOCAL_STORE_LOGO_URL
-      ? theme === "dark"
-        ? LOCAL_STORE_LOGO_URL
-        : LOCAL_STORE_LOGO_DARK_URL
-      : buildImageProxyUrl(rawLogoUrl);
+  const isLocalLogo =
+    rawLogoUrl === LOCAL_STORE_LOGO_URL ||
+    rawLogoUrl === LOCAL_STORE_LOGO_DARK_URL ||
+    rawLogoUrl.includes("logo-diez-deportes");
+  const resolvedLogoUrl = isLocalLogo
+    ? LOCAL_STORE_LOGO_URL
+    : buildImageProxyUrl(rawLogoUrl);
   const resolvedHeroImageUrl = heroImageUrl || settings.heroImageUrl;
   const displayHeroImageUrl = buildImageProxyUrl(resolvedHeroImageUrl);
   const heroStyle = resolvedHeroImageUrl
@@ -817,13 +1009,17 @@ export function Storefront({
   const selectedProductGroup = selectedProduct
     ? productGroups.find(
         (group) => group.members.some((product) => product.id === selectedProduct.id),
-      ) || null
+      ) ||
+      filterOptionGroups.find((group) =>
+        group.members.some((product) => product.id === selectedProduct.id),
+      ) ||
+      null
     : null;
   const selectedDetailProduct = selectedProductGroup
     ? selectedProductGroup.members.find(
         (product) => product.id === selectedVariantId,
       ) || getDefaultSelectableProduct(selectedProductGroup)
-    : null;
+    : selectedProduct;
   const variantColorOptions = selectedProductGroup
     ? getVariantColorOptions(selectedProductGroup)
     : [];
@@ -865,17 +1061,59 @@ export function Storefront({
         ].filter((product): product is Product => Boolean(product)),
       )
     : [];
-  const selectedDetailGallery =
+  const rawSelectedDetailGallery =
     selectedDetailGroupGallery.length > 0
       ? selectedDetailGroupGallery
       : selectedDetailProductGallery;
+  const [selectedDetailGallery, setSelectedDetailGallery] = useState(
+    rawSelectedDetailGallery,
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function removeRepeatedImages() {
+      const fingerprints = await Promise.all(
+        rawSelectedDetailGallery.map((imageUrl) =>
+          getVisualImageFingerprint(
+            buildImageProxyUrl(imageUrl, { transparentBackground: true }) || imageUrl,
+          ),
+        ),
+      );
+      const seen = new Set<string>();
+      const nextGallery = rawSelectedDetailGallery.filter((imageUrl, index) => {
+        const fingerprint = fingerprints[index];
+        if (!fingerprint) {
+          return true;
+        }
+        if (seen.has(fingerprint)) {
+          return false;
+        }
+        seen.add(fingerprint);
+        return true;
+      });
+
+      if (!cancelled) {
+        setSelectedDetailGallery(nextGallery);
+      }
+    }
+
+    setSelectedDetailGallery(rawSelectedDetailGallery);
+    void removeRepeatedImages();
+    return () => {
+      cancelled = true;
+    };
+  }, [rawSelectedDetailGallery.join("\u0001")]);
+  const visibleSelectedDetailGallery = selectedDetailGallery.filter(
+    (imageUrl) => !unavailableImageSet.has(imageUrl),
+  );
   const activeDetailImageUrl =
     selectedDetailImageUrl &&
-    selectedDetailGallery.includes(selectedDetailImageUrl)
+    visibleSelectedDetailGallery.includes(selectedDetailImageUrl)
       ? selectedDetailImageUrl
-      : selectedDetailGallery[0] || null;
+      : visibleSelectedDetailGallery[0] || null;
   const activeDetailImageIndex = activeDetailImageUrl
-    ? Math.max(selectedDetailGallery.indexOf(activeDetailImageUrl), 0)
+    ? Math.max(visibleSelectedDetailGallery.indexOf(activeDetailImageUrl), 0)
     : 0;
   const selectedProductCartItem = selectedDetailProduct
     ? cart.find((item) => item.id === selectedDetailProduct.id) || null
@@ -1045,20 +1283,6 @@ export function Storefront({
   ]);
 
   useEffect(() => {
-    if (!selectedProduct) {
-      return;
-    }
-
-    const selectedStillVisible = productGroups.some((group) =>
-      group.members.some((product) => product.id === selectedProduct.id),
-    );
-
-    if (!selectedStillVisible) {
-      setSelectedProduct(null);
-    }
-  }, [productGroups, selectedProduct]);
-
-  useEffect(() => {
     setCatalogPage(1);
   }, [
     search,
@@ -1130,8 +1354,13 @@ export function Storefront({
   }, [selectedDetailProduct?.id]);
 
   useEffect(() => {
-    setSelectedDetailImageUrl(selectedDetailGallery[0] || null);
-  }, [selectedDetailProduct?.id, selectedDetailGallery[0]]);
+    setSelectedDetailImageUrl(visibleSelectedDetailGallery[0] || null);
+  }, [selectedDetailProduct?.id, visibleSelectedDetailGallery[0]]);
+
+  useEffect(() => {
+    setDetailImageZoom(1);
+    setDetailImagePosition({ x: 0, y: 0 });
+  }, [activeDetailImageUrl]);
 
   function applyAudienceFilter(nextAudience: AudienceFilter) {
     setSelectedAudience((current) =>
@@ -1250,21 +1479,167 @@ export function Storefront({
   function closeProductDetail() {
     setSelectedProduct(null);
     setSelectedVariantId(null);
+    setDetailImageViewerOpen(false);
+    setDetailImageZoom(1);
+    setDetailImagePosition({ x: 0, y: 0 });
+    setLightboxImageZoom(1);
+    setLightboxImagePosition({ x: 0, y: 0 });
+  }
+
+  function changeDetailImageZoom(direction: -1 | 1) {
+    setDetailImageZoom((current) =>
+      Math.min(3, Math.max(1, Number((current + direction * 0.5).toFixed(1)))),
+    );
+  }
+
+  function handleDetailPointerDown(event: ReactPointerEvent<HTMLImageElement>) {
+    if (detailImageZoom <= 1) return;
+    event.preventDefault();
+    event.stopPropagation();
+    detailDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: detailImagePosition.x,
+      originY: detailImagePosition.y,
+    };
+    detailWasDraggedRef.current = false;
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handleDetailPointerMove(event: ReactPointerEvent<HTMLImageElement>) {
+    const drag = detailDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (
+      Math.abs(event.clientX - drag.startX) > 4 ||
+      Math.abs(event.clientY - drag.startY) > 4
+    ) {
+      detailWasDraggedRef.current = true;
+    }
+    setDetailImagePosition({
+      x: drag.originX + event.clientX - drag.startX,
+      y: drag.originY + event.clientY - drag.startY,
+    });
+  }
+
+  function handleDetailPointerUp(event: ReactPointerEvent<HTMLImageElement>) {
+    if (detailDragRef.current?.pointerId === event.pointerId) {
+      detailDragRef.current = null;
+    }
+  }
+
+  function changeLightboxImageZoom(direction: -1 | 1) {
+    setLightboxImageZoom((current) =>
+      Math.min(4, Math.max(1, Number((current + direction * 0.5).toFixed(1)))),
+    );
+  }
+
+  function resetLightboxImagePosition() {
+    setLightboxImagePosition({ x: 0, y: 0 });
+  }
+
+  function handleLightboxPointerDown(event: ReactPointerEvent<HTMLImageElement>) {
+    if (lightboxImageZoom <= 1) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    lightboxDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: lightboxImagePosition.x,
+      originY: lightboxImagePosition.y,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handleLightboxPointerMove(event: ReactPointerEvent<HTMLImageElement>) {
+    const drag = lightboxDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+
+    setLightboxImagePosition({
+      x: drag.originX + event.clientX - drag.startX,
+      y: drag.originY + event.clientY - drag.startY,
+    });
+  }
+
+  function handleLightboxPointerUp(event: ReactPointerEvent<HTMLImageElement>) {
+    if (lightboxDragRef.current?.pointerId === event.pointerId) {
+      lightboxDragRef.current = null;
+    }
+  }
+
+  function panLightboxWithMouse(event: ReactMouseEvent<HTMLImageElement>) {
+    if (lightboxImageZoom <= 1) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const originX = lightboxImagePosition.x;
+    const originY = lightboxImagePosition.y;
+
+    const move = (moveEvent: MouseEvent) => {
+      setLightboxImagePosition({
+        x: originX + moveEvent.clientX - startX,
+        y: originY + moveEvent.clientY - startY,
+      });
+    };
+    const stop = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", stop);
+    };
+
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", stop, { once: true });
+  }
+
+  function panDetailWithMouse(event: ReactMouseEvent<HTMLImageElement>) {
+    if (detailImageZoom <= 1) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const originX = detailImagePosition.x;
+    const originY = detailImagePosition.y;
+
+    const move = (moveEvent: MouseEvent) => {
+      setDetailImagePosition({
+        x: originX + moveEvent.clientX - startX,
+        y: originY + moveEvent.clientY - startY,
+      });
+    };
+    const stop = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", stop);
+    };
+
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", stop, { once: true });
   }
 
   function moveDetailImage(direction: -1 | 1) {
-    if (selectedDetailGallery.length <= 1) {
+    if (visibleSelectedDetailGallery.length <= 1) {
       return;
     }
 
     setSelectedDetailImageUrl((current) => {
-      const currentIndex = current ? selectedDetailGallery.indexOf(current) : 0;
+      const currentIndex = current
+        ? visibleSelectedDetailGallery.indexOf(current)
+        : 0;
       const safeIndex = currentIndex >= 0 ? currentIndex : 0;
       const nextIndex =
-        (safeIndex + direction + selectedDetailGallery.length) %
-        selectedDetailGallery.length;
+        (safeIndex + direction + visibleSelectedDetailGallery.length) %
+        visibleSelectedDetailGallery.length;
 
-      return selectedDetailGallery[nextIndex] || selectedDetailGallery[0] || null;
+      return (
+        visibleSelectedDetailGallery[nextIndex] ||
+        visibleSelectedDetailGallery[0] ||
+        null
+      );
     });
   }
 
@@ -1796,6 +2171,20 @@ export function Storefront({
             )}
           </a>
 
+          <div className="site-header-search">
+            <CatalogSearch
+              value={search}
+              suggestions={searchSuggestions}
+              onChange={setSearch}
+              onSelect={(value) => {
+                setSearch(value);
+                scrollToCatalog();
+              }}
+              placeholder="Buscar productos, marcas o categorías"
+              ariaLabel="Buscar productos, marcas o categorías"
+            />
+          </div>
+
           <nav className="site-nav" aria-label="Principal">
             <a href="#top">Inicio</a>
             <a href="#sobre-nosotros">Sobre nosotros</a>
@@ -2001,7 +2390,7 @@ export function Storefront({
           >
             <div className="filters-panel-mobile-header">
               <div className="filters-panel-mobile-copy">
-                <strong>Filtros y pedido</strong>
+                <strong>Filtros</strong>
                 <span>{filtersPanelStatusCopy}</span>
               </div>
               <button
@@ -2015,23 +2404,37 @@ export function Storefront({
 
             <div className="panel-block">
               <div className="panel-block-header">
-                <h2>Buscar</h2>
+                <h2 className="catalog-sidebar-search-heading">Buscar</h2>
                 {renderActiveFilterChip({
                   value: activeSearchLabel,
                   onClear: clearSearchFilter,
                   ariaLabel: "Quitar filtro de búsqueda",
                 })}
               </div>
-              <input
-                className="search-input"
-                type="search"
+              <CatalogSearch
                 value={search}
-                onChange={(event) => setSearch(event.target.value)}
+                suggestions={searchSuggestions}
+                onChange={setSearch}
+                onSelect={(value) => {
+                  setSearch(value);
+                  scrollToCatalog();
+                }}
                 placeholder="Codigo, descripcion, marca o categoria"
+                ariaLabel="Buscar productos por codigo, descripcion, marca o categoria"
               />
             </div>
 
-            <div className="catalog-summary" aria-label="Resumen del pedido">
+            <div
+              className="catalog-summary catalog-summary-filters-total"
+              aria-label="Total actual"
+              style={{
+                background: "transparent",
+                backgroundImage: "none",
+                border: "none",
+                boxShadow: "none",
+                padding: 0,
+              }}
+            >
               <div className="catalog-summary-header">
                 <div className="catalog-summary-header-copy">
                   <span className="catalog-summary-kicker">Tu pedido</span>
@@ -2043,7 +2446,16 @@ export function Storefront({
                 </div>
               </div>
 
-              <div className="catalog-summary-total-card">
+              <div
+                className="catalog-summary-total-card"
+                style={{
+                  background: "var(--header-control-bg)",
+                  backgroundImage: "none",
+                  border: "1px solid var(--header-control-line)",
+                  borderRadius: "16px",
+                  boxShadow: "0 8px 18px rgba(15, 23, 42, 0.08)",
+                }}
+              >
                 <div className="catalog-summary-total-copy">
                   <span>Total actual</span>
                   <small>{catalogSummaryCountLabel}</small>
@@ -2428,13 +2840,16 @@ export function Storefront({
                     : ""}
                 </p>
                 <div className="catalog-toolbar-mobile-search">
-                  <input
-                    className="search-input catalog-toolbar-search-input"
-                    type="search"
+                  <CatalogSearch
                     value={search}
-                    onChange={(event) => setSearch(event.target.value)}
+                    suggestions={searchSuggestions}
+                    onChange={setSearch}
+                    onSelect={(value) => {
+                      setSearch(value);
+                      scrollToCatalog();
+                    }}
                     placeholder="Buscar productos"
-                    aria-label="Buscar productos en el catálogo"
+                    ariaLabel="Buscar productos en el catalogo"
                   />
                   {search.trim() ? (
                     <button
@@ -2490,13 +2905,14 @@ export function Storefront({
               <div className="catalog-grid">
               {paginatedProductGroups.map((group) => {
                 const product = group.catalogProduct;
-                const gallery = getCatalogCardGallery(product);
+                const gallery = getCatalogCardGallery(product).filter(
+                  (imageUrl) => !unavailableImageSet.has(imageUrl),
+                );
                 const activeGalleryIndex = getCatalogPreviewImageIndex(
                   group.parentCode,
                   gallery.length,
                 );
-                const activeGalleryImageUrl =
-                  gallery[activeGalleryIndex] || product.imageUrl;
+                const activeGalleryImageUrl = gallery[activeGalleryIndex] || null;
                 const hasVariants = group.children.length > 0;
                 const groupColorChoiceCount = getVariantColorOptions(group).length;
                 const groupSizeChoiceCount = countDistinctVariantLabels(group.children);
@@ -2532,6 +2948,20 @@ export function Storefront({
                     className="catalog-card"
                     key={group.parentCode}
                     onMouseLeave={() => resetCatalogPreviewImage(group.parentCode)}
+                    onClickCapture={(event) => {
+                      const target = event.target as HTMLElement;
+                      if (target.closest("button")) {
+                        return;
+                      }
+
+                      openProductDetail(product);
+                    }}
+                    onPointerUp={(event) => {
+                      const target = event.target as HTMLElement;
+                      if (!target.closest("button")) {
+                        openProductDetail(product);
+                      }
+                    }}
                     onClick={() => openProductDetail(product)}
                     onKeyDown={(event) =>
                       handleProductCardKeyDown(event, product)
@@ -2540,7 +2970,10 @@ export function Storefront({
                     tabIndex={0}
                     aria-label={`Ver detalle de ${product.description}`}
                   >
-                    <div className="catalog-card-media">
+                    <div
+                      className="catalog-card-media"
+                      onClick={() => openProductDetail(product)}
+                    >
                       {activeGalleryImageUrl ? (
                         <img
                           key={activeGalleryImageUrl}
@@ -2552,6 +2985,10 @@ export function Storefront({
                           }
                           alt={product.description}
                           loading="lazy"
+                          onError={(event) => {
+                            markImageUnavailable(activeGalleryImageUrl);
+                            event.currentTarget.classList.add("image-failed");
+                          }}
                         />
                       ) : (
                         <div className="catalog-card-placeholder">
@@ -2629,7 +3066,10 @@ export function Storefront({
                       ) : null}
                     </div>
 
-                    <div className="catalog-card-body">
+                    <div
+                      className="catalog-card-body"
+                      onClick={() => openProductDetail(product)}
+                    >
                       <div className="catalog-card-tags">
                         <span className="catalog-tag">Cod. {product.code}</span>
                         <span
@@ -2718,24 +3158,21 @@ export function Storefront({
                         className="catalog-card-button"
                         onClick={(event) => {
                           event.stopPropagation();
-                          if (hasVariantChoices) {
-                            openProductDetail(product);
-                            return;
-                          }
-
-                          addToCart(selectableCatalogProduct);
+                          openProductDetail(product);
                         }}
-                        disabled={disableAddButton}
                       >
-                        {hasVariantChoices
-                          ? variantButtonLabel
-                          : disableAddButton
-                            ? "Sin stock"
-                            : "A\u00f1adir al carrito"}
+                        {hasVariantChoices ? variantButtonLabel : "Ver detalle"}
                       </button>
-                      <span className="catalog-card-detail-link">
+                      <button
+                        type="button"
+                        className="catalog-card-detail-link"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openProductDetail(product);
+                        }}
+                      >
                         {hasVariantChoices ? variantDetailLabel : "Ver detalle"}
-                      </span>
+                      </button>
                     </div>
                   </article>
                 );
@@ -2924,14 +3361,39 @@ export function Storefront({
                             }) || activeDetailImageUrl
                           }
                           alt={selectedDetailProduct.description}
+                          draggable={false}
+                          onDragStart={(event) => event.preventDefault()}
                           loading="eager"
+                          style={{
+                            transform: `translate(${detailImagePosition.x}px, ${detailImagePosition.y}px) scale(${detailImageZoom})`,
+                            cursor: detailImageZoom > 1 ? "grab" : "zoom-in",
+                          }}
+                          onClick={() => {
+                            if (detailWasDraggedRef.current) {
+                              detailWasDraggedRef.current = false;
+                              return;
+                            }
+                            setLightboxImageZoom(1);
+                            resetLightboxImagePosition();
+                            setDetailImageViewerOpen(true);
+                          }}
+                          onPointerDown={handleDetailPointerDown}
+                          onPointerMove={handleDetailPointerMove}
+                          onPointerUp={handleDetailPointerUp}
+                          onPointerCancel={handleDetailPointerUp}
+                          onMouseDown={panDetailWithMouse}
+                          title="Abrir imagen grande"
+                          onError={(event) => {
+                            markImageUnavailable(activeDetailImageUrl);
+                            event.currentTarget.classList.add("image-failed");
+                          }}
                         />
                       ) : (
                         <div className="catalog-card-placeholder product-detail-placeholder">
                           {selectedDetailProduct.code.slice(0, 3)}
                         </div>
                       )}
-                      {selectedDetailGallery.length > 1 ? (
+                      {visibleSelectedDetailGallery.length > 1 ? (
                         <>
                           <div className="product-detail-stage-controls">
                             <button
@@ -2953,22 +3415,55 @@ export function Storefront({
                           </div>
                           <div
                             className="product-detail-stage-count"
-                            aria-label={`${selectedDetailGallery.length} fotos disponibles`}
+                            aria-label={`${visibleSelectedDetailGallery.length} fotos disponibles`}
                           >
-                            {activeDetailImageIndex + 1}/{selectedDetailGallery.length}
+                            {activeDetailImageIndex + 1}/{visibleSelectedDetailGallery.length}
                           </div>
                         </>
                       ) : null}
+                      {activeDetailImageUrl ? (
+                        <div className="product-detail-zoom-controls" aria-label="Controles de zoom">
+                          <button
+                            type="button"
+                            onClick={() => changeDetailImageZoom(-1)}
+                            disabled={detailImageZoom <= 1}
+                            aria-label="Alejar imagen"
+                          >
+                            −
+                          </button>
+                          <span>{Math.round(detailImageZoom * 100)}%</span>
+                          <button
+                            type="button"
+                            onClick={() => changeDetailImageZoom(1)}
+                            disabled={detailImageZoom >= 3}
+                            aria-label="Acercar imagen"
+                          >
+                            +
+                          </button>
+                          <button
+                            type="button"
+                            className="product-detail-expand-button"
+                            onClick={() => {
+                              setLightboxImageZoom(1);
+                              resetLightboxImagePosition();
+                              setDetailImageViewerOpen(true);
+                            }}
+                            aria-label="Ver imagen completa"
+                          >
+                            ⛶
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
 
-                    {selectedDetailGallery.length > 1 ? (
+                    {visibleSelectedDetailGallery.length > 1 ? (
                       <div className="product-detail-gallery-wrap">
                         <span className="product-detail-gallery-label">Galeria</span>
                         <div
                           className="product-detail-gallery"
                           aria-label="Mas fotos del producto"
                         >
-                          {selectedDetailGallery.map((imageUrl, index) => {
+                          {visibleSelectedDetailGallery.map((imageUrl, index) => {
                             const isActive = imageUrl === activeDetailImageUrl;
 
                             return (
@@ -2993,6 +3488,10 @@ export function Storefront({
                                   }
                                   alt={`${selectedDetailProduct.description} - foto ${index + 1}`}
                                   loading="lazy"
+                                  onError={(event) => {
+                                    markImageUnavailable(imageUrl);
+                                    event.currentTarget.classList.add("image-failed");
+                                  }}
                                 />
                               </button>
                             );
@@ -3268,6 +3767,86 @@ export function Storefront({
             </div>
           </section>
         </>
+      ) : null}
+
+      {detailImageViewerOpen && activeDetailImageUrl ? (
+        <div
+          className="product-image-lightbox"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Imagen ampliada del producto"
+          onClick={() => setDetailImageViewerOpen(false)}
+        >
+          <button
+            type="button"
+            className="product-image-lightbox-close"
+            onClick={() => setDetailImageViewerOpen(false)}
+            aria-label="Cerrar imagen ampliada"
+          >
+            X
+          </button>
+          <img
+            src={buildImageProxyUrl(activeDetailImageUrl, {
+              transparentBackground: true,
+            }) || activeDetailImageUrl}
+            alt={selectedDetailProduct?.description || "Imagen ampliada"}
+            draggable={false}
+            onDragStart={(event) => event.preventDefault()}
+            style={{
+              transform: `translate(${lightboxImagePosition.x}px, ${lightboxImagePosition.y}px) scale(${lightboxImageZoom})`,
+              cursor: lightboxImageZoom > 1 ? "grab" : "zoom-in",
+            }}
+            onWheel={(event) => {
+              event.preventDefault();
+              changeLightboxImageZoom(event.deltaY > 0 ? -1 : 1);
+            }}
+            onClick={(event) => event.stopPropagation()}
+            onPointerDown={handleLightboxPointerDown}
+            onPointerDownCapture={handleLightboxPointerDown}
+            onPointerMove={handleLightboxPointerMove}
+            onPointerMoveCapture={handleLightboxPointerMove}
+            onPointerUp={handleLightboxPointerUp}
+            onPointerCancel={handleLightboxPointerUp}
+            onMouseDown={panLightboxWithMouse}
+          />
+          <div
+            className="product-image-lightbox-zoom"
+            onClick={(event) => event.stopPropagation()}
+            aria-label="Controles de zoom de la imagen"
+          >
+            <button
+              type="button"
+              onClick={() => changeLightboxImageZoom(-1)}
+              disabled={lightboxImageZoom <= 1}
+              aria-label="Alejar imagen"
+            >
+              −
+            </button>
+            <span>{Math.round(lightboxImageZoom * 100)}%</span>
+            <button
+              type="button"
+              onClick={() => changeLightboxImageZoom(1)}
+              disabled={lightboxImageZoom >= 4}
+              aria-label="Acercar imagen"
+            >
+              +
+            </button>
+          </div>
+          {visibleSelectedDetailGallery.length > 1 ? (
+            <div
+              className="product-image-lightbox-controls"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <button type="button" onClick={() => moveDetailImage(-1)} aria-label="Imagen anterior">
+                &lt;
+              </button>
+              <span>{activeDetailImageIndex + 1} / {visibleSelectedDetailGallery.length}</span>
+              <button type="button" onClick={() => moveDetailImage(1)} aria-label="Imagen siguiente">
+                &gt;
+              </button>
+            </div>
+          ) : null}
+        </div>
       ) : null}
 
       {mobileCartOpen ? (
@@ -4210,6 +4789,44 @@ function getProductGallery(product: Product | null | undefined) {
   }
 
   return gallery;
+}
+
+async function getVisualImageFingerprint(imageUrl: string) {
+  return new Promise<string | null>((resolve) => {
+    const image = new Image();
+    image.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = 24;
+        canvas.height = 24;
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        if (!context) {
+          resolve(null);
+          return;
+        }
+
+        context.drawImage(image, 0, 0, 24, 24);
+        const pixels = context.getImageData(0, 0, 24, 24).data;
+        let hash = 2166136261;
+        for (let index = 0; index < pixels.length; index += 4) {
+          hash ^= Math.round((pixels[index] || 0) / 16);
+          hash = Math.imul(hash, 16777619);
+          hash ^= Math.round((pixels[index + 1] || 0) / 16);
+          hash = Math.imul(hash, 16777619);
+          hash ^= Math.round((pixels[index + 2] || 0) / 16);
+          hash = Math.imul(hash, 16777619);
+          hash ^= Math.round((pixels[index + 3] || 0) / 16);
+          hash = Math.imul(hash, 16777619);
+        }
+        resolve(String(hash >>> 0));
+      } catch {
+        resolve(null);
+      }
+    };
+    image.onerror = () => resolve(null);
+    image.crossOrigin = "anonymous";
+    image.src = imageUrl;
+  });
 }
 
 function mergeProductGalleries(products: Array<Product | null | undefined>) {

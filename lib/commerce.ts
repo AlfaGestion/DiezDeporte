@@ -69,9 +69,9 @@ export function resolveImageUrl(
     return isLegacyOdooImageUrl(imagePath) ? null : imagePath;
   }
 
-  const normalizedFileName = imagePath.replace(/^\/+/, "");
+  const normalizedFileName = getManagedImageFileName(imagePath);
   if (!imageBaseUrl) {
-    if (/^[^\\/]+$/.test(normalizedFileName)) {
+    if (normalizedFileName) {
       return `/api/product-images/${encodeURIComponent(normalizedFileName)}`;
     }
 
@@ -84,6 +84,13 @@ export function resolveImageUrl(
   return `${base}${cleanPath}`;
 }
 
+function getManagedImageFileName(imagePath: string) {
+  const normalized = imagePath.replace(/\\/g, "/");
+  const fileName = normalized.split("/").filter(Boolean).pop() || "";
+
+  return fileName || null;
+}
+
 function isLegacyOdooImageUrl(value: string) {
   return /^https?:\/\/(?:www\.)?diezdeportes\.com\.ar\/web\/image\//i.test(value)
     || /^https?:\/\/diezdeportes\.odoo\.com\/web\/image\//i.test(value);
@@ -94,14 +101,23 @@ export function buildImageProxyUrl(
   options?: { transparentBackground?: boolean },
 ) {
   if (!imageUrl) return null;
-  if (!/^https?:\/\//i.test(imageUrl)) return imageUrl;
+  if (!/^https?:\/\//i.test(imageUrl)) {
+    if (
+      options?.transparentBackground
+      && imageUrl.startsWith("/api/product-images/")
+    ) {
+      return `${imageUrl}${imageUrl.includes("?") ? "&" : "?"}transparent=2`;
+    }
+
+    return imageUrl;
+  }
 
   if (!options?.transparentBackground) {
     return imageUrl;
   }
 
   const encodedUrl = encodeURIComponent(imageUrl);
-  return `/api/image-proxy?url=${encodedUrl}&transparent=1`;
+  return `/api/image-proxy?url=${encodedUrl}&transparent=2`;
 }
 
 export function formatCurrency(value: number) {
