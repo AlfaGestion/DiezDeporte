@@ -234,8 +234,47 @@ iframe {
 .site-header-search .search-input {
   min-height: 42px;
   padding-right: 16px;
-  border-color: color-mix(in srgb, var(--header-control-line) 80%, var(--line));
-  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--header-control-line));
+  background:
+    linear-gradient(105deg, color-mix(in srgb, var(--accent-soft) 42%, transparent), transparent 58%),
+    color-mix(in srgb, var(--surface) 92%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.site-header-search .search-input::placeholder {
+  color: color-mix(in srgb, var(--header-text) 66%, var(--accent));
+}
+
+.site-header-search .search-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent), 0 10px 24px rgba(15, 23, 42, 0.12);
+}
+
+html:not([data-theme="dark"]) .site-header-search .search-input {
+  border-color: #e4b51f;
+  background:
+    linear-gradient(105deg, rgba(255, 221, 76, 0.34), rgba(255, 246, 190, 0.18) 58%),
+    var(--surface);
+  color: #172033;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72), 0 0 0 1px rgba(228, 181, 31, 0.14);
+}
+
+html:not([data-theme="dark"]) .site-header-search .search-input:focus {
+  border-color: #d39f00;
+  box-shadow: 0 0 0 4px rgba(228, 181, 31, 0.2), 0 10px 24px rgba(174, 126, 0, 0.14);
+}
+
+html[data-theme="dark"] .site-header-search .search-input {
+  border-color: #4c83ff;
+  background:
+    linear-gradient(105deg, rgba(76, 131, 255, 0.28), rgba(214, 61, 73, 0.12) 58%),
+    color-mix(in srgb, var(--surface) 92%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 0 0 1px rgba(76, 131, 255, 0.16);
+}
+
+html[data-theme="dark"] .site-header-search .search-input:focus {
+  border-color: #ff5b67;
+  box-shadow: 0 0 0 4px rgba(255, 91, 103, 0.2), 0 10px 24px rgba(7, 11, 18, 0.24);
 }
 
 .site-logo {
@@ -266,6 +305,11 @@ iframe {
   max-width: 100%;
   height: 48px;
   object-fit: contain;
+}
+
+html[data-theme="dark"] .site-header .site-logo img,
+html[data-theme="dark"] .site-footer .site-logo img {
+  filter: brightness(0) invert(1);
 }
 
 .site-nav {
@@ -2459,13 +2503,13 @@ html[data-theme="dark"] .catalog-sidebar-toggle-badge {
 }
 
 .product-detail-backdrop {
-  z-index: 40;
+  z-index: 90;
 }
 
 .product-detail-modal {
   position: fixed;
   inset: 50% auto auto 50%;
-  z-index: 41;
+  z-index: 91;
   width: min(1080px, calc(100vw - 28px));
   max-height: calc(100vh - 34px);
   overflow: auto;

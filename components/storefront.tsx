@@ -520,7 +520,6 @@ export function Storefront({
       return;
     }
 
-    setPostalCodePromptOpen(true);
   }, []);
 
   useEffect(() => {
@@ -952,7 +951,9 @@ export function Storefront({
     rawLogoUrl === LOCAL_STORE_LOGO_DARK_URL ||
     rawLogoUrl.includes("logo-diez-deportes");
   const resolvedLogoUrl = isLocalLogo
-    ? LOCAL_STORE_LOGO_URL
+    ? theme === "dark"
+      ? LOCAL_STORE_LOGO_URL
+      : LOCAL_STORE_LOGO_DARK_URL
     : buildImageProxyUrl(rawLogoUrl);
   const resolvedHeroImageUrl = heroImageUrl || settings.heroImageUrl;
   const displayHeroImageUrl = buildImageProxyUrl(resolvedHeroImageUrl);
@@ -1422,9 +1423,14 @@ export function Storefront({
   }
 
   function openProductDetail(product: Product) {
+    setPostalCodePromptOpen(false);
+    setMobileCartOpen(false);
     setFiltersPanelOpen(false);
     setSelectedProduct(product);
     setSelectedVariantId(null);
+    setDetailImageZoom(1);
+    setDetailImagePosition({ x: 0, y: 0 });
+    setDetailImageViewerOpen(false);
   }
 
   function getCatalogCardGallery(product: Product) {
@@ -1824,6 +1830,14 @@ export function Storefront({
   }
 
   function handleContinueToPayment() {
+    if (
+      !isPickupDeliveryMethod(customer.deliveryMethod) &&
+      !isLikelyValidPostalCode(customer.postalCode)
+    ) {
+      openPostalCodePrompt();
+      return;
+    }
+
     const validationError = getCheckoutValidationMessage({
       customer,
       allowPickupCheckoutWithoutAddress: settings.allowPickupCheckoutWithoutAddress,
@@ -2948,6 +2962,12 @@ export function Storefront({
                     className="catalog-card"
                     key={group.parentCode}
                     onMouseLeave={() => resetCatalogPreviewImage(group.parentCode)}
+                    onPointerDownCapture={(event) => {
+                      const target = event.target as HTMLElement;
+                      if (!target.closest("button")) {
+                        openProductDetail(product);
+                      }
+                    }}
                     onClickCapture={(event) => {
                       const target = event.target as HTMLElement;
                       if (target.closest("button")) {
@@ -2972,6 +2992,11 @@ export function Storefront({
                   >
                     <div
                       className="catalog-card-media"
+                      onPointerDown={(event) => {
+                        if (!(event.target as HTMLElement).closest("button")) {
+                          openProductDetail(product);
+                        }
+                      }}
                       onClick={() => openProductDetail(product)}
                     >
                       {activeGalleryImageUrl ? (
@@ -2985,6 +3010,10 @@ export function Storefront({
                           }
                           alt={product.description}
                           loading="lazy"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openProductDetail(product);
+                          }}
                           onError={(event) => {
                             markImageUnavailable(activeGalleryImageUrl);
                             event.currentTarget.classList.add("image-failed");
@@ -3104,7 +3133,14 @@ export function Storefront({
                         </p>
                       ) : null}
 
-                      <h3>{product.description}</h3>
+                      <h3
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openProductDetail(product);
+                        }}
+                      >
+                        {product.description}
+                      </h3>
 
                       <p className="catalog-card-subtitle">
                         {hasVariantChoices
