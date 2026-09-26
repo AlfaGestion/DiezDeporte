@@ -6,6 +6,7 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
+  TouchEvent as ReactTouchEvent,
 } from "react";
 import {
   buildImageProxyUrl,
@@ -482,6 +483,22 @@ export function Storefront({
   } | null>(null);
   const detailDragRef = useRef<typeof lightboxDragRef.current>(null);
   const detailWasDraggedRef = useRef(false);
+  const detailTouchRef = useRef<{
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+    pinchDistance: number | null;
+    pinchZoom: number;
+  } | null>(null);
+  const lightboxTouchRef = useRef<{
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+    pinchDistance: number | null;
+    pinchZoom: number;
+  } | null>(null);
 
   const unavailableImageSet = useMemo(
     () => new Set(unavailableImageUrls),
@@ -1498,7 +1515,104 @@ export function Storefront({
     );
   }
 
+  function getTouchDistance(touches: ReactTouchEvent<HTMLImageElement>["touches"]) {
+    if (touches.length < 2) {
+      return 0;
+    }
+
+    const first = touches[0];
+    const second = touches[1];
+    return Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY);
+  }
+
+  function handleDetailTouchStart(event: ReactTouchEvent<HTMLImageElement>) {
+    const firstTouch = event.touches[0];
+    if (!firstTouch) {
+      return;
+    }
+
+    if (event.touches.length >= 2) {
+      detailTouchRef.current = {
+        startX: firstTouch.clientX,
+        startY: firstTouch.clientY,
+        originX: detailImagePosition.x,
+        originY: detailImagePosition.y,
+        pinchDistance: getTouchDistance(event.touches),
+        pinchZoom: detailImageZoom,
+      };
+      detailWasDraggedRef.current = true;
+      event.preventDefault();
+      return;
+    }
+
+    detailTouchRef.current = {
+      startX: firstTouch.clientX,
+      startY: firstTouch.clientY,
+      originX: detailImagePosition.x,
+      originY: detailImagePosition.y,
+      pinchDistance: null,
+      pinchZoom: detailImageZoom,
+    };
+  }
+
+  function handleDetailTouchMove(event: ReactTouchEvent<HTMLImageElement>) {
+    const gesture = detailTouchRef.current;
+    if (!gesture) {
+      return;
+    }
+
+    if (event.touches.length >= 2 && gesture.pinchDistance) {
+      const distance = getTouchDistance(event.touches);
+      const nextZoom = Math.min(
+        3,
+        Math.max(1, Number((gesture.pinchZoom * (distance / gesture.pinchDistance)).toFixed(2))),
+      );
+      setDetailImageZoom(nextZoom);
+      event.preventDefault();
+      return;
+    }
+
+    const firstTouch = event.touches[0];
+    if (!firstTouch) {
+      return;
+    }
+
+    const deltaX = firstTouch.clientX - gesture.startX;
+    const deltaY = firstTouch.clientY - gesture.startY;
+    if (Math.abs(deltaX) > 8 || Math.abs(deltaY) > 8) {
+      detailWasDraggedRef.current = true;
+    }
+
+    if (detailImageZoom > 1) {
+      setDetailImagePosition({
+        x: gesture.originX + deltaX,
+        y: gesture.originY + deltaY,
+      });
+      event.preventDefault();
+    }
+  }
+
+  function handleDetailTouchEnd(event: ReactTouchEvent<HTMLImageElement>) {
+    const gesture = detailTouchRef.current;
+    if (!gesture || event.touches.length > 0) {
+      return;
+    }
+
+    const changedTouch = event.changedTouches[0];
+    if (changedTouch && gesture.pinchDistance === null && detailImageZoom <= 1) {
+      const deltaX = changedTouch.clientX - gesture.startX;
+      const deltaY = changedTouch.clientY - gesture.startY;
+      if (Math.abs(deltaX) >= 50 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2) {
+        moveDetailImage(deltaX < 0 ? 1 : -1);
+        detailWasDraggedRef.current = true;
+      }
+    }
+
+    detailTouchRef.current = null;
+  }
+
   function handleDetailPointerDown(event: ReactPointerEvent<HTMLImageElement>) {
+    if (event.pointerType !== "mouse") return;
     if (detailImageZoom <= 1) return;
     event.preventDefault();
     event.stopPropagation();
@@ -1514,6 +1628,7 @@ export function Storefront({
   }
 
   function handleDetailPointerMove(event: ReactPointerEvent<HTMLImageElement>) {
+    if (event.pointerType !== "mouse") return;
     const drag = detailDragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     if (
@@ -1529,6 +1644,7 @@ export function Storefront({
   }
 
   function handleDetailPointerUp(event: ReactPointerEvent<HTMLImageElement>) {
+    if (event.pointerType !== "mouse") return;
     if (detailDragRef.current?.pointerId === event.pointerId) {
       detailDragRef.current = null;
     }
@@ -1540,11 +1656,82 @@ export function Storefront({
     );
   }
 
+  function handleLightboxTouchStart(event: ReactTouchEvent<HTMLImageElement>) {
+    const firstTouch = event.touches[0];
+    if (!firstTouch) {
+      return;
+    }
+
+    lightboxTouchRef.current = {
+      startX: firstTouch.clientX,
+      startY: firstTouch.clientY,
+      originX: lightboxImagePosition.x,
+      originY: lightboxImagePosition.y,
+      pinchDistance: event.touches.length >= 2 ? getTouchDistance(event.touches) : null,
+      pinchZoom: lightboxImageZoom,
+    };
+    if (event.touches.length >= 2) {
+      event.preventDefault();
+    }
+  }
+
+  function handleLightboxTouchMove(event: ReactTouchEvent<HTMLImageElement>) {
+    const gesture = lightboxTouchRef.current;
+    if (!gesture) {
+      return;
+    }
+
+    if (event.touches.length >= 2 && gesture.pinchDistance) {
+      const distance = getTouchDistance(event.touches);
+      const nextZoom = Math.min(
+        4,
+        Math.max(1, Number((gesture.pinchZoom * (distance / gesture.pinchDistance)).toFixed(2))),
+      );
+      setLightboxImageZoom(nextZoom);
+      event.preventDefault();
+      return;
+    }
+
+    const firstTouch = event.touches[0];
+    if (!firstTouch) {
+      return;
+    }
+
+    const deltaX = firstTouch.clientX - gesture.startX;
+    const deltaY = firstTouch.clientY - gesture.startY;
+    if (lightboxImageZoom > 1) {
+      setLightboxImagePosition({
+        x: gesture.originX + deltaX,
+        y: gesture.originY + deltaY,
+      });
+      event.preventDefault();
+    }
+  }
+
+  function handleLightboxTouchEnd(event: ReactTouchEvent<HTMLImageElement>) {
+    const gesture = lightboxTouchRef.current;
+    if (!gesture || event.touches.length > 0) {
+      return;
+    }
+
+    const changedTouch = event.changedTouches[0];
+    if (changedTouch && gesture.pinchDistance === null && lightboxImageZoom <= 1) {
+      const deltaX = changedTouch.clientX - gesture.startX;
+      const deltaY = changedTouch.clientY - gesture.startY;
+      if (Math.abs(deltaX) >= 50 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2) {
+        moveDetailImage(deltaX < 0 ? 1 : -1);
+      }
+    }
+
+    lightboxTouchRef.current = null;
+  }
+
   function resetLightboxImagePosition() {
     setLightboxImagePosition({ x: 0, y: 0 });
   }
 
   function handleLightboxPointerDown(event: ReactPointerEvent<HTMLImageElement>) {
+    if (event.pointerType !== "mouse") return;
     if (lightboxImageZoom <= 1) {
       return;
     }
@@ -1562,6 +1749,7 @@ export function Storefront({
   }
 
   function handleLightboxPointerMove(event: ReactPointerEvent<HTMLImageElement>) {
+    if (event.pointerType !== "mouse") return;
     const drag = lightboxDragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) {
       return;
@@ -1574,6 +1762,7 @@ export function Storefront({
   }
 
   function handleLightboxPointerUp(event: ReactPointerEvent<HTMLImageElement>) {
+    if (event.pointerType !== "mouse") return;
     if (lightboxDragRef.current?.pointerId === event.pointerId) {
       lightboxDragRef.current = null;
     }
@@ -1632,6 +1821,11 @@ export function Storefront({
       return;
     }
 
+    setDetailImageZoom(1);
+    setDetailImagePosition({ x: 0, y: 0 });
+    setLightboxImageZoom(1);
+    setLightboxImagePosition({ x: 0, y: 0 });
+
     setSelectedDetailImageUrl((current) => {
       const currentIndex = current
         ? visibleSelectedDetailGallery.indexOf(current)
@@ -1647,6 +1841,14 @@ export function Storefront({
         null
       );
     });
+  }
+
+  function selectDetailImage(imageUrl: string) {
+    setDetailImageZoom(1);
+    setDetailImagePosition({ x: 0, y: 0 });
+    setLightboxImageZoom(1);
+    setLightboxImagePosition({ x: 0, y: 0 });
+    setSelectedDetailImageUrl(imageUrl);
   }
 
   function handleProductCardKeyDown(
@@ -2222,17 +2424,6 @@ export function Storefront({
               >
                 <IconFilter />
               </button>
-            ) : null}
-
-            {whatsappHref ? (
-              <a
-                className="site-whatsapp-chip"
-                href={whatsappHref}
-                target="_blank"
-                rel="noreferrer"
-              >
-                WhatsApp
-              </a>
             ) : null}
 
             <button
@@ -2962,26 +3153,6 @@ export function Storefront({
                     className="catalog-card"
                     key={group.parentCode}
                     onMouseLeave={() => resetCatalogPreviewImage(group.parentCode)}
-                    onPointerDownCapture={(event) => {
-                      const target = event.target as HTMLElement;
-                      if (!target.closest("button")) {
-                        openProductDetail(product);
-                      }
-                    }}
-                    onClickCapture={(event) => {
-                      const target = event.target as HTMLElement;
-                      if (target.closest("button")) {
-                        return;
-                      }
-
-                      openProductDetail(product);
-                    }}
-                    onPointerUp={(event) => {
-                      const target = event.target as HTMLElement;
-                      if (!target.closest("button")) {
-                        openProductDetail(product);
-                      }
-                    }}
                     onClick={() => openProductDetail(product)}
                     onKeyDown={(event) =>
                       handleProductCardKeyDown(event, product)
@@ -2989,14 +3160,9 @@ export function Storefront({
                     role="button"
                     tabIndex={0}
                     aria-label={`Ver detalle de ${product.description}`}
-                  >
+                    >
                     <div
                       className="catalog-card-media"
-                      onPointerDown={(event) => {
-                        if (!(event.target as HTMLElement).closest("button")) {
-                          openProductDetail(product);
-                        }
-                      }}
                       onClick={() => openProductDetail(product)}
                     >
                       {activeGalleryImageUrl ? (
@@ -3417,6 +3583,10 @@ export function Storefront({
                           onPointerMove={handleDetailPointerMove}
                           onPointerUp={handleDetailPointerUp}
                           onPointerCancel={handleDetailPointerUp}
+                          onTouchStart={handleDetailTouchStart}
+                          onTouchMove={handleDetailTouchMove}
+                          onTouchEnd={handleDetailTouchEnd}
+                          onTouchCancel={handleDetailTouchEnd}
                           onMouseDown={panDetailWithMouse}
                           title="Abrir imagen grande"
                           onError={(event) => {
@@ -3512,7 +3682,7 @@ export function Storefront({
                                 ]
                                   .filter(Boolean)
                                   .join(" ")}
-                                onClick={() => setSelectedDetailImageUrl(imageUrl)}
+                                onClick={() => selectDetailImage(imageUrl)}
                                 aria-label={`Ver foto ${index + 1} de ${selectedDetailProduct.description}`}
                                 aria-pressed={isActive}
                               >
@@ -3843,6 +4013,10 @@ export function Storefront({
             onPointerMoveCapture={handleLightboxPointerMove}
             onPointerUp={handleLightboxPointerUp}
             onPointerCancel={handleLightboxPointerUp}
+            onTouchStart={handleLightboxTouchStart}
+            onTouchMove={handleLightboxTouchMove}
+            onTouchEnd={handleLightboxTouchEnd}
+            onTouchCancel={handleLightboxTouchEnd}
             onMouseDown={panLightboxWithMouse}
           />
           <div
@@ -5365,6 +5539,14 @@ function IconCart() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M7 18a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm9 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4ZM5 4h-2v2h1.2l2.16 8.64A2 2 0 0 0 8.3 16H18v-2H8.3l-.25-1H18a2 2 0 0 0 1.94-1.52L21.6 5H7.1L6.65 3.2A1.5 1.5 0 0 0 5.2 2H5v2Z" />
+    </svg>
+  );
+}
+
+function IconWhatsapp() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12.02 2a9.92 9.92 0 0 0-8.58 14.9L2 22l5.25-1.38A9.92 9.92 0 1 0 12.02 2Zm0 18.1a8.18 8.18 0 0 1-4.17-1.14l-.3-.18-3.12.82.84-3.04-.2-.31A8.18 8.18 0 1 1 12.02 20.1Zm4.5-6.14c-.25-.13-1.46-.72-1.69-.8-.23-.09-.4-.13-.57.13-.17.25-.65.8-.8.96-.15.17-.3.19-.55.06-.25-.13-1.05-.39-2-1.23-.74-.66-1.24-1.47-1.39-1.72-.14-.25-.02-.39.11-.52.12-.12.25-.3.38-.44.13-.15.17-.25.25-.42.08-.17.04-.32-.02-.45-.06-.13-.57-1.37-.78-1.88-.21-.5-.42-.43-.57-.44h-.49c-.17 0-.44.06-.67.32-.23.25-.88.86-.88 2.1 0 1.24.9 2.43 1.02 2.6.13.17 1.76 2.69 4.27 3.77.6.26 1.07.41 1.44.53.6.19 1.15.16 1.58.1.48-.07 1.46-.6 1.67-1.18.21-.58.21-1.08.15-1.18-.06-.1-.23-.16-.48-.29Z" />
     </svg>
   );
 }
